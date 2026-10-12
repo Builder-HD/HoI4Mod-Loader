@@ -22,6 +22,30 @@ Addresses below are for orientation in the named build only. Code uses the signa
 - It is probably an unpatched 1.19.2, but that can't be confirmed locally, and 1.19.2 isn't the
   build in use. So it was not added to `loader_config.ini`.
 
+**What universal-checksum-patcher changes (verified 2026-10-12):**
+- On 2026-10-12 22:54 the game folder's `hoi4.exe` was replaced. The file is
+  `v1.19.2.0.a729`, sha256 `0de7bdfa278347209fe67c134b9b321f2beab38dd107bc5397f1ab1f6e8d0998`,
+  the same size as `hoi4.exe.backup`. Only `hoi4.exe` changed; `hoi4_rev.txt` still says 1.19.3.
+- It differs from `hoi4.exe.backup` by **exactly one byte**, at file offset `0x16e0fa`
+  (VA `0x14016ecfa`). The backup has `85 C0 0F 94 C3` (`test eax,eax; sete bl`, after a call
+  comparing a computed checksum string with a stored one). The new file has `31 C0 0F 94 C3`
+  (`xor eax,eax; sete bl`): the comparison always reports "equal".
+- So that file is a **checksum-patched 1.19.2**, and `hoi4.exe.backup` is the unpatched 1.19.2.
+- The 1.19.3 exe carries the same patch: pattern `E8 ?? ?? ?? ?? 31 C0 0F 94 C3` matches once,
+  at `0x14016f205` (call) / `0x14016f20a` (patched byte). Unpatched builds have no match for
+  that pattern; the `85 C0` form appears about 30 times as ordinary code.
+- **Consequence:** a patched exe differs from its vanilla build only in that byte, so every
+  loader signature behaves identically on both. The vanilla 1.19.3 hash would be the 1.19.3
+  copy with that byte reverted, but that is unverified until a Steam-original 1.19.3 file is
+  available.
+
+| Build | State | SHA-256 |
+|---|---|---|
+| 1.19.2 | unpatched (`hoi4.exe.backup`) | `870ebf1f615262facca48a3b947775c41f0a5338f3068c40958209f5c41c65ad` |
+| 1.19.2 | checksum-patched (game folder since 22:54) | `0de7bdfa278347209fe67c134b9b321f2beab38dd107bc5397f1ab1f6e8d0998` |
+| 1.19.3 | checksum-patched (game folder until 22:54) | `2d939e60d31aa15aeb70a9f6d4abd88b568b2f657990f0eeb9020e04f55221f8` |
+| 1.19.3 | unpatched | not available |
+
 There is therefore **no vanilla 1.19.3 hoi4.exe on this machine**, and the "patched vs vanilla"
 signature comparison could only be done against 1.19.2 (below). Ways to get a vanilla 1.19.3
 without touching the game folder are listed under "Obtaining a vanilla 1.19.3 exe".
