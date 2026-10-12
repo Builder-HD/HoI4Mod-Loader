@@ -42,13 +42,18 @@ Addresses below are for orientation in the named build only. Code uses the signa
 | Build | State | SHA-256 |
 |---|---|---|
 | 1.19.2 | unpatched (`hoi4.exe.backup`) | `870ebf1f615262facca48a3b947775c41f0a5338f3068c40958209f5c41c65ad` |
-| 1.19.2 | checksum-patched (game folder since 22:54) | `0de7bdfa278347209fe67c134b9b321f2beab38dd107bc5397f1ab1f6e8d0998` |
+| 1.19.2 | checksum-patched (game folder 22:54 to 23:01) | `0de7bdfa278347209fe67c134b9b321f2beab38dd107bc5397f1ab1f6e8d0998` |
 | 1.19.3 | checksum-patched (game folder until 22:54) | `2d939e60d31aa15aeb70a9f6d4abd88b568b2f657990f0eeb9020e04f55221f8` |
-| 1.19.3 | unpatched | not available |
+| **1.19.3** | **vanilla, from Steam "Verify integrity" at 23:01** | `7dc947be34970da1e1c787bcddbe7f62b610ff258aebf8f06aa8b348f3a031d5` |
 
-There is therefore **no vanilla 1.19.3 hoi4.exe on this machine**, and the "patched vs vanilla"
-signature comparison could only be done against 1.19.2 (below). Ways to get a vanilla 1.19.3
-without touching the game folder are listed under "Obtaining a vanilla 1.19.3 exe".
+**Vanilla 1.19.3 verified (2026-10-12 23:01):**
+- After Steam's "Verify integrity", `hoi4.exe` is `v1.19.3.0.c01a`, the same size as the
+  patched 1.19.3.
+- It differs from the patched 1.19.3 in **exactly one byte**: file offset `0x16e60a`
+  (VA `0x14016f20a`), `0x85` vanilla vs `0x31` patched. That is the patch site identified above.
+- The patch pattern `E8 ?? ?? ?? ?? 31 C0 0F 94 C3` has 0 matches in it.
+- Added to `loader_config.ini` as `1.19.3_vanilla`; the patched hash stays as
+  `1.19.3_checksum_patched`.
 
 Tools: Ghidra 12.1.4 headless (full auto-analysis of the 1.19.3 copy, then read-only xref and
 decompile scripts), a Python PE parser, and `tools/check_signatures.py`.
@@ -156,15 +161,15 @@ applies the loader's rule (exactly one match in `.text`).
 
 **Used by the loader (engine tier, `engine_probe`):**
 
-| Signature | 1.19.3 checksum-patched | 1.19.2 (`hoi4.exe.backup`) |
-|---|---|---|
-| `kSigPhysfsDoOpen` | 1 match, `0x142513a20` | 1 match, `0x1424fea50` |
-| `kSigPhysfsOpenRead` (its `E8` at +15 calls doOpen) | 1 match, `0x142514720` | 1 match, `0x1424ff750` |
+| Signature | 1.19.3 vanilla | 1.19.3 checksum-patched | 1.19.2 (`hoi4.exe.backup`) |
+|---|---|---|---|
+| `kSigPhysfsDoOpen` | 1 match, `0x142513a20` | 1 match, `0x142513a20` | 1 match, `0x1424fea50` |
+| `kSigPhysfsOpenRead` (its `E8` at +15 calls doOpen) | 1 match, `0x142514720` | 1 match, `0x142514720` | 1 match, `0x1424ff750` |
 
-Both match uniquely in both builds, even though the code moved by about 0x15000 between them.
-That is good evidence the patterns survive a patch release. They have **not** been checked
-against a vanilla 1.19.3, which isn't available locally. The checksum patcher most likely
-changes only checksum-validation code, not PhysFS, but this is unverified.
+Both match uniquely in all three builds, even though the code moved by about 0x15000 between
+1.19.2 and 1.19.3. That is good evidence the patterns survive a patch release. Vanilla and
+patched builds of one version differ in a single checksum-compare byte, so they always give
+identical results.
 
 **Reference only (not used by the loader), checked on 1.19.3:**
 
@@ -181,17 +186,15 @@ The runtime scanner (`src/sigscan.cpp`) anchors on a fixed byte inside the patte
 uncommon in x64 code, rather than the first byte (usually `0x48`/`0x40`), so `memchr` stops
 less often. The scan time is logged per signature.
 
-### Obtaining a vanilla 1.19.3 exe (needed to finish the dual-build check)
+### Adding a new build
 
-Either way, keep a *copy* outside the game folder and run `tools/check_signatures.py` on both:
-- **SteamCMD** (no change to the game folder): `download_depot 394360 <depot id> <manifest id>`
-  into a separate directory (394360 is HOI4's app id). Needs a Steam login, plus the Windows
-  depot id and 1.19.3 manifest id, e.g. from SteamDB (not verified here). Ask before downloading.
-- **Steam "Verify integrity of game files"**: restores vanilla `hoi4.exe` in place. Copy it out
-  before re-running the checksum patcher. This changes the game folder, so it's your call (steps
-  in the chat summary).
-
-Then add it to `loader_config.ini` as `1.19.3_vanilla = <sha256>`.
+1. Get the exe: Steam "Verify integrity of game files" restores the vanilla one. Do not run the
+   checksum patcher before copying it.
+2. Copy it outside the game folder.
+3. Run `python tools/check_signatures.py <copy>`. Every signature must match exactly once.
+4. Add `<version>_vanilla = <sha256>` to `loader_config.ini`. If you also use the checksum
+   patcher, add its output as `<version>_checksum_patched`: it differs from vanilla in only the
+   one patched byte.
 
 ## Script findings (in-game tests)
 
@@ -383,7 +386,7 @@ const std::string* GetNameKey(CStrategicRegion* r) {
 
 ### Signature status (checked on 1.19.3 patched and 1.19.2)
 
-| Function | Pattern | 1.19.3 | 1.19.2 |
+| Function | Pattern | 1.19.3 (vanilla and patched) | 1.19.2 |
 |---|---|---|---|
 | `CStrategicRegion::GetNameKey` | `48 83 79 48 00 75 09 48 8B 41 30 48 83 C0 20 C3 48 8D 41 38 C3` (whole function) | 1 match, `0x140e23410` | 1 match, `0x140e0eb10` |
 | `CGameState::IsLoadedFromSave` | `0F B6 81 34 0A 00 00 C3` | 1 match, `0x1401e2930` | 1 match, `0x1401e24b0` |
@@ -391,7 +394,7 @@ const std::string* GetNameKey(CStrategicRegion* r) {
 The `CState` equivalent of GetNameKey has a different body (`... 74 05 48 8D 41 38 C3 ...`),
 so the region pattern stays unique. The remaining signatures (game-entered function, gamestate
 pointer, flag container functions, effect registry) will be derived and checked on both builds
-in B3. **Not yet checked against a vanilla 1.19.3**: none is available yet.
+in B3, on vanilla 1.19.3, patched 1.19.3 and 1.19.2.
 
 Vtables can also be found at runtime from RTTI names (`.?AVCRenameProvinceEffect@@` → type
 descriptor → complete object locator → vtable). That is more robust than byte patterns for the

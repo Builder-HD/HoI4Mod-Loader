@@ -109,6 +109,7 @@ Or in Visual Studio: **File > Open > Folder...**, pick this folder, choose `x64-
 
 ```
 [supported_hashes]
+1.19.3_vanilla = 7dc947be34970da1e1c787bcddbe7f62b610ff258aebf8f06aa8b348f3a031d5
 1.19.3_checksum_patched = 2d939e60d31aa15aeb70a9f6d4abd88b568b2f657990f0eeb9020e04f55221f8
 ```
 
