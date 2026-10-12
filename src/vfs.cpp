@@ -140,13 +140,7 @@ static void* CreateApiHook(const char* name, void* detour, void** orig) {
         HMODULE mod = GetModuleHandleW(m);
         void* target = mod ? (void*)GetProcAddress(mod, name) : nullptr;
         if (!target) continue;
-        MH_STATUS s = MH_CreateHook(target, detour, orig);
-        if (s != MH_OK) {
-            Log("ERROR: MH_CreateHook(%ls!%s) failed: %s", m, name, MH_StatusToString(s));
-            return nullptr;
-        }
-        Log("Hook prepared: %ls!%s at %p", m, name, target);
-        return target;
+        return HookQueue(target, detour, orig, name) ? target : nullptr;
     }
     Log("ERROR: %s not found", name);
     return nullptr;
@@ -194,17 +188,13 @@ bool VfsStart() {
         return false;
     }
 
+    // Queued only; main.cpp applies all queued hooks in one go (each apply suspends all threads).
     void* w = CreateApiHook("CreateFileW", (void*)&Hook_CreateFileW, (void**)&g_origCreateFileW);
     void* a = w ? CreateApiHook("CreateFileA", (void*)&Hook_CreateFileA, (void**)&g_origCreateFileA) : nullptr;
-    // Queue both and apply once: each apply suspends all threads, which is the slow part.
-    MH_STATUS s = MH_UNKNOWN;
-    if (w && a && (s = MH_QueueEnableHook(w)) == MH_OK && (s = MH_QueueEnableHook(a)) == MH_OK &&
-        (s = MH_ApplyQueued()) == MH_OK) {
-        Log("Virtual file hooks enabled (%d file(s))", ready);
+    if (w && a) {
+        Log("Virtual file hooks queued (%d file(s))", ready);
         return true;
     }
-    if (s != MH_UNKNOWN) Log("ERROR: MH_EnableHook failed: %s", MH_StatusToString(s));
     if (w) MH_RemoveHook(w);
-    if (a) MH_RemoveHook(a);
     return false;
 }

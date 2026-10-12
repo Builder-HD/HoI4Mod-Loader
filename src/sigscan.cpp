@@ -5,15 +5,16 @@
 #include <string.h>
 #include <vector>
 
-static bool GetTextSection(uint8_t** begin, size_t* size) {
+bool ImageSection(const char* name, uint8_t** begin, size_t* size) {
     uint8_t* base = (uint8_t*)GetModuleHandleW(nullptr);
     auto* dos = (IMAGE_DOS_HEADER*)base;
     if (!base || dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
     auto* nt = (IMAGE_NT_HEADERS64*)(base + dos->e_lfanew);
     if (nt->Signature != IMAGE_NT_SIGNATURE) return false;
     IMAGE_SECTION_HEADER* sec = IMAGE_FIRST_SECTION(nt);
+    size_t len = strlen(name);
     for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i) {
-        if (memcmp(sec[i].Name, ".text", 6) == 0) {
+        if (len <= 8 && memcmp(sec[i].Name, name, len) == 0 && (len == 8 || sec[i].Name[len] == 0)) {
             *begin = base + sec[i].VirtualAddress;
             *size = sec[i].Misc.VirtualSize;
             return true;
@@ -21,6 +22,8 @@ static bool GetTextSection(uint8_t** begin, size_t* size) {
     }
     return false;
 }
+
+static bool GetTextSection(uint8_t** begin, size_t* size) { return ImageSection(".text", begin, size); }
 
 // "48 8B ?? 05" -> bytes + mask (true = must match).
 static bool ParsePattern(const char* pattern, std::vector<uint8_t>* bytes, std::vector<bool>* mask) {
@@ -93,10 +96,55 @@ uint8_t* SigFindUnique(const char* name, const char* pattern) {
     return found;
 }
 
-uint8_t* SigFollowRel32(uint8_t* insn) {
+uint8_t* SigFollowRel32(uint8_t* insn) { return SigRipTarget(insn, 1, 5); }
+
+uint8_t* SigRipTarget(uint8_t* insn, size_t relOffset, size_t insnLen) {
     int32_t rel;
-    memcpy(&rel, insn + 1, sizeof rel);
-    return insn + 5 + rel;
+    memcpy(&rel, insn + relOffset, sizeof rel);
+    return insn + insnLen + rel;
+}
+
+uint8_t* AnchorFindLea(const char* name, const char* text) {
+    // The string: exactly one NUL-delimited occurrence in .rdata.
+    uint8_t* rdata;
+    size_t rsize;
+    uint8_t* code;
+    size_t csize;
+    if (!ImageSection(".rdata", &rdata, &rsize) || !GetTextSection(&code, &csize)) {
+        Log("ERROR: anchor '%s': cannot locate hoi4.exe sections", name);
+        return nullptr;
+    }
+    size_t len = strlen(text);
+    uint8_t* str = nullptr;
+    int strHits = 0;
+    for (uint8_t* p = rdata + 1; p + len < rdata + rsize;) {
+        p = (uint8_t*)memchr(p, text[0], rdata + rsize - len - p);
+        if (!p) break;
+        if (p[-1] == 0 && p[len] == 0 && memcmp(p, text, len) == 0 && ++strHits == 1) str = p;
+        ++p;
+    }
+    if (strHits != 1) {
+        Log("ERROR: anchor '%s': string found %d time(s), expected 1", name, strHits);
+        return nullptr;
+    }
+    // The code: exactly one `lea r64,[rip+rel32]` (REX.W 48/4C, 8D, modrm 00 rrr 101) targeting it.
+    uint8_t* found = nullptr;
+    int refs = 0;
+    for (uint8_t* p = code; p + 7 <= code + csize;) {
+        p = (uint8_t*)memchr(p, 0x8D, code + csize - 6 - p);
+        if (!p) break;
+        uint8_t* insn = p - 1;
+        if (insn >= code && (insn[0] == 0x48 || insn[0] == 0x4C) && (p[1] & 0xC7) == 0x05 &&
+            SigRipTarget(insn, 3, 7) == str && ++refs == 1)
+            found = insn;
+        ++p;
+    }
+    if (refs != 1) {
+        Log("ERROR: anchor '%s': %d lea reference(s), expected 1", name, refs);
+        return nullptr;
+    }
+    Log("Anchor '%s' -> %s", name, SigDescribe(found).c_str());
+    return found;
 }
 
 std::string SigDescribe(const void* p) {

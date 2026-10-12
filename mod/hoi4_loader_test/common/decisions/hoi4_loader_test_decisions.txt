@@ -1,0 +1,91 @@
+# Test decisions for the region_names plugin. Region 42 = Bay of Biscay (STRATEGICREGION_42).
+#
+# The native effects (set_/reset_strategic_region_name) exist only while hoi4_loader's
+# region_names feature is active. Without it the game logs "Unknown effect" for them when
+# parsing this file; the decisions are then hidden and harmless. The last decision uses the plain
+# flag protocol, which never produces parse errors.
+hoi4_loader_test_category = {
+
+	hoi4_srn_test_rename_a = {
+		icon = generic_research
+		cost = 0
+		visible = { has_global_flag = hoi4_loader_plugin_region_names }
+		complete_effect = {
+			set_strategic_region_name = { region = 42 name = HOI4_LOADER_TEST_REGION_NAME_A }
+			country_event = { id = hoi4_loader_test.2 hours = 1 }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	hoi4_srn_test_rename_b = {
+		icon = generic_research
+		cost = 0
+		visible = { has_global_flag = hoi4_loader_plugin_region_names }
+		complete_effect = {
+			set_strategic_region_name = { region = 42 name = HOI4_LOADER_TEST_REGION_NAME_B }
+			country_event = { id = hoi4_loader_test.2 hours = 1 }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	hoi4_srn_test_reset = {
+		icon = generic_research
+		cost = 0
+		visible = { has_global_flag = hoi4_loader_plugin_region_names }
+		complete_effect = {
+			reset_strategic_region_name = { region = 42 }
+			country_event = { id = hoi4_loader_test.2 hours = 1 }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# Must fail safe: region 9999 does not exist. Expect a loader.log line, no change, no crash.
+	hoi4_srn_test_invalid_region = {
+		icon = generic_research
+		cost = 0
+		visible = { has_global_flag = hoi4_loader_plugin_region_names }
+		complete_effect = {
+			set_strategic_region_name = { region = 9999 name = HOI4_LOADER_TEST_REGION_NAME_A }
+			country_event = { id = hoi4_loader_test.2 hours = 1 }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# Must fail safe: this localisation key does not exist. Expect a loader.log line and the
+	# region keeping its current name.
+	hoi4_srn_test_missing_key = {
+		icon = generic_research
+		cost = 0
+		visible = { has_global_flag = hoi4_loader_plugin_region_names }
+		complete_effect = {
+			set_strategic_region_name = { region = 42 name = HOI4_LOADER_TEST_KEY_THAT_DOES_NOT_EXIST }
+			country_event = { id = hoi4_loader_test.2 hours = 1 }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# Plain flag protocol, no native effect: what a mod that must also run without the loader
+	# would do. Clears the other test names itself, then sets name C.
+	hoi4_srn_test_flag_protocol = {
+		icon = generic_research
+		cost = 0
+		visible = { has_global_flag = hoi4_loader_present }
+		complete_effect = {
+			clr_global_flag = hoi4_srn_42_HOI4_LOADER_TEST_REGION_NAME_A
+			clr_global_flag = hoi4_srn_42_HOI4_LOADER_TEST_REGION_NAME_B
+			set_global_flag = hoi4_srn_42_HOI4_LOADER_TEST_REGION_NAME_C
+			country_event = { id = hoi4_loader_test.2 hours = 1 }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	hoi4_srn_test_show = {
+		icon = generic_research
+		cost = 0
+		visible = { has_global_flag = hoi4_loader_present }
+		complete_effect = {
+			country_event = { id = hoi4_loader_test.2 }
+		}
+		ai_will_do = { base = 0 }
+	}
+}

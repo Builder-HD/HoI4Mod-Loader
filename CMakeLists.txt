@@ -32,6 +32,11 @@ add_library(hoi4_loader SHARED
     src/sigscan.cpp
     src/features.cpp
     src/plugin_engine_probe.cpp
+    src/plugin_region_names.cpp
+    src/engine.cpp
+    src/engine.h
+    src/lifecycle.cpp
+    src/lifecycle.h
     src/loader.h
     src/signatures.h
     src/sha256.h

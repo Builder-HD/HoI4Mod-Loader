@@ -15,6 +15,7 @@
 #include <wchar.h>
 
 #include "MinHook.h"
+#include "engine.h"
 
 // ---------------------------------------------------------------------------
 // version.dll forwarding
@@ -176,13 +177,36 @@ static void Init(HMODULE self) {
         Log("ERROR: MH_Initialize failed: %s; loader inactive", MH_StatusToString(s));
         return;
     }
+    if (engineAllowed && !Engine::Resolve()) Log("WARNING: no engine functions resolved; engine features will fail");
     FeaturesInit(engineAllowed);
     if (!VfsStart()) {
         Log("ERROR: virtual files unavailable; script cannot detect the loader");
+        MH_Uninitialize();  // removes every queued hook: the game runs unmodded
+        return;
+    }
+    if ((s = MH_ApplyQueued()) != MH_OK) {
+        Log("ERROR: enabling hooks failed: %s; loader inactive", MH_StatusToString(s));
+        MH_Uninitialize();
         return;
     }
     Log("Loader ready in %llu ms: hoi4_loader_version = %d, engine tier %s", GetTickCount64() - t0, LOADER_VERSION,
         engineAllowed ? "enabled" : "disabled");
+}
+
+bool HookQueue(void* target, void* detour, void** original, const char* name) {
+    if (!target) {
+        Log("ERROR: hook %s: no target", name);
+        return false;
+    }
+    MH_STATUS s = MH_CreateHook(target, detour, original);
+    if (s == MH_OK) s = MH_QueueEnableHook(target);
+    if (s != MH_OK) {
+        Log("ERROR: hook %s at %p failed: %s", name, target, MH_StatusToString(s));
+        MH_RemoveHook(target);
+        return false;
+    }
+    Log("Hook queued: %s at %p", name, target);
+    return true;
 }
 
 // No C++ objects here, so SEH can catch anything Init throws at the OS level.

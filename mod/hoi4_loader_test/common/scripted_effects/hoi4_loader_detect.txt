@@ -6,4 +6,6 @@ hoi4_loader_init = {
 	clr_global_flag = hoi4_loader_present
 	clear_variable = global.hoi4_loader_version
 	clr_global_flag = hoi4_loader_plugin_engine_probe
+	clr_global_flag = hoi4_loader_plugin_lifecycle
+	clr_global_flag = hoi4_loader_plugin_region_names
 }

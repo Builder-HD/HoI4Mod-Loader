@@ -9,3 +9,36 @@ defined_text = {
 		localization_key = hoi4_loader_test_engine_inactive
 	}
 }
+
+# region_names feature status.
+defined_text = {
+	name = GetHoi4LoaderRegionNamesStatus
+	text = {
+		trigger = { has_global_flag = hoi4_loader_plugin_region_names }
+		localization_key = hoi4_loader_test_region_names_active
+	}
+	text = {
+		localization_key = hoi4_loader_test_region_names_inactive
+	}
+}
+
+# Name of region 42 according to the hoi4_srn flags (the test decisions only use A, B and C).
+# Script cannot read the engine's displayed name, so this is the stored state, not the UI.
+defined_text = {
+	name = GetHoi4LoaderRegion42FlagName
+	text = {
+		trigger = { has_global_flag = hoi4_srn_42_HOI4_LOADER_TEST_REGION_NAME_A }
+		localization_key = HOI4_LOADER_TEST_REGION_NAME_A
+	}
+	text = {
+		trigger = { has_global_flag = hoi4_srn_42_HOI4_LOADER_TEST_REGION_NAME_B }
+		localization_key = HOI4_LOADER_TEST_REGION_NAME_B
+	}
+	text = {
+		trigger = { has_global_flag = hoi4_srn_42_HOI4_LOADER_TEST_REGION_NAME_C }
+		localization_key = HOI4_LOADER_TEST_REGION_NAME_C
+	}
+	text = {
+		localization_key = hoi4_loader_test_region_original
+	}
+}

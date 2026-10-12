@@ -1,0 +1,6 @@
+hoi4_loader_test_category = {
+	icon = generic_research
+	visible = {
+		is_ai = no
+	}
+}

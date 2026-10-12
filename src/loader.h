@@ -35,9 +35,16 @@ using ContentGenerator = std::string (*)();
 // redirected. Must be called before VfsStart().
 bool register_virtual_file(const wchar_t* pathSuffix, ContentGenerator generator);
 
-// Generates every registered file once, writes them to %TEMP%\hoi4_loader and hooks
-// CreateFileW/A. Requires MH_Initialize() to have succeeded.
+// Generates every registered file once, writes them to %TEMP%\hoi4_loader and queues the
+// CreateFileW/A hooks (applied by main.cpp). Requires MH_Initialize() to have succeeded.
 bool VfsStart();
+
+// ---------------------------------------------------------------------------
+// main.cpp: hooks
+// ---------------------------------------------------------------------------
+// Creates a MinHook hook and queues it for enabling; main.cpp applies all queued hooks at once
+// after the features and the VFS are set up. Logs failures.
+bool HookQueue(void* target, void* detour, void** original, const char* name);
 
 // ---------------------------------------------------------------------------
 // sigscan.cpp
@@ -47,6 +54,13 @@ bool VfsStart();
 uint8_t* SigFindUnique(const char* name, const char* pattern);
 // Follows a rel32 call/jmp: `insn` points at the E8/E9 opcode.
 uint8_t* SigFollowRel32(uint8_t* insn);
+// Target of a RIP-relative operand: rel32 at insn+relOffset, instruction length insnLen.
+uint8_t* SigRipTarget(uint8_t* insn, size_t relOffset, size_t insnLen);
+// The single `lea r64,[rip+x]` in .text that references the unique NUL-terminated string
+// `text` in .rdata. Logs and returns nullptr unless both are unique.
+uint8_t* AnchorFindLea(const char* name, const char* text);
+// A section of hoi4.exe's in-memory image (".text", ".rdata", ".data").
+bool ImageSection(const char* name, uint8_t** begin, size_t* size);
 // "hoi4.exe+0x1234" style description of an address, for logs.
 std::string SigDescribe(const void* p);
 
@@ -63,6 +77,13 @@ void FeaturesInit(bool engineAllowed);
 // Comma-separated feature names in the given tier, for logs.
 std::string FeatureNames(Tier tier);
 
+bool FeatureActive(const char* name);
+// Runtime failure after init (e.g. a self-check once the game exists): marks the feature
+// inactive and clears its script flag.
+void FeatureDeactivate(const char* name, const char* reason);
+
 // Plugin entry points (one file each). Return false to stay inactive; must leave the game
 // unmodified in that case.
 bool EngineProbeInit();
+bool LifecycleFeatureInit();  // features.cpp -> lifecycle.cpp
+bool RegionNamesInit();       // plugin_region_names.cpp

@@ -28,3 +28,17 @@ country_event = {
 		name = hoi4_loader_test.1.a
 	}
 }
+
+# Region name status for region 42 (Bay of Biscay), as recorded in the hoi4_srn flags. The
+# engine-side name (what the UI shows) must match it; check it in the UI as described in README.
+country_event = {
+	id = hoi4_loader_test.2
+	title = hoi4_loader_test.2.t
+	desc = hoi4_loader_test.2.d
+	picture = GFX_report_event_generic_read_write
+	is_triggered_only = yes
+
+	option = {
+		name = hoi4_loader_test.2.a
+	}
+}
