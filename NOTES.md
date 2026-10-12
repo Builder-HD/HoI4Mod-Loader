@@ -531,4 +531,64 @@ or dropped after an update, without touching persistence.
   game's localisation before using it. If it is missing, the region keeps its original name
   and `loader.log` says why, so the UI never shows a raw key. The localisation lookup function
   still has to be located; the panel code shows the call path (`FUN_14011e010`) to start from.
+  *(Superseded in B3: located; see below.)*
 - **Invalid region id:** ignored with a log line.
+
+## B3: implementation (option 2 approved: flag core plus native syntax)
+
+Approved 2026-10-12. Design as recommended in B2: the flags are the only storage, and the
+native effects only manage them.
+
+### Additional engine findings used by B3
+
+- **Region by id:** `gamestate->regions[id]`, array at `gamestate+0x2e0`, count `+0x2ec`,
+  valid `1 <= id < count` (`FUN_1413a7770`, used by naval triggers: "Region ID had an unexpected
+  value"). The offsets are read from the signature at runtime.
+- **Tokens:**
+  - `FUN_1424bb460(int* out, {const char*, size_t}*)` interns a string, creating dynamic tokens.
+    It asserts "lexer is synchronized initialized".
+  - `FUN_1424bc260(int token)` returns the token's `const std::string*` from the lexer table
+    (locked).
+  - The lexer becomes ready at the end of `FUN_140176f30`, which writes the ready byte; it is
+    called only indirectly. `FUN_1424cc9e0`/`FUN_1424ca600` are just int-to-string, not
+    token lookups.
+- **Flags:**
+  - `FUN_140cbfea0(flags, token, value, days)` sets; `FUN_140cbfe60(flags, token)` clears (both
+    called from the effects' Execute).
+  - A flag entry (`CScriptFlag`, 0x30 bytes) holds the token at `+8`, the set date at `+0x20`
+    (save token `0x284a`), the value at `+0x28` and the days at `+0x2a`.
+- **Localisation:** `FUN_142245e60(std::string* out, const char* key, 0, 0)` is `Localize()`
+  (`localize.cpp`). `FUN_14011e010` is only a std::string copy; widgets localise keys themselves.
+- **Effect registry:** each registration stub is
+  `entry = new CEffectEntry<T>{vtable, help}; Register(_EffectEntries, token, entry)`. The loader
+  finds the `set_province_name` stub through its help string and reads, from fixed offsets
+  checked by opcode, the registry global, the entry vtable, the token and the `Register` function.
+
+### How it is wired
+
+| Piece | Mechanism |
+|---|---|
+| `engine.cpp` | Resolves the 14 signatures, the anchor and RTTI vtables (`.?AVCEffect@@`, `.?AVCSetGlobalFlagEffect@@`, `.?AVCClearGlobalFlagEffect@@`, `.?AVCRenameProvinceEffect@@`). Groups fail independently. |
+| `lifecycle` feature | Hooks the lexer sync (registers native effects and tokens right after it, before scripts using them are parsed) and "game entered" (callbacks get `loadedFromSave`). After a loaded save it sets `hoi4_loader_present` and sets or clears every `hoi4_loader_plugin_*` flag immediately. |
+| Display | `CStrategicRegion::GetNameKey` is hooked. If the region (id = `template+0xa0`) has an entry in a lock-free table of atomic pointers, that key is returned; otherwise the original runs. Strings in the table are never freed (readers on other threads). |
+| Self-check | On every game entered: `RegionTemplateId(regions[i]) == i` for all regions, else the feature deactivates itself and clears its flag. |
+| Flags to names | Rescan on game entered, after every `set_global_flag` / `clr_global_flag` Execute (hooked via RTTI vtable slot 13) and after the native effects. The latest set date wins, ties go to the larger key; the key must exist in localisation. Changes set the map manager's names-dirty flag (`+0x81 = 0x101`), as `set_state_name` does. |
+| Native effects | Tokens `set_strategic_region_name`/`reset_strategic_region_name` are registered with entries whose factory calls `set_province_name`'s factory and then swaps in a cloned vtable (slot `[-1]` keeps the RTTI locator). Slot 4 maps `region` to `id`; slot 7 returns an empty tooltip; slot 13 runs set or reset under SEH. Before cloning, slots 4/7/13 are checked to be real overrides of `CEffect`. |
+| Kill switch | `[features] region_names = 0` (or `lifecycle = 0`) in `loader_config.ini`. |
+
+### Unverified until the in-game test (each one is logged)
+
+1. **Map labels:** whether the names-dirty flag also rebuilds strategic region map labels. If
+   not, the label keeps the old name until the next interface rebuild; the fallback would be
+   calling the label rebuild (`FUN_140b554b0`).
+2. **Missing key:** `Localize()` on a missing key is assumed to return the key itself (or
+   nothing). `loader.log` prints "localisation key ... found / NOT found" for every key checked.
+3. **Empty tooltip:** whether an empty slot-7 result shows nothing or an empty line in decision
+   tooltips.
+4. **Timing:** that the lexer-sync hook fires before any file using the native effects is parsed.
+   If not, `error.log` shows "Unknown effect" for the test decisions even with the loader active.
+5. **Flag name characters:** `-` in a key is accepted by the loader but untested in script
+   flags; flags longer than vanilla's 68 characters are untested.
+
+Not covered: `modify_global_flag`, flags with `days =` expiring, and console flag commands do not
+trigger a rescan. The next game-entered or flag effect picks the change up.

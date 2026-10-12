@@ -28,10 +28,18 @@ Current features:
 |---|---|---|---|
 | core detection | file | `hoi4_loader_present` | the trigger/effect above |
 | `engine_probe` | engine | `hoi4_loader_plugin_engine_probe` | diagnostic only: resolves two PhysFS signatures and cross-checks them; patches nothing |
+| `lifecycle` | engine | `hoi4_loader_plugin_lifecycle` | "lexer ready" and "game entered" (new game *and* loaded save) callbacks for other features; refreshes the plugin flags right after a save is loaded |
+| `region_names` | engine (needs `lifecycle`) | `hoi4_loader_plugin_region_names` | runtime strategic region names, see below |
 
 On an unknown build the file tier stays on, the engine tier is off, and `loader.log` lists the
 disabled features and prints the exact line to add to `loader_config.ini`. A feature whose init
-fails (for example a signature not found) is left inactive and its flag stays cleared.
+fails (for example a signature not found) is left inactive and its flag stays cleared. Any
+feature can also be switched off by hand in `loader_config.ini`:
+
+```
+[features]
+region_names = 0
+```
 
 ### Checking for features in script
 
@@ -51,8 +59,56 @@ When to call `hoi4_loader_init` (the test mod's `common/on_actions` file shows b
   corrects them within 7 in-game days.
 
 Have your stub `hoi4_loader_init` clear the flags too, so a save loaded without the loader loses
-them at the next weekly refresh. `hoi4_loader_present = yes` is always current; a
-`hoi4_loader_plugin_*` flag can lag up to a week after loading a save.
+them at the next weekly refresh. `hoi4_loader_present = yes` is always current. With the
+`lifecycle` feature the loader refreshes the plugin flags itself right after a save is loaded; on
+builds without it, a `hoi4_loader_plugin_*` flag can lag up to a week after loading a save.
+
+## Strategic region names (`region_names`)
+
+Rename a strategic region (id from `map/strategicregions/*.txt`) to a localisation key, and back:
+
+```
+set_strategic_region_name = { region = 42 name = MY_LOC_KEY }
+reset_strategic_region_name = { region = 42 }
+```
+
+These are native effects, usable in any effect block (decisions, events, focuses, on_actions,
+`meta_effect`). They exist only while `region_names` is active. Without the loader, or on an
+unsupported build, the game logs `Unknown effect` for every use when parsing.
+
+**Storage: a plain global flag per region**, `hoi4_srn_<region id>_<localisation key>`. The
+native effects only manage these flags: set clears the region's other `hoi4_srn` flags, then
+sets its own; reset clears them. Consequences:
+- **Persistence:** names survive save and load, because flags are saved.
+- **No loader or unsupported build:** the flags are inert and every region shows its original
+  name. The engine's own name field is never written, so saves stay vanilla.
+- **Loader back:** loading the same save on a supported build with the loader shows the names
+  again.
+
+**Mods that must also run without the loader** can use the flags directly, with no native
+effect and therefore no parse errors:
+
+```
+clr_global_flag = hoi4_srn_42_MY_OLD_KEY   # clear the previous name yourself
+set_global_flag = hoi4_srn_42_MY_LOC_KEY   # rename
+```
+
+If several `hoi4_srn` flags exist for one region, the most recently set one wins.
+
+**Rules:**
+- The key may contain `A-Z a-z 0-9 _ . -` and be up to 100 characters long, and it must exist
+  in the localisation.
+- Invalid region ids, malformed or missing keys are ignored with a line in `loader.log`; the
+  region keeps its name.
+- The effects add no tooltip line; use `custom_effect_tooltip` if a decision needs one.
+
+**Where the name shows:** everything that asks the engine for the region's name. That includes
+map-mode and region tooltips, the region panel, air and naval mission screens, task forces,
+naval invasion and blockade texts, radar, theaters, trigger tooltips and map labels.
+
+**Multiplayer:** names are cosmetic; the flags are ordinary game state set by script on every
+client. All players need the loader anyway, because it changes the files the game reads, which
+affects the checksum.
 
 ## Layout
 
@@ -66,6 +122,9 @@ src/sigscan.cpp               signature scanner over hoi4.exe .text
 src/signatures.h              all engine-tier byte signatures
 src/features.cpp              feature registry, tier gating, core detection files
 src/plugin_engine_probe.cpp   engine_probe feature
+src/plugin_region_names.cpp   region_names feature (flags, GetNameKey hook, native effects)
+src/engine.cpp, engine.h      engine access: all hoi4.exe functions/data the features use
+src/lifecycle.cpp, .h         lexer-ready / game-entered callbacks (lifecycle feature)
 src/proxy.asm, version.def    version.dll export stubs
 src/sha256.h                  self-contained SHA-256
 tools/check_signatures.py     check src/signatures.h against hoi4.exe copies

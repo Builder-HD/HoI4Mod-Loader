@@ -123,21 +123,16 @@ static void LoadRealVersionDll() {
 }
 
 // True if engine-tier features may run: hoi4.exe's hash is listed in loader_config.ini.
-static bool CheckSupportedBuild(HMODULE self, const wchar_t* exePath) {
+static bool CheckSupportedBuild(const wchar_t* exePath, const wchar_t* iniPath) {
     char hash[65];
     if (!GetExeHash(exePath, hash)) {
         Log("Engine-tier features disabled (hoi4.exe hash unavailable): %s", FeatureNames(Tier::Engine).c_str());
         return false;
     }
-
-    wchar_t iniPath[MAX_PATH * 2];
-    DWORD n = GetModuleFileNameW(self, iniPath, ARRAYSIZE(iniPath));
-    if (!n || n >= ARRAYSIZE(iniPath)) {
+    if (!iniPath) {
         Log("ERROR: cannot get own module path");
         return false;
     }
-    size_t dirLen = BaseName(iniPath) - iniPath;
-    wcscpy_s(iniPath + dirLen, ARRAYSIZE(iniPath) - dirLen, L"loader_config.ini");
 
     wchar_t label[128];
     int entries = 0;
@@ -170,7 +165,15 @@ static void Init(HMODULE self) {
     if (!inGame) return;
 
     ULONGLONG t0 = GetTickCount64();
-    bool engineAllowed = CheckSupportedBuild(self, exePath);
+    // loader_config.ini next to this DLL.
+    wchar_t iniBuf[MAX_PATH * 2];
+    const wchar_t* iniPath = nullptr;
+    n = GetModuleFileNameW(self, iniBuf, ARRAYSIZE(iniBuf));
+    if (n && n < ARRAYSIZE(iniBuf)) {
+        size_t dirLen = BaseName(iniBuf) - iniBuf;
+        if (wcscpy_s(iniBuf + dirLen, ARRAYSIZE(iniBuf) - dirLen, L"loader_config.ini") == 0) iniPath = iniBuf;
+    }
+    bool engineAllowed = CheckSupportedBuild(exePath, iniPath);
 
     MH_STATUS s = MH_Initialize();
     if (s != MH_OK) {
@@ -178,7 +181,7 @@ static void Init(HMODULE self) {
         return;
     }
     if (engineAllowed && !Engine::Resolve()) Log("WARNING: no engine functions resolved; engine features will fail");
-    FeaturesInit(engineAllowed);
+    FeaturesInit(engineAllowed, iniPath);
     if (!VfsStart()) {
         Log("ERROR: virtual files unavailable; script cannot detect the loader");
         MH_Uninitialize();  // removes every queued hook: the game runs unmodded

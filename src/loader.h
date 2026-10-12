@@ -71,9 +71,10 @@ std::string SigDescribe(const void* p);
 // Engine tier: hooks or patches code inside hoi4.exe; runs only on a supported hash.
 enum class Tier { File, Engine };
 
-// Decides which features run (engine tier only if `engineAllowed`), initialises them and
-// registers the core detection files. Must run before VfsStart().
-void FeaturesInit(bool engineAllowed);
+// Decides which features run (engine tier only if `engineAllowed`; any feature can be turned
+// off with `<name> = 0` under [features] in the ini), initialises them and registers the core
+// detection files. Must run before VfsStart().
+void FeaturesInit(bool engineAllowed, const wchar_t* iniPath);
 // Comma-separated feature names in the given tier, for logs.
 std::string FeatureNames(Tier tier);
 

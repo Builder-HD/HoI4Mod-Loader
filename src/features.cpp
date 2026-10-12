@@ -108,10 +108,16 @@ static void RefreshFlagsOnGameEntered(bool loadedFromSave) {
     Log("Plugin flags refreshed after loading a save");
 }
 
-void FeaturesInit(bool engineAllowed) {
+void FeaturesInit(bool engineAllowed, const wchar_t* iniPath) {
     for (Feature& f : g_features) {
         if (f.tier == Tier::Engine && !engineAllowed) {
             Log("Feature %s (%s tier): DISABLED, hoi4.exe hash not supported", f.name, TierName(f.tier));
+            continue;
+        }
+        wchar_t key[64];
+        swprintf_s(key, L"%hs", f.name);
+        if (iniPath && GetPrivateProfileIntW(L"features", key, 1, iniPath) == 0) {
+            Log("Feature %s (%s tier): DISABLED in loader_config.ini [features]", f.name, TierName(f.tier));
             continue;
         }
         if (f.requires && !FeatureActive(f.requires)) {
