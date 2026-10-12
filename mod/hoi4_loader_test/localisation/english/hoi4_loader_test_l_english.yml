@@ -1,0 +1,9 @@
+﻿l_english:
+ hoi4_loader_test.1.t:0 "HOI4 Loader Check"
+ hoi4_loader_test.1.d_full:0 "§GLoader PRESENT.§!\n\nScripted trigger: replaced\nScripted effect: replaced\nLoader version: [?global.hoi4_loader_version|0]\nEngine tier (engine_probe): [GetHoi4LoaderEngineProbe]"
+ hoi4_loader_test.1.d_trigger_only:0 "§YLoader PARTIAL.§!\n\nScripted trigger: replaced\nScripted effect: NOT replaced (global flag missing)\nLoader version: unknown\nEngine tier (engine_probe): [GetHoi4LoaderEngineProbe]"
+ hoi4_loader_test.1.d_effect_only:0 "§YLoader PARTIAL.§!\n\nScripted trigger: NOT replaced\nScripted effect: replaced\nLoader version: [?global.hoi4_loader_version|0]\nEngine tier (engine_probe): [GetHoi4LoaderEngineProbe]"
+ hoi4_loader_test.1.d_none:0 "§RLoader NOT present.§!\n\nScripted trigger: stub (always = no)\nScripted effect: stub\nEngine tier (engine_probe): [GetHoi4LoaderEngineProbe]\nSee Documents/Paradox Interactive/Hearts of Iron IV/loader.log"
+ hoi4_loader_test_engine_active:0 "§Gactive§! (flag hoi4_loader_plugin_engine_probe set)"
+ hoi4_loader_test_engine_inactive:0 "§Ydisabled§! (flag hoi4_loader_plugin_engine_probe not set)"
+ hoi4_loader_test.1.a:0 "OK"

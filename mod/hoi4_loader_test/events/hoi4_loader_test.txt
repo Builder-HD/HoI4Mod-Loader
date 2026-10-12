@@ -1,0 +1,30 @@
+add_namespace = hoi4_loader_test
+
+# Fired from on_startup for every human player. The scripted trigger and the
+# scripted effect are reported separately so a partial failure is visible.
+country_event = {
+	id = hoi4_loader_test.1
+	title = hoi4_loader_test.1.t
+	desc = {
+		text = hoi4_loader_test.1.d_full
+		trigger = { hoi4_loader_present = yes has_global_flag = hoi4_loader_present }
+	}
+	desc = {
+		text = hoi4_loader_test.1.d_trigger_only
+		trigger = { hoi4_loader_present = yes NOT = { has_global_flag = hoi4_loader_present } }
+	}
+	desc = {
+		text = hoi4_loader_test.1.d_effect_only
+		trigger = { NOT = { hoi4_loader_present = yes } has_global_flag = hoi4_loader_present }
+	}
+	desc = {
+		text = hoi4_loader_test.1.d_none
+		trigger = { NOT = { hoi4_loader_present = yes } NOT = { has_global_flag = hoi4_loader_present } }
+	}
+	picture = GFX_report_event_generic_read_write
+	is_triggered_only = yes
+
+	option = {
+		name = hoi4_loader_test.1.a
+	}
+}

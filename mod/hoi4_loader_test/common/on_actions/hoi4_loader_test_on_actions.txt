@@ -1,0 +1,33 @@
+on_actions = {
+	# New game only: on_startup does NOT fire when a save is loaded.
+	on_startup = {
+		effect = {
+			# on_startup effects run without a scope, and scripted effects need one,
+			# so hoi4_loader_init is called from inside a country scope.
+			every_country = {
+				limit = { is_ai = no }
+				# Diagnostics in logs/game.log.
+				log = "hoi4_loader_test: on_startup fired"
+				if = {
+					limit = { has_global_flag = hoi4_loader_plugin_engine_probe }
+					log = "hoi4_loader_test: engine_probe flag was SET before hoi4_loader_init"
+				}
+				else = {
+					log = "hoi4_loader_test: engine_probe flag was NOT set before hoi4_loader_init"
+				}
+				hoi4_loader_init = yes
+				country_event = { id = hoi4_loader_test.1 hours = 1 }
+			}
+		}
+	}
+	# Loaded saves keep the flags they were saved with, which may not match this session's
+	# loader (e.g. engine tier now disabled). Refresh them weekly; ROOT is each country.
+	on_weekly = {
+		effect = {
+			if = {
+				limit = { is_ai = no }
+				hoi4_loader_init = yes
+			}
+		}
+	}
+}

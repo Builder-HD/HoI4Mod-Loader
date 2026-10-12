@@ -1,0 +1,11 @@
+# Engine-tier status line for the loader check event.
+defined_text = {
+	name = GetHoi4LoaderEngineProbe
+	text = {
+		trigger = { has_global_flag = hoi4_loader_plugin_engine_probe }
+		localization_key = hoi4_loader_test_engine_active
+	}
+	text = {
+		localization_key = hoi4_loader_test_engine_inactive
+	}
+}
