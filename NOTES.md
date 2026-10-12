@@ -240,3 +240,268 @@ Every scenario checks:
 | 8 | exe size changed | rehash, "size changed", engine tier off |
 
 All pass as of 2026-10-12. SHA-256 was cross-checked against `sha256sum` (58 MB in 157 ms).
+
+---
+
+# Part B: strategic region names
+
+## B1 findings (1.19.3 checksum-patched copy; addresses are for orientation only)
+
+Method: Ghidra headless on the 1.19.3 copy (string xrefs, RTTI vtables, decompilation),
+plus byte-level checks on the 1.19.2 copy. RTTI class names (`.?AV...@@`) survive in the
+binary, which made the classes easy to identify.
+
+### 1. Where strategic regions live and where the name is
+
+- **Loading.** `FUN_140a65010` loads `map/` + `strategicregions` (plus `map/colors.txt` and
+  `map/weatherpositions.txt`) into the strategic-region database (singleton getter
+  `FUN_140163c30`, instance pointer `DAT_14332f080`).
+- **Two objects per region:**
+  - `CStrategicRegionTemplate` (vtable `0x1429dbe50`): static data from the file. Its read
+    function (vtable slot 4) maps save token `0xb` (`id`) to `+0xa0` and `0x1b` (`name`) to the
+    strings at `+0x40` and `+0x20`. So `template+0x20` holds `"STRATEGICREGION_<id>"`, the
+    localisation key. Province lists etc. follow.
+  - `CStrategicRegion` (vtable `0x14296d558`, second interface at `+8`): live game state.
+    `+0x30` points to its template, `+0x60` is the id. **`+0x38` is a string (0x20-byte MSVC
+    `std::string`, length at `+0x48`) holding an optional name override.**
+- **The override is built in and saved natively.** `CStrategicRegion` write (slot 2) emits
+  token `0x1b` (`name`) with `+0x38` **only when it is non-empty**; read (slot 4) restores it.
+  Vanilla script never writes it (no effect references it), so vanilla saves never contain it.
+  It is the region equivalent of the state override that `set_state_name` writes at
+  `CState+0x38`.
+
+### 2. How the UI gets the name: one getter, looked up every time
+
+`FUN_140e23410` is effectively `CStrategicRegion::GetNameKey()`:
+
+```c
+const std::string* GetNameKey(CStrategicRegion* r) {
+    if (r->customName.size /* +0x48 */ == 0)
+        return &r->template /* +0x30 */ ->nameKey /* +0x20 */;
+    return &r->customName /* +0x38 */;
+}
+```
+
+- It returns a **localisation key**; callers localise it each time (e.g. the region panel
+  update `FUN_1417369d0` does `SetText(Localize(*GetNameKey(region)))`). No cached copies in
+  game state.
+- **99 call sites in 60+ functions**, including the air mission tooltip
+  (`COMMAND_POWER_TOOLTIP_AIR_MISSION`, `LOCATION`), army air mission panel, air wing states,
+  naval invasion, blockade, port strike and naval battle titles, task force activity, mines
+  effects, radar tooltip, faction theater map mode, the region info panel, map-mode tooltips,
+  trigger tooltips (`TRIGGER_STRAT_REGION_ID`), and the localisation object system (`EV_*`
+  table, i.e. scripted loc `GetName`).
+- An instruction scan for inlined copies (`cmp [r+0x48],0` with `lea [r+0x38]` and
+  `mov [r+0x30]` nearby) found only one other region copy, in a debug message
+  ("Province ... added twice to strategic area"). So **hooking or relying on this one function
+  covers every UI location**.
+- **Map labels are cached**: `FUN_140b59200(mapNames, labelType)` builds the map text labels
+  (it calls `GetNameKey`) for label types 0/2/3/6 at interface creation (`FUN_140b554b0`,
+  called from the in-game interface setup that loads `interface/main.gui`). Single-type
+  rebuild entry points exist (`FUN_140b58430`, `FUN_140b58440`). `set_state_name`'s execute
+  also marks map text dirty: `*(u16*)(DAT_14333cfb8 + 0x81) = 0x101` via `FUN_140e139c0`, and
+  pushes a UI refresh command (0xd8-byte record) on the in-game interface handler
+  (`DAT_14332f698`, vtable +0xb8). Refreshing region labels after a rename is therefore feasible.
+
+### 3. How script effects are registered and executed
+
+- **Names to type ids.** Every effect and trigger name is a compile-time token. For example,
+  `FUN_1424c4b70(descriptor, 0x37a4, "set_state_name")` sits in the giant static initialiser
+  `FUN_1400831c0`. Known ids: `set_state_name` 0x37a4, `set_province_name` 0x37a3,
+  `set_global_flag` 0x2739.
+- **Registry.** `_EffectEntries` is a `std::map<int token, CEffectEntryBase*>` at
+  `DAT_143330000`. Each effect has a small static registration function, e.g. `FUN_140017260`:
+  `entry = new CEffectEntry<CSetStateNameEffect>{ vtable, "set_state_name = <string> - ..." };
+  FUN_1405415a0(registry, 0x37a4, entry)`. It asserts the token is not registered yet.
+  `entry->vtable[1]` is the factory (`new` effect object).
+- **`CEffect` interface** (25 virtual slots, vtable `0x1427d4990`). Slot 3 is the generic
+  reader: it iterates a `{ ... }` block and calls slot 4 per key. Slot 4 handles one block
+  item, slot 6 a single value (`effect = value`), slot 7 builds the tooltip, slot 13 executes.
+- **`CSetStateNameEffect`** (vtable `0x1427501d8`, object 0x78 bytes):
+  - slot 6 stores the value at `+0x58` (std::string);
+  - slot 7 builds tooltip `EFFECT_SET_STATE_NAME` / `EFFECT_RESET_STATE_NAME`;
+  - slot 13 gets the scope state from the global gamestate (`DAT_14332f260`; states at `+0x2c8`,
+    count `+0x2d4`), copies the string into `state+0x38`, and triggers the map/UI refresh above.
+- **`CRenameProvinceEffect`** (`set_province_name = { id = <province> name = <string> }`, any
+  scope; vtable `0x142773728`; object 0x80 bytes; registered as token 0x37a3 by
+  `FUN_14001dec0`). It overrides only 4 slots:
+  - 0: destructor;
+  - 4: block item; `id` (token 0xb) goes to an int at `+0x58`, `name` (token 0x1b) to a
+    std::string at `+0x60`, anything else is a parse error;
+  - 7: tooltip;
+  - 13: execute; `province = gamestate->provinces.Get(id)`, then `province+0x40 = name`.
+
+  **This is an almost exact template for `set_strategic_region_name = { region = .. name = .. }`.**
+- Script scopes: `STRATEGIC_REGION` is a real scope (documented triggers/effects), but there is
+  no region name effect or trigger in vanilla.
+- **No scripted-effect parameters in HOI4.** Vanilla never uses `$PARAM$` in scripted
+  effects, and neither the shipped docs nor the exe show argument support (the `$X$` syntax
+  exists only in localisation). Scripted effects are invoked as `name = yes`.
+  The closest tool is `meta_effect = { text = { ... [X] ... } X = "..." }`, which builds and
+  runs script text at runtime. So **the requested syntax `set_strategic_region_name = {
+  region = 42 name = KEY }` is only possible as a native (engine-registered) effect.**
+
+### 4. Global flags, and the after-load / after-new-game hook point
+
+- **Storage.** `CSetGlobalFlagEffect::Execute` (vtable slot 13, `FUN_140362930`) resolves the
+  flag name to a token (`FUN_141393330`; dynamic names via `FUN_1424bb460`, string to token)
+  and calls `FUN_140cbfea0(*(gamestate+0x258), token, value, days)`. The global flag container
+  is `*(gamestate+0x258)`: a flat array (`data +8`, count `+0x14`) of 0x30-byte entries with
+  `+8` token, `+0x18` set date (copied from `gamestate+0x468`), `+0x28` value, `+0x2a` days.
+  `FUN_140cbf6d0` is get-or-create (linear search by token). Enumeration is a simple loop.
+  Token to string: `FUN_1424ca600(out, token)`.
+- **Hook point for load and new game.** `FUN_140dd9b20` (in-game idler, `ingameidler.cpp`) runs
+  when the game is entered, for **both** a new game and a loaded save. It fires `on_startup`
+  only `if (!FUN_1401e2930(gamestate))`, where `FUN_1401e2930` returns the byte
+  `gamestate+0xa34`, i.e. **"loaded from save"**. This explains the in-game observation that
+  `on_startup` does not run on load. Hooking `FUN_140dd9b20` and running code after the
+  original returns gives one callback for both cases, with the new/loaded distinction.
+
+### Signature status (checked on 1.19.3 patched and 1.19.2)
+
+| Function | Pattern | 1.19.3 | 1.19.2 |
+|---|---|---|---|
+| `CStrategicRegion::GetNameKey` | `48 83 79 48 00 75 09 48 8B 41 30 48 83 C0 20 C3 48 8D 41 38 C3` (whole function) | 1 match, `0x140e23410` | 1 match, `0x140e0eb10` |
+| `CGameState::IsLoadedFromSave` | `0F B6 81 34 0A 00 00 C3` | 1 match, `0x1401e2930` | 1 match, `0x1401e24b0` |
+
+The `CState` equivalent of GetNameKey has a different body (`... 74 05 48 8D 41 38 C3 ...`),
+so the region pattern stays unique. The remaining signatures (game-entered function, gamestate
+pointer, flag container functions, effect registry) will be derived and checked on both builds
+in B3. **Not yet checked against a vanilla 1.19.3**: none is available yet.
+
+Vtables can also be found at runtime from RTTI names (`.?AVCRenameProvinceEffect@@` → type
+descriptor → complete object locator → vtable). That is more robust than byte patterns for the
+effect classes; `rtti.py` in the analysis scratchpad implements it offline.
+
+## B2: options for `set_strategic_region_name`
+
+Requirements: rename and reset at runtime; show everywhere; survive save/load; cosmetic only;
+with no loader or on an unsupported build the original name shows. Every option below uses
+the engine's own `GetNameKey` path, so every UI location from B1 picks the name up.
+
+### Option 1: native effects
+
+Register `set_strategic_region_name` and `reset_strategic_region_name` in `_EffectEntries`.
+The effect class would be a clone of `CRenameProvinceEffect`'s vtable with three slots
+replaced: block item (accept `region` and `name`), tooltip, and execute.
+
+- **Pro:** the exact requested syntax; runs wherever effects run (decisions, events, focuses,
+  `meta_effect`); validation at execution time; can show a proper tooltip.
+- **Pro:** much less reverse engineering than feared, thanks to the `CRenameProvinceEffect`
+  template.
+- **Con:** new engine surface: create a token for the new names, insert into the registry after
+  hoi4.exe's static initialisers ran but before scripts are parsed, clone vtables, implement a
+  tooltip. The most fragile option on updates (vtable layout, registry type, token API).
+- **Con, important:** without the loader, or on an unsupported build (engine tier off), every
+  use is an **"Unknown effect" parse error**. The line is dropped and the rest of the block
+  still runs, but `error.log` gets spammed and mods cannot ship this safely to non-loader
+  users. A mitigation would need a new VFS feature (mod-supplied "overlay" files served only
+  when the engine feature is active).
+- **Con, multiplayer:** game state written by the effect would differ between clients with
+  and without it. The loader also changes the files the game reads, so a mixed lobby should
+  already fail the checksum, but this is a reason to keep the effect's state change identical
+  everywhere.
+
+### Option 2: flag protocol + engine watcher (no new effects)
+
+Names are expressed as plain global flags, set by normal script:
+
+```
+set_global_flag = hoi4_srn_42_MY_LOC_KEY   # rename region 42
+set_global_flag = hoi4_srn_42_reset        # back to the original name
+```
+
+The loader enumerates `hoi4_srn_<id>_<key>` flags. For each region, the most recently set one
+wins (entry set date, and live ordering from a set/clear hook). It answers `GetNameKey` from
+that table. Updates come from:
+- the game-entered hook, on load and new game;
+- a hook on the global flag set/clear path, for immediate updates (this also covers flags set
+  by `meta_effect`, which runs the same effect classes).
+
+After an update it refreshes the map labels and open panels. The loader can serve readable
+wrappers through the VFS, e.g. per-region `hoi4_srn_reset_42 = yes`.
+
+- **Pro:** script stays vanilla. No parse errors without the loader, and a save with these
+  flags loads anywhere; without the loader or on an unsupported build the flags are inert, so
+  the original names show.
+- **Pro:** persistence comes free: flags are saved with the game. Load the save with the loader
+  again and the names come back.
+- **Pro:** no effect registry, vtable cloning, parser or tooltip work; smallest engine surface.
+- **Pro:** deterministic. Flags are set by identical script on every client, and the name
+  lookup is local and cosmetic, so it cannot desync.
+- **Con:** not the requested syntax. A dynamic key needs `meta_effect`. The decision tooltip
+  shows "Set global flag hoi4_srn_42_..." unless the modder hides it with
+  `hidden_effect` + `custom_effect_tooltip`.
+- **Con:** no script-time validation; invalid ids or keys are reported in `loader.log`.
+- **Con:** flags accumulate (one per key ever used per region; bounded by the mod's key set).
+  Timed flags (`days =`) are not supported.
+
+### Option 3: native effect that writes the engine's own override (`region+0x38`)
+
+The smallest possible implementation: the engine saves and loads the field itself.
+
+- **Con, disqualifying:** the vanilla engine reads `name` back from the save. A save loaded
+  without the loader, or on an unsupported build, **keeps showing the custom name**, or the raw
+  key if the mod's localisation is missing. That violates the requirement, and the save cannot
+  be cleaned without the loader. Rejected; listed for completeness.
+
+### Recommendation: Option 2 as the core, with Option 1's syntax added on top
+
+1. **First, Option 2 (core):**
+   - the flag protocol;
+   - the `GetNameKey` hook, which never writes `region+0x38`, so saves stay vanilla;
+   - the game-entered lifecycle callback (also used to refresh `hoi4_loader_plugin_*` flags
+     immediately after loading);
+   - the flag set/clear hook;
+   - map label refresh.
+
+   It meets every requirement, including the no-loader and unsupported-build cases. It is
+   multiplayer-safe and has the smallest, most update-resistant engine footprint.
+2. **Then, optionally, Option 1 as thin syntax sugar:** native
+   `set_strategic_region_name = { region = 42 name = KEY }` and
+   `reset_strategic_region_name = { region = 42 }` whose execute **only sets the corresponding
+   `hoi4_srn_*` flag** (via the engine's flag container), so storage and behaviour stay
+   identical to the core. Mods that must also run without the loader keep using the flag
+   protocol; mods that require the loader get the nice syntax. The test mod would exercise
+   both.
+
+The core is the part that has to be right; the native effect is a front-end that can be added,
+or dropped after an update, without touching persistence.
+
+### Flag names built from localisation keys (if the flag approach is used)
+
+- **Characters.** Across all 148,611 vanilla localisation keys the character set is
+  `[A-Za-z0-9_]` plus `.` (24,203 keys, e.g. `political.14.a.tt`) and `-` (67 keys, e.g.
+  `ETH_italo-ethiopian_empire_decisions`).
+  - `.` already appears in vanilla flag names (`news.157_fired`, `SOV_soviet.48_trotsky`), so it
+    is safe.
+  - `-` never appears in a vanilla flag name. Its handling by the script lexer is unverified
+    (risk: parsed as a separator or sign).
+  - Spaces, quotes, `:`, `@`, `[`, `]`, `$`, `=` and `#` do not occur in keys, and some of them
+    are special in script.
+
+  Plan: accept `[A-Za-z0-9_.]` as-is; test `-` in B3 and, if it fails, reject such keys with
+  a log line.
+- **Length.** Vanilla keys are up to 111 characters (99th percentile 54); vanilla flag names
+  reach 68. `hoi4_srn_<id>_` adds up to 13, giving 124 at most. No engine limit was found:
+  flags are interned tokens backed by strings, and binary saves store strings with a 16-bit
+  length. B3 will test a 124-character flag through set, save, load and `has_global_flag`;
+  until verified, the loader logs and ignores names over a conservative cap.
+- **Parsing.** The flag carries `<id>` then `_` then `<key>`. The id is all digits, so the first
+  `_` after the prefix is unambiguous even when the key contains `_`. The reserved key `reset`
+  means "original name". A key equal to `reset` would be unusable, which is acceptable.
+
+### Behaviour without the loader or on an unsupported build
+
+- **Options 1 and 2 (anything that never writes `region+0x38`):** the engine sees no
+  override, `GetNameKey` returns `STRATEGICREGION_<id>`, and the original name shows
+  everywhere. The `hoi4_srn_*` flags stay in the save, unused. Loading the same save later
+  with the loader on a supported build brings the names back. With Option 1 alone, script
+  using the effect also logs "Unknown effect" parse errors in that setup.
+- **Option 3:** the custom name persists in the save and keeps showing. This is why it is
+  rejected.
+- **Missing localisation key (planned for B3):** the loader will check the key against the
+  game's localisation before using it. If it is missing, the region keeps its original name
+  and `loader.log` says why, so the UI never shows a raw key. The localisation lookup function
+  still has to be located; the panel code shows the call path (`FUN_14011e010`) to start from.
+- **Invalid region id:** ignored with a log line.
