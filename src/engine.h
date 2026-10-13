@@ -61,9 +61,9 @@ void* RegionById(int id);      // CStrategicRegion* or null
 int RegionTemplateId(void* region);  // id stored in the region's template, -1 if unreadable
 
 // --- Localisation / UI -----------------------------------------------------------------------
-// True if the localisation has text for key. Uses the engine's Localize(); the returned engine
-// string is intentionally leaked (callers cache results).
-bool LocKeyExists(const char* key);
+// The localised text for key (engine Localize()), or null if the localisation has no entry.
+// The returned string is never freed: callers cache it and may hand it to the engine.
+const EngineString* LocalizeKey(const char* key);
 void MarkMapNamesDirty();  // the refresh set_state_name triggers
 
 // --- Effect registry -------------------------------------------------------------------------

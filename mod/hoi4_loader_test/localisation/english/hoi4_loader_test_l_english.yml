@@ -10,7 +10,7 @@
  hoi4_loader_test_region_names_inactive:0 "§Ydisabled§! (flag hoi4_loader_plugin_region_names not set)"
  hoi4_loader_test.1.a:0 "OK"
  hoi4_loader_test.2.t:0 "Region Name Check"
- hoi4_loader_test.2.d:0 "Strategic region 42 (vanilla name: Bay of Biscay).\n\nName stored in the hoi4_srn flags: §Y[GetHoi4LoaderRegion42FlagName]§!\nRegion names feature: [GetHoi4LoaderRegionNamesStatus]\n\nThe map, the region tooltip, naval and air mission screens should all show the same name. loader.log lists every change."
+ hoi4_loader_test.2.d:0 "Strategic region 42 (vanilla name: Bay of Biscay).\n\nName stored in the hoi4_srn flags: [GetHoi4LoaderRegion42FlagName]\nRegion names feature: [GetHoi4LoaderRegionNamesStatus]\n\nThe map, the region tooltip, naval and air mission screens should all show the same name. loader.log lists every change."
  hoi4_loader_test.2.a:0 "OK"
  hoi4_loader_test_region_original:0 "Bay of Biscay (original name, no flag)"
  HOI4_LOADER_TEST_REGION_NAME_A:0 "Loader Test Sea A"

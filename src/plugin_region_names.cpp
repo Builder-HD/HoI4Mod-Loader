@@ -63,22 +63,6 @@ const EngineString* __fastcall GetNameKeyDetour(void* region) {
     return g_origGetNameKey(region);
 }
 
-// Strings handed to the engine are never freed: readers on other threads may still hold them.
-// One allocation per rename; bounded by what script does.
-const EngineString* MakeEngineString(const std::string& s) {
-    auto* e = new EngineString{};
-    e->size = s.size();
-    if (s.size() <= 15) {
-        e->cap = 15;
-        memcpy(e->buf, s.c_str(), s.size() + 1);
-    } else {
-        e->cap = s.size();
-        e->ptr = new char[s.size() + 1];
-        memcpy(e->ptr, s.c_str(), s.size() + 1);
-    }
-    return e;
-}
-
 // --- Flag parsing ---------------------------------------------------------------------------
 bool ValidKey(const char* k, size_t n) {
     if (n == 0 || n > kMaxKeyLen) return false;
@@ -119,16 +103,24 @@ const Parsed& ParseToken(int token) {
     return g_tokenCache.emplace(token, std::move(p)).first->second;
 }
 
-// --- Localisation check (cached) ------------------------------------------------------------
-std::unordered_map<std::string, bool> g_locCache;
+// --- Localisation (cached) ------------------------------------------------------------------
+// GetNameKey's callers display its result as text (in-game test 2026-10-13: returning a key
+// showed the raw key), so the table holds localised text. Strings are never freed: readers on
+// other threads may still hold them. One per distinct key.
+std::unordered_map<std::string, const EngineString*> g_locCache;
 
-bool KeyExists(const std::string& key) {
+const EngineString* DisplayName(const std::string& key) {
     auto it = g_locCache.find(key);
     if (it != g_locCache.end()) return it->second;
-    bool ok = Engine::LocKeyExists(key.c_str());
-    Log("region_names: localisation key '%s' %s", key.c_str(), ok ? "found" : "NOT found (region keeps its name)");
-    return g_locCache.emplace(key, ok).first->second;
+    const EngineString* text = Engine::LocalizeKey(key.c_str());
+    if (text)
+        Log("region_names: localisation key '%s' found: \"%s\"", key.c_str(), text->c_str());
+    else
+        Log("region_names: localisation key '%s' NOT found (region keeps its name)", key.c_str());
+    return g_locCache.emplace(key, text).first->second;
 }
+
+bool KeyExists(const std::string& key) { return DisplayName(key) != nullptr; }
 
 // --- Rescan: flags -> display table ---------------------------------------------------------
 struct Candidate {
@@ -176,7 +168,7 @@ void Rescan(const char* why) {
         if (!want.empty() && !KeyExists(want)) want.clear();
         if (want == g_current[id]) continue;
         g_current[id] = want;
-        g_names[id].store(want.empty() ? nullptr : MakeEngineString(want), std::memory_order_release);
+        g_names[id].store(want.empty() ? nullptr : DisplayName(want), std::memory_order_release);
         Log("region_names: region %d -> %s", id, want.empty() ? "original name" : want.c_str());
         ++changes;
     }
@@ -213,6 +205,11 @@ bool SelfCheck() {
     g_checkedFor = count;
     g_enabled.store(true, std::memory_order_release);
     Log("region_names: self-check passed (%d regions)", count - 1);
+    // Diagnostic: what the engine itself returns (key or display text) for one region.
+    if (void* r = Engine::RegionById(count > 42 ? 42 : 1)) {
+        const EngineString* s = g_origGetNameKey(r);
+        Log("region_names: engine name of region %d: \"%s\"", Engine::RegionTemplateId(r), s ? s->c_str() : "(null)");
+    }
     return true;
 }
 

@@ -309,9 +309,12 @@ const std::string* GetNameKey(CStrategicRegion* r) {
 }
 ```
 
-- It returns a **localisation key**; callers localise it each time (e.g. the region panel
-  update `FUN_1417369d0` does `SetText(Localize(*GetNameKey(region)))`). No cached copies in
-  game state.
+- **Correction (in-game test 2026-10-13):** callers display its result **as text**. Returning
+  a localisation key showed the raw key in the UI. The template's name string at `+0x20` is
+  therefore most likely already the localised name; the read function fills both `+0x40` (key)
+  and `+0x20`. The loader now logs the engine's own result for region 42 to confirm. It is
+  looked up each time (the region panel update `FUN_1417369d0` copies it into the widget
+  text); there are no cached copies in game state.
 - **99 call sites in 60+ functions**, including the air mission tooltip
   (`COMMAND_POWER_TOOLTIP_AIR_MISSION`, `LOCATION`), army air mission panel, air wing states,
   naval invasion, blockade, port strike and naval battle titles, task force activity, mines
@@ -570,24 +573,37 @@ native effects only manage them.
 |---|---|
 | `engine.cpp` | Resolves the 14 signatures, the anchor and RTTI vtables (`.?AVCEffect@@`, `.?AVCSetGlobalFlagEffect@@`, `.?AVCClearGlobalFlagEffect@@`, `.?AVCRenameProvinceEffect@@`). Groups fail independently. |
 | `lifecycle` feature | Hooks the lexer sync (registers native effects and tokens right after it, before scripts using them are parsed) and "game entered" (callbacks get `loadedFromSave`). After a loaded save it sets `hoi4_loader_present` and sets or clears every `hoi4_loader_plugin_*` flag immediately. |
-| Display | `CStrategicRegion::GetNameKey` is hooked. If the region (id = `template+0xa0`) has an entry in a lock-free table of atomic pointers, that key is returned; otherwise the original runs. Strings in the table are never freed (readers on other threads). |
+| Display | `CStrategicRegion::GetNameKey` is hooked. If the region (id = `template+0xa0`) has an entry in a lock-free table of atomic pointers, that entry is returned; otherwise the original runs. Entries hold the key's **localised text** (`Localize()` once per key, cached), because callers display the result as is. Strings in the table are never freed (readers on other threads). A language change at runtime keeps the old text until the next rename. |
 | Self-check | On every game entered: `RegionTemplateId(regions[i]) == i` for all regions, else the feature deactivates itself and clears its flag. |
 | Flags to names | Rescan on game entered, after every `set_global_flag` / `clr_global_flag` Execute (hooked via RTTI vtable slot 13) and after the native effects. The latest set date wins, ties go to the larger key; the key must exist in localisation. Changes set the map manager's names-dirty flag (`+0x81 = 0x101`), as `set_state_name` does. |
 | Native effects | Tokens `set_strategic_region_name`/`reset_strategic_region_name` are registered with entries whose factory calls `set_province_name`'s factory and then swaps in a cloned vtable (slot `[-1]` keeps the RTTI locator). Slot 4 maps `region` to `id`; slot 7 returns an empty tooltip; slot 13 runs set or reset under SEH. Before cloning, slots 4/7/13 are checked to be real overrides of `CEffect`. |
 | Kill switch | `[features] region_names = 0` (or `lifecycle = 0`) in `loader_config.ini`. |
 
-### Unverified until the in-game test (each one is logged)
+### In-game test results (2026-10-13, vanilla 1.19.3, loaded save)
 
+Verified:
+- **Native effects:** registered in time. The lexer-sync callback ran at +2.5 s, before any
+  script, and `error.log` had no "Unknown effect". Rename A/B and reset work.
+- **Flag protocol:** decision C works.
+- **Task forces** show the new name.
+- **Persistence:** name B survived save, game restart and load. The game-entered (loaded save)
+  rescan restored it, and the plugin flags were refreshed immediately.
+- **Missing key:** detected (`Localize()` returned the key or nothing); the region keeps its
+  name and `loader.log` has an error line.
+- **Invalid region 9999:** refused with a log line, no crash.
+- **Self-check:** passed with 304 regions.
+
+Found and fixed: the UI displayed the raw key (see B1 #2 correction). The table now holds
+localised text.
+
+Still open:
 1. **Map labels:** whether the names-dirty flag also rebuilds strategic region map labels. If
-   not, the label keeps the old name until the next interface rebuild; the fallback would be
-   calling the label rebuild (`FUN_140b554b0`).
-2. **Missing key:** `Localize()` on a missing key is assumed to return the key itself (or
-   nothing). `loader.log` prints "localisation key ... found / NOT found" for every key checked.
-3. **Empty tooltip:** whether an empty slot-7 result shows nothing or an empty line in decision
+   not, the fallback is calling the label rebuild (`FUN_140b554b0`).
+2. **Empty tooltip:** whether an empty slot-7 result shows nothing or an empty line in decision
    tooltips.
-4. **Timing:** that the lexer-sync hook fires before any file using the native effects is parsed.
-   If not, `error.log` shows "Unknown effect" for the test decisions even with the loader active.
-5. **Flag name characters:** `-` in a key is accepted by the loader but untested in script
+3. **Other UI places:** region tooltip and panel, air missions and naval missions have not been
+   reported yet.
+4. **Flag name characters:** `-` in a key is accepted by the loader but untested in script
    flags; flags longer than vanilla's 68 characters are untested.
 
 Not covered: `modify_global_flag`, flags with `days =` expiring, and console flag commands do not

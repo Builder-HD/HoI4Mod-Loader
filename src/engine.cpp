@@ -239,14 +239,14 @@ int RegionTemplateId(void* region) {
     return tmpl ? Read<int>(tmpl, kTemplateId) : -1;
 }
 
-bool LocKeyExists(const char* key) {
-    if (!g_localize || !key || !*key) return false;
-    EngineString out{};
-    g_localize(&out, key, nullptr, 0);
-    const char* text = out.c_str();
-    // Assumption (logged by the caller for verification): a missing entry localises to the key
-    // itself, or to nothing.
-    return out.size != 0 && strcmp(text, key) != 0;
+const EngineString* LocalizeKey(const char* key) {
+    if (!g_localize || !key || !*key) return nullptr;
+    auto* out = new EngineString{};
+    g_localize(out, key, nullptr, 0);
+    // A missing entry localises to the key itself or to nothing; both mean "missing". The in-game
+    // test (2026-10-13) detected a missing key this way.
+    if (out->size == 0 || strcmp(out->c_str(), key) == 0) return nullptr;
+    return out;
 }
 
 void MarkMapNamesDirty() {
