@@ -39,6 +39,32 @@ hoi4_loader_test_category = {
 		ai_will_do = { base = 0 }
 	}
 
+	# Key with '-' (67 vanilla localisation keys have one; no vanilla flag does). Tests the
+	# script lexer on the effect argument and on has_global_flag in the status event.
+	hoi4_srn_test_dash = {
+		icon = generic_research
+		cost = 0
+		visible = { has_global_flag = hoi4_loader_plugin_region_names }
+		complete_effect = {
+			set_strategic_region_name = { region = 42 name = HOI4_LOADER_TEST-REGION-NAME-DASH }
+			country_event = { id = hoi4_loader_test.2 hours = 1 }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# Longest key the loader accepts (100 characters), so the flag name is 112 characters
+	# (vanilla's longest flag is 68). The localised text is long too, for UI layout.
+	hoi4_srn_test_long = {
+		icon = generic_research
+		cost = 0
+		visible = { has_global_flag = hoi4_loader_plugin_region_names }
+		complete_effect = {
+			set_strategic_region_name = { region = 42 name = HOI4_LOADER_TEST_REGION_NAME_THAT_IS_DELIBERATELY_VERY_LONG_TO_CHECK_FLAG_NAME_LIMITS_IN_SAVE_AND_UI }
+			country_event = { id = hoi4_loader_test.2 hours = 1 }
+		}
+		ai_will_do = { base = 0 }
+	}
+
 	# Must fail safe: region 9999 does not exist. Expect a loader.log line, no change, no crash.
 	hoi4_srn_test_invalid_region = {
 		icon = generic_research

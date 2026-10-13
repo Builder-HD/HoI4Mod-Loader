@@ -39,6 +39,14 @@ defined_text = {
 		localization_key = HOI4_LOADER_TEST_REGION_NAME_C
 	}
 	text = {
+		trigger = { has_global_flag = hoi4_srn_42_HOI4_LOADER_TEST-REGION-NAME-DASH }
+		localization_key = HOI4_LOADER_TEST-REGION-NAME-DASH
+	}
+	text = {
+		trigger = { has_global_flag = hoi4_srn_42_HOI4_LOADER_TEST_REGION_NAME_THAT_IS_DELIBERATELY_VERY_LONG_TO_CHECK_FLAG_NAME_LIMITS_IN_SAVE_AND_UI }
+		localization_key = HOI4_LOADER_TEST_REGION_NAME_THAT_IS_DELIBERATELY_VERY_LONG_TO_CHECK_FLAG_NAME_LIMITS_IN_SAVE_AND_UI
+	}
+	text = {
 		localization_key = hoi4_loader_test_region_original
 	}
 }
