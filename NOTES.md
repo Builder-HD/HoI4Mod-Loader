@@ -989,3 +989,191 @@ stand-in exe checks the guard files: `engine_probe` = yes or no by tier, `region
   - `loader_script_docs.md` lists all three commands as registered;
   - the dash-key and long-key names survive save and load.
   The dash/long save/load item from Part B step 0 is closed by this run.
+
+# Part D: on_game_loaded
+
+## D1: findings (1.19.3 in Ghidra; addresses are from that build and given for orientation only)
+
+### How on_actions are defined: a dynamic, name-keyed database, not a hardcoded list
+
+- **The database:** `COnActionDataBase` (RTTI name, a `TGameItemDatabase`; 0x150 bytes,
+  created by `FUN_140a75a40`, the global instance is `DAT_14332efa0`).
+  - **Lookup table** at `+0x28`: 0x28-byte entries `{std::string name, int hash}`, count at
+    `+0x34`. The hash is a case-insensitive FNV-1a (`FUN_140bc96d0`).
+  - **Object table** at `+0x40`: `COnActionList*`, count at `+0x4c`. `[0]` is a
+    `TNullObject<COnActionList>`.
+  - **Lookup by name:** `FUN_140a792b0(db, const std::string&)` → `FUN_140a75940` compares the
+    hash, then `_stricmp`. An unknown name returns the null object.
+- **Loading:** `FUN_140a79930` lists every file under `common/on_actions` (vanilla and mods)
+  and calls `FUN_140a760d0(db, parser)` for each. Inside `on_actions = { ... }` every key is
+  looked up by name. If it is not found, a **new `COnActionList` (0xd8 bytes) is created for
+  any key** and appended to both tables. Only the prefixes `on_daily_` / `on_weekly_` /
+  `on_monthly_` get extra handling (tag-specific lists, with "%s is not a valid tag of
+  on_daily").
+  - There is **no whitelist and no error for an unknown key** (`FUN_140625b10`, called per key,
+    is only a debug filename-portability check).
+- **Merging:** the block is parsed into the existing list when the name exists, otherwise into
+  the new one (`list->vtable[3](list, parser)`). So every file and mod that writes
+  `on_startup = { ... }` adds to the same list. A new key such as `on_game_loaded` merges
+  exactly the same way: the first file creates the list, later files add to it.
+- **Consequence:** `on_game_loaded = { effect = { ... } }` in a mod is already parsed into a
+  real on_action today, **with or without the loader**. Vanilla simply never fires it. The
+  loader only has to fire it; nothing needs registering.
+
+### How the engine fires an on_action (from on_startup)
+
+In the game-entered function `FUN_140dd9b20` (`ingameidler.cpp`), only when
+`!IsLoadedFromSave`:
+
+```
+seed  = SyncedRandom("ingameidler.cpp", 0x1546)          // FUN_142233fa0 (random.cpp, the OOS-checked game RNG)
+CEventScope scope(seed & 0x7fffffff)                     // FUN_140534fe0 (0xb0 bytes), dtor FUN_140535820
+list  = OnActionDb_Find(db, std::string("on_startup"))   // FUN_140a792b0
+OnAction_Fire(db, list, &scope, 0)                       // FUN_140a79ba0
+```
+
+- **`OnAction_Fire`**: does nothing if the game state is being deleted (`gamestate+0xa3a`).
+  Otherwise it fires:
+  - the list's `events` (`+0x60`, count `+0x6c`), with a scope check per event ("On action event
+    X has the wrong scope");
+  - one of its `random_events` (`FUN_140a79410`);
+  - its `effect` block (`list+0x78`, vtable slot 12, called with the scope).
+- **The "game has started" check** (`gamestate+0xa39`) is a debug-build assertion only.
+- **Scope:**
+  - `on_startup` gets a scope with **no ROOT/FROM** (only the random seed), so country events
+    and country effects fail there.
+  - Earlier in the same function, for new games the engine itself builds a **country scope for
+    the local player** (`FUN_14053a610(scope, &gamestate+0x520 (player tag; +0x524 when 0), 1)`).
+    That is exactly what `on_game_loaded` needs.
+
+### Load paths and flags
+
+- **`CCurrentGameState::Load`** (`FUN_1401e2ac0`, logs `CCurrentGameState::Load_START/END`) is
+  the only code that sets `gamestate+0xa34` ("loaded from save") = 1. The new-game init
+  (`FUN_1401e0610`) and the constructor clear it.
+- **Callers of Load:**
+  - the file loader dispatch `FUN_140da04f0` (two variants: `FUN_140d9f9c0`, `FUN_140d9ff80`);
+  - the stream loader `FUN_141999f00`, which keeps the local player's country and is used by the
+    lobby's "File transfer in gamesetup done." path and by `HotJoinGame` (`ingamempcommands.cpp`).
+- **Main menu load, Continue, loading from the in-game menu and ironman** all go through the
+  file loader, then the in-game idler entry `FUN_140ddc350` → `FUN_140dd9b20`. That is where the
+  lifecycle hook already sees "game entered (loaded save)".
+  - **Ironman** is `gamestate+0xc0 & 1` and makes no difference for firing.
+  - Loading again from the in-game menu is expected to re-enter the idler; the D3 test plan
+    checks it.
+- **The engine's own session classification** (`playsession_start` telemetry, `FUN_14021ba20`):
+  - new/load = `IsLoadedFromSave`;
+  - `game_type` = multiplayer if the session's server object (`session+0x58`) is a
+    `CNetworkServer` or `CProxyServer`, ironman if `gamestate+0xc0 & 1`, else normal;
+  - `hot_join` = `session+0x73e`.
+- **Server classes (RTTI):**
+  - `CDummyServer`: local, single player;
+  - `CNetworkServer`: multiplayer host;
+  - `CProxyServer`: multiplayer client;
+  - `CDedicatedServer`.
+  - The session (`CSession`, `session.cpp`) comes from the idler's vtable slot 17 (`+0x88`) or
+    from `(*DAT_14332f698)->vtable[17]`.
+
+### Multiplayer
+
+- **Hot join:** `CSession::bIsHotjoin` (`+0x73e`) is set when the joining client enters
+  `HOTJOIN_ASKING_FOR_JOIN` (`FUN_142251120`; also `FUN_142252520(session, bool)`).
+  - The joiner loads the host's **current** game state through the stream loader, then enters
+    the game. So the game-entered function runs **on the joiner only**, with "loaded from save"
+    set.
+  - Host and other clients keep running; they don't re-enter.
+  - Anything the loader does to game state at that point happens on one machine: an **OOS
+    desync**.
+- **Session-wide load:** the host loads the save from file; clients receive it by the lobby
+  file transfer and load it through `Load` as well. All machines then enter the game before
+  the first tick. In principle a local trigger fires on every machine at the same point
+  (`on_startup` relies on the same pattern for new games). But:
+  - **Not verified statically:** whether a multiplayer **new** game also transfers the state
+    to clients (then clients would see "loaded" while the host sees "new"), and which machines
+    re-enter after an OOS **resync**.
+  - The scope seed uses the synced RNG, so any machine that fires when the others don't also
+    shifts the RNG stream.
+- **Engine command path:**
+  - Lockstep execution is done with `CCommand` subclasses (745 RTTI names), e.g.
+    `CSelectEventOptionCommand`, `CExecuteButtonCommand`, and `CPostHotJoinCommand` /
+    `CReadyAfterHotJoinCommand` for hot join.
+  - There is **no generic "run effect / fire on_action" command**. Adding one means a new
+    command class registered in the engine's command factory with matching IDs on all machines.
+- **Existing loader code with the same hazard:** `lifecycle`'s "refresh plugin flags after
+  load" also writes game state in the game-entered callback. In a hot join it runs on the joiner
+  only. It writes the same values the host already has, because all players must run the same
+  loader build and features: the served files are part of the checksum. So in practice it
+  changes nothing, but it should get the same hot-join guard.
+
+### Without the loader
+
+- **No error expected:** the key is accepted (see above), so `error.log` should say nothing
+  about `on_game_loaded`; the list just never fires. To be confirmed in game (D3 test plan).
+
+## D2: options (awaiting approval)
+
+### Option 1 (recommended): real on_action, fired by the loader (single player in v1)
+
+- **What the loader does:** after the game-entered callbacks (flag refresh, region rescan),
+  when the save was loaded, the loader looks up `on_game_loaded` in the engine's on_action
+  database and fires it exactly as the engine fires `on_startup`: synced-RNG seed, engine
+  fire function. No registration and no parser hook, because the engine already builds the list
+  from every mod's files.
+- **Scope:** ROOT = the local player's country (the engine's own player-scope construction),
+  so `country_event`, `log`, `set_country_flag` etc. work directly. In observer mode (no
+  player country) there is no ROOT, like `on_startup`.
+- **When it fires:** only when **all** of these hold, otherwise it logs why and skips:
+  - "loaded from save";
+  - the server object is a `CDummyServer` (single player);
+  - `bIsHotjoin` is 0.
+  The test is the engine's own multiplayer/hot-join classification, read through RTTI and
+  instruction-derived offsets.
+- **Multiplayer: v1 never fires,** with the log line "on_game_loaded not fired: multiplayer
+  (host|client, hotjoin=N)". That's safe in every MP case, including hot join and resync. The
+  log line also gives the data for a v2.
+- **Without the loader:** silent, expected no `error.log` line. The on_action exists but never
+  fires.
+- **Game update:** about 8 signatures and offsets:
+  - DB global, find, fire;
+  - scope ctor/dtor and set-country;
+  - synced RNG;
+  - session getter, server offset, hot-join offset.
+  These are ordinary engine functions with distinctive bodies and string anchors
+  (`onaction.cpp`, `ingameidler.cpp`). Any miss: the feature stays off, logged, and the guard
+  says `no`.
+- **Guard:** `hoi4_loader_feature_game_loaded`. Mods normally don't need it (an unfired
+  on_action is harmless); it's useful for UI ("migrations supported"). In MP it still says
+  `yes`, because it is served before the session type is known; README documents that the
+  on_action never fires in MP in v1.
+- **Docs:** `loader_script_docs.md` gets an "On actions" section.
+
+### Option 2: scripted effects `hoi4_loader_on_game_loaded_*`, run by name
+
+The loader enumerates the scripted-effect database, sorts the names and runs each with the
+player scope.
+- **Pro:** independent of the on_action database.
+- **Con:** needs scripted-effect enumeration and execution (more reverse engineering than
+  Option 1). It's not the requested syntax, and mods must invent unique names.
+- **Same MP problem and same SP-only gate.** Without the loader it is silent too.
+- **Verdict:** strictly worse than Option 1 now that on_action keys are known to be dynamic.
+  Keep it only as a fallback if a future build hardcodes on_actions.
+
+### Option 3 (later, multiplayer): lockstep via a network command
+
+Only the host decides, sends a custom `CCommand`, and every machine runs it in the same tick.
+A hot joiner receives the post-command state.
+- **Pro:** the only design that is MP-safe by construction.
+- **Con:** a custom command class plus registration in the engine's command factory (IDs,
+  serialization, replay on hot join). That's the largest and riskiest piece of reverse
+  engineering so far. **Not proposed for v1.**
+
+### Option 1b (possible v2, needs an MP test first)
+
+Also fire in multiplayer when the whole session loads together: every machine "loaded",
+`bIsHotjoin` = 0, before the first tick. It needs evidence that host and clients agree in
+every case: lobby load, new game, resync. The v1 log line in MP (the optional MP step of the D3
+plan) gathers it.
+
+### Also proposed
+
+Apply the same hot-join guard to `lifecycle`'s flag refresh: skip it on a hot-join client.
