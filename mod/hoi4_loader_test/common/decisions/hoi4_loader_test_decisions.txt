@@ -147,7 +147,7 @@ hoi4_loader_test_category = {
 	hoi4_srn_test_flag_protocol = {
 		icon = generic_research
 		cost = 0
-		visible = { has_global_flag = hoi4_loader_present }
+		visible = { hoi4_loader_present = yes }  # trigger, not the saved flag: never stale
 		complete_effect = {
 			clr_global_flag = hoi4_srn_42_HOI4_LOADER_TEST_REGION_NAME_A
 			clr_global_flag = hoi4_srn_42_HOI4_LOADER_TEST_REGION_NAME_B
@@ -160,7 +160,7 @@ hoi4_loader_test_category = {
 	hoi4_srn_test_show = {
 		icon = generic_research
 		cost = 0
-		visible = { has_global_flag = hoi4_loader_present }
+		# Always visible: the status is also useful without the loader.
 		complete_effect = {
 			country_event = { id = hoi4_loader_test.2 }
 		}

@@ -957,3 +957,34 @@ stand-in exe checks the guard files: `engine_probe` = yes or no by tier, `region
 5. **No loader:** the guard keeps guarded decisions hidden immediately after loading a save
    made with the loader, while the "UNGUARDED" decision shows up.
 6. **Docs file:** `loader_script_docs.md` content.
+
+### In-game results (2026-10-13, vanilla 1.19.3)
+
+- **Registration:** at lexer-ready (+2.6 s after load) `loader.log` showed 3 of 3 commands
+  registered and the docs file written. The first guard-file read came at +6.1 s and was served
+  `yes`, so the ordering holds with about 3.5 s of margin.
+- **Trigger and tooltips:**
+  - `strategic_region_has_custom_name` flips correctly with rename and reset, in `visible` and
+    in `available`;
+  - the negated requirement line, read while renamed, was "Strategic region Loader Test Sea A
+    (42) does NOT have a custom name";
+  - the effects work as before after the migration;
+  - after a save load, `region 42 -> HOI4_LOADER_TEST_REGION_NAME_A` came back through the
+    rescan.
+- **Without the loader** (`version.dll` removed, save made with the loader loaded):
+  - the region shows "Bay of Biscay";
+  - the guarded decision is hidden immediately;
+  - the UNGUARDED decision (plugin flag as guard) is visible, which confirms the stale-flag
+    hazard;
+  - the status event showed trigger no, guard no, plugin flag stale "active";
+  - `error.log` has only the expected `Unknown trigger-type` / `Unknown effect-type` lines
+    (`trigger.cpp:568/700`, `effect.cpp:358/445`).
+  - The `remotefile.cpp:238 Failed allocate data buffer` lines appear without the loader too, so
+    they are unrelated to it.
+- **Test-mod fix from this run:** the flag-protocol decision used the saved
+  `hoi4_loader_present` flag, which was stale without the loader. It now uses the
+  `hoi4_loader_present = yes` trigger. The status decision is always visible.
+- **Still open:**
+  - `error.log` with the loader (no `Unexpected token` lines for the test mod);
+  - the content of `loader_script_docs.md`;
+  - the dash and long-key save/load check.
