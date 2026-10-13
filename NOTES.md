@@ -627,3 +627,246 @@ Still open:
 
 Not covered: `modify_global_flag`, flags with `days =` expiring, and console flag commands do not
 trigger a rescan. The next game-entered or flag effect picks the change up.
+
+---
+
+# Part C: native effect and trigger API
+
+## C1 findings: triggers (vanilla 1.19.3 copy; structure verified on patched 1.19.3 and 1.19.2)
+
+Addresses are 1.19.3 for orientation. All anchors and RTTI classes below exist in all three
+builds with identical vtable slot counts.
+
+### Registration
+
+- **Registry.** Triggers have their own registry, a `std::map<int token, CTriggerEntryBase*>` at
+  `DAT_143330050` (created lazily by `FUN_14054cea0`), next to the effects' `DAT_143330000`. The
+  documentation generator (`FUN_140299ad0`) dumps both.
+- **Stub.** There are 595 trigger registration stubs, all the same shape as the effect stubs
+  except for a 0x18-byte entry:
+  `entry = new CTriggerEntry<T>{ vtable, help, byte flag }; FUN_140550970(registry, token, entry)`.
+  The byte at `+0x10` is 1 in 584 stubs and 0 in 11 (e.g. a conscription-ratio trigger); its
+  meaning is unknown and new entries use 1.
+- **Anchor.** `has_global_flag`'s stub (token 0x2bf1) references its unique help text
+  ("has global flag been set.Check flag val date set and days since set.\nExample: ..."), so it
+  can serve as the trigger-registry anchor exactly like `set_province_name` does for effects.
+- **Entry vtables.** `CTriggerEntry<T>` has slot 0 = destructor and slot 1 = factory, like
+  `CEffectEntry<T>`.
+- **Map layout.** Both registries are MSVC `std::map`. A node is
+  `{left, parent, right, color, isnil @+0x19, key int @+0x20, value @+0x28}`, read in
+  `FUN_1405415a0`. A lookup can therefore be done read-only by walking the tree, which is how a
+  "name already exists" check can work.
+- **Register function.** It overwrites an existing key; only debug builds assert. So refusing
+  duplicates is the loader's job.
+
+### `CTrigger` interface (23 slots; vtable `.?AVCTrigger@@`)
+
+| Slot | Role (evidence) |
+|---|---|
+| 0 | destructor |
+| 3 | checked evaluate: scope check, then slot 22 (`FUN_14054d0b0` prints ": Invalid Scope, supported: ... provided: ...") |
+| 4 | read single value (`trigger = value`). The base handles scope targets first (`THIS` 0x29c3, `ROOT` 0x2c94, `PREV` 0x2c95, `FROM` 0x298f, `event_target:`...) and records them as flags in `+0x24`. |
+| 5 | read clause. Base `FUN_14054fd00`: block loop, calls slot 6 per key and slot 7 to validate ("Non-assign trigger is not enclosed..."). Single-value triggers override it to call slot 4 ("Not a valid value"). |
+| 6 | read one block item `(this, parser, keyToken, ctx)`; the base rejects unknown keys |
+| 14 | **supported scopes mask** (pure virtual), e.g. 0 = any (`always`), 2 = State, 4 = Country |
+| 15 | scopes that a scope-target value may point at (pure virtual), e.g. `0x5fc` |
+| 18 | dependency hook per scope type (base no-op) |
+| 21 | **tooltip** `std::string* (this, std::string* out, ctx, bool negated)` (pure virtual). E.g. `always`: picks `TRIGGER_ALWAYS_TRUE/FALSE` by `negated`, localises, formats with the scope (`FUN_1410e48a0(out, ctx, text)`), appends `\n`. |
+| 22 | **evaluate** `bool (this, CEventScope*)` (pure virtual) |
+| 23 | numeric triggers only: `GetValue(scope)`, compared in slot 22 |
+
+The effect side, for comparison: slot 3 reads the clause (the base loops over a block and calls
+slot 4 per key; single-value effects call slot 6), slot 7 is the tooltip, slot 13 executes and
+**slot 19 is the supported-scopes mask** (e.g. `set_state_name` returns 2).
+
+### Templates to clone
+
+- **Single value:** `CAlwaysTrigger` (`always = yes`). The object is 0x60 bytes and its only own
+  field is a bool at `+0x58`. Slots: 4 reads a bool via `FUN_1424c5640(value, bool*)`, 22 returns
+  it, 21 is the tooltip. Integers are read the same way with `FUN_1424c5220(value, int*)`
+  (`num_of_factories`).
+- **Block with named parameters:** any trigger can be given the base slot 5 (block loop) and a
+  custom slot 6. The parser reads typed values through `FUN_1424c08d0(parser, int*)` (int),
+  `FUN_1424c0ab0(parser, std::string*, 0)` (string) and `FUN_1424c2060(parser)` (unexpected key);
+  `has_global_flag` (0xb0-byte object) is the vanilla example of a block trigger. Effects:
+  `CRenameProvinceEffect` (0x80 bytes, block, any scope) as already used in B3.
+- **Spare room in the object:** each template's private area starts at `+0x58`. A generic
+  command keeps a pointer to its own parsed-argument record there; every slot that touches that
+  area is replaced.
+
+### Comparison operators
+
+- **Value triggers with comparison** (`num_of_factories > 50`) share one base:
+  - slot 5 reads the operator token from the parser (`parser+0x78`: 0x1d3 = `>`, 0x1d4 = `<`; any
+    other token logs "Not a valid compare token in trigger" and falls back to equality), then
+    calls slot 4;
+  - slot 4 stores an int (`+0x60`) or a variable/script value (`+0x68`, flag `+0x70`);
+  - slot 22 compares `GetValue(scope)` (slot 23) with it using the operator at `+0x58`.
+
+  **A clone of `CNumOfFactoriesTrigger` with slots 14, 21 and 23 replaced gets `>`, `<`, `=` and
+  variable arguments for free.** Effort: small.
+- **Operators inside blocks** (`has_global_flag = { value < 5 }`): the block item handler would
+  read `parser+0x78` per key and store the operator per parameter. Feasible, but a separate step.
+
+### Scopes
+
+`CEventScope` (persistent; written by `FUN_14053bda0`) holds one current scope plus links. The
+scope type is a bitmask computed from which field is set (`FUN_140537d90`); names come from the
+table at `0x1427d4500`:
+
+| Mask | Scope | Field |
+|---|---|---|
+| 0x2 | State | `+0xa8` int state id |
+| 0x4 | Country | `+0x08` int tag index |
+| 0x8 | Character | `+0x50` 8-byte id |
+| 0x10 | Combatant | `+0x60` pointer (not saved) |
+| 0x20 | Ace | `+0x68` id |
+| 0x40 | StrategicRegion | `+0x48` `CStrategicRegion*` (confirmed by `add_region_efficiency`) |
+| 0x80 | Operation | `+0x58` id |
+| 0x100 | Unit | `+0x70` id |
+| 0x200 | Military Industrial Organisation | `+0x78` id |
+| 0x400 | Purchase Contract | `+0x80` id |
+| 0x800 | Raid Instance | `+0x88` id |
+| 0x1000 | Special Project | `+0x90` id |
+| 0x2000 | Faction | `+0x98` id |
+
+`ROOT`, `FROM` and `PREV` are `CEventScope*` at `+0x18`, `+0x20` and `+0x28` (pointing to the
+scope itself when unset). Effects (slot 13) and triggers (slot 22) receive the `CEventScope*`
+directly. The state, country and region fields are plain reads; the 8-byte ids need lookups.
+
+### Tooltips
+
+- **Triggers:** slot 21's text appears in requirement lists (decisions, focuses) and gets the
+  ✓/✗ marking from the engine. The `negated` argument tells the trigger it sits under `NOT`.
+- **Building text:** `Localize(key)` gives an engine-owned `std::string`. Arbitrary text
+  can be built in engine memory with the engine's `std::string::assign(ptr, len)`
+  (`FUN_14011d970`, used by `Localize` itself), so the engine can free it later. The B3 effects
+  avoid this by returning an empty string; triggers need real text.
+- **Effects:** slot 7, same signature without `negated`.
+
+### Why triggers are riskier than effects
+
+1. **Volume.** Triggers run for every AI country, every visible decision or focus tooltip and
+   every frame a tooltip is open. A slow `evaluate` costs game speed for everyone.
+2. **Concurrency.** AI evaluation runs on worker threads; the engine's
+   `_ThreadForbidCount`/gamestate asserts exist because of it. `evaluate` must be thread-safe
+   and lock-free, and must not allocate or log on the normal path.
+3. **Determinism.** AI choices follow trigger results, so a trigger that reads anything but game
+   state desyncs multiplayer.
+4. **Without the loader the semantics invert.** An unknown *effect* is dropped, so nothing
+   happens, which is safe. An unknown *trigger* is also dropped, so the condition disappears and
+   the surrounding `visible`/`available`/`limit` becomes **true**. Mods must guard native triggers
+   with the feature flag in the same block (e.g.
+   `has_global_flag = hoi4_loader_plugin_region_names`).
+5. **Tooltips allocate.** That is acceptable in UI code, but the tooltip callback must still be
+   bounded and must never touch game-state locks.
+
+## C2: proposed API (pending approval)
+
+### Shape
+
+```cpp
+// src/native_script.h (internal API for plugins)
+enum class ParamType { Int, Bool, Key };   // Key = identifier-like string (loc keys, names)
+enum class Form { Value, Block };          // name = <value>   |   name = { key = value ... }
+struct ParamSpec { const char* name; ParamType type; bool required; };
+
+struct Args {                               // typed, in schema order; filled at parse time
+    bool has(int i) const; int i(int i) const; bool b(int i) const; const char* key(int i) const;
+};
+struct Scope {                              // read-only view of the engine's CEventScope
+    uint32_t types() const;                 // ScopeMask bits that are set
+    int stateId() const; int countryTag() const; int strategicRegionId() const;
+    Scope root() const; Scope from() const; Scope prev() const;   // invalid view if unset
+};
+struct TextOut { void add(const char* utf8); };   // builds the engine-owned tooltip string
+
+struct NativeEffect {
+    const char* name; const char* help; Form form; std::vector<ParamSpec> params;
+    uint32_t scopes;                        // ScopeMask, 0 = any
+    void (*execute)(const Args&, const Scope&);
+    void (*tooltip)(const Args&, const Scope&, TextOut&);           // optional
+};
+struct NativeTrigger {
+    const char* name; const char* help; Form form; std::vector<ParamSpec> params;
+    uint32_t scopes;
+    bool (*evaluate)(const Args&, const Scope&);                     // hot path
+    void (*tooltip)(const Args&, const Scope&, bool negated, TextOut&);  // optional
+};
+bool register_native_effect(const NativeEffect&);    // call from the feature's init
+bool register_native_trigger(const NativeTrigger&);
+```
+
+### Behaviour
+
+- **When.** Plugins call `register_*` from their feature init (in `DllMain`). Calls are validated
+  immediately (schema: name and parameter names `[a-z0-9_]+`, no duplicate parameter, `Value`
+  form has exactly one parameter, callbacks present) and queued. The engine registration
+  happens in the `lifecycle` lexer-ready callback. Any call after that window is refused with a
+  log line. Commands therefore exist only while their feature is active.
+- **No clobbering.** At registration the name's token is looked up read-only in the engine
+  registry (tree walk) and in the loader's own list. If either has it, that command is refused
+  and logged. The plugin's other commands still register, and the feature is told so it can log
+  or deactivate.
+- **Engine binding** (one place, `native_script_engine.cpp`), per command:
+  - Clone the template vtable, keeping the RTTI locator at `[-1]`:
+    `CRenameProvinceEffect` for effects, `CAlwaysTrigger` for triggers.
+  - Replace these slots:
+    - **effects:** block 3 (base loop) / 4 (item), value 3 / 6, 7 (tooltip), 13 (execute),
+      19 (scopes);
+    - **triggers:** block 5 (base loop) / 6 (item), value 5 / 4, 14 (scopes), 15 (`0`),
+      21 (tooltip), 22 (evaluate).
+  - The factory calls the template's factory, then sets our vtable and an argument-record
+    pointer at `+0x58`.
+  - Entries are `{vtable, help}` for effects and `{vtable, help, 1}` for triggers.
+- **Parsing.**
+  - The item handler maps key token to parameter and reads it with the engine's readers (int,
+    bool, string), so type errors are reported by the engine with file and line.
+  - Unknown keys go to the base handler (engine error).
+  - A missing required parameter is logged once per command and marks the record invalid.
+  - Records are allocated at parse time and never freed: they are bounded by script size, and
+    the engine may copy or keep objects longer than expected.
+- **Callbacks.**
+  - Every callback runs under SEH; an exception logs once per command (atomic flag).
+  - Effects do nothing on an invalid record or an exception. Triggers return `false`, and the
+    engine applies `NOT` itself. So a failing trigger inside `NOT = { ... }` counts as true;
+    the README will say so.
+  - `evaluate` gets lock-free, allocation-free access to `Args` and `Scope` (plain reads).
+- **Tooltips.**
+  - `TextOut` assembles UTF-8 text and hands it to the engine through `std::string::assign`
+    (engine allocator); a trailing `\n` is added as vanilla does.
+  - Triggers without a tooltip get a generic line (`<name>: <param>=<value> ...`).
+  - Effects without a tooltip show nothing, as now.
+- **Generated docs.** After registration, `loader_script_docs.md` next to `loader.log` lists, per
+  command: kind, feature, status (registered or refused with reason), scopes (names from the
+  engine table), form, parameters (name, type, required) and help.
+- **Scope safety.**
+  - `Scope` only reads the three plain fields (state, country, region id via the template) and
+    the `ROOT`/`FROM`/`PREV` links, each guarded by the type mask.
+  - The other scope types (ids that need engine lookups) are exposed only as "type present" in
+    v1.
+
+### Deliberate v1 limits
+
+- **No comparison operators.** Proposed next step: a `NumericTrigger` kind on the
+  `CNumOfFactoriesTrigger` template (`name > 5`, `< 5`, `= 5`, variables) with
+  `int (*value)(const Args&, const Scope&)`.
+- **Scope targets as values are not offered** (`name = ROOT` style).
+- **The `id` alias goes away.** `set_strategic_region_name` currently also accepts `id = 42` (a
+  side effect of the `set_province_name` clone). After the move to the API only `region` is
+  accepted.
+
+### Testability (C5)
+
+The registration logic splits into an engine-free core and the engine binding:
+- **Engine-free core:** schema validation, the registration window state machine, conflict
+  checks against an abstract registry, and the documentation writer.
+- **Engine binding:** vtable cloning and the engine reader calls.
+
+The smoke tests link the core directly with a fake registry and check:
+- valid and invalid schemas;
+- duplicate and vanilla names refused;
+- calls before and after the window refused;
+- the exact docs file content.
+
+The engine binding is covered by the in-game test plan.
