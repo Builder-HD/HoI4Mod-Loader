@@ -596,15 +596,22 @@ Verified:
 Found and fixed: the UI displayed the raw key (see B1 #2 correction). The table now holds
 localised text.
 
+Re-test after the fix (2026-10-13, new game and loaded save):
+- **Real names** ("Loader Test Sea A") everywhere checked, with no raw key.
+- **Engine behaviour confirmed:** `engine name of region 42: "Bay of Biscay"`, so `GetNameKey`
+  returns display text.
+- **Map labels** in air and naval map modes update after a rename. The names-dirty flag is
+  enough; no label rebuild call is needed.
+- **Air wings and task forces** show the new name.
+- **Effect tooltip:** the native effect adds no visible line. The odd tooltip text that showed
+  up was the test decision's own description, which contained `{` (HOI4 localisation treats `{`
+  as markup and swallowed `{ r`). The descriptions were reworded.
+
 Still open:
-1. **Map labels:** whether the names-dirty flag also rebuilds strategic region map labels. If
-   not, the fallback is calling the label rebuild (`FUN_140b554b0`).
-2. **Empty tooltip:** whether an empty slot-7 result shows nothing or an empty line in decision
-   tooltips.
-3. **Other UI places:** region tooltip and panel, air missions and naval missions have not been
-   reported yet.
-4. **Flag name characters:** `-` in a key is accepted by the loader but untested in script
+1. **Flag name characters:** `-` in a key is accepted by the loader but untested in script
    flags; flags longer than vanilla's 68 characters are untested.
+2. **Unchecked UI places:** the region panel/tooltip and naval mission screens were not
+   explicitly reported. They use the same `GetNameKey` path as the places that work.
 
 Not covered: `modify_global_flag`, flags with `days =` expiring, and console flag commands do not
 trigger a rescan. The next game-entered or flag effect picks the change up.

@@ -101,6 +101,7 @@ If several `hoi4_srn` flags exist for one region, the most recently set one wins
 - Invalid region ids, malformed or missing keys are ignored with a line in `loader.log`; the
   region keeps its name.
 - The effects add no tooltip line; use `custom_effect_tooltip` if a decision needs one.
+  Avoid `{` in localisation text: HOI4 treats it as markup.
 
 **Where the name shows:** everything that asks the engine for the region's name. That includes
 map-mode and region tooltips, the region panel, air and naval mission screens, task forces,
