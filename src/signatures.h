@@ -70,6 +70,9 @@ SIG(kSigLocalize, "48 89 6C 24 18 48 89 74 24 20 57 41 56 41 57 48 83 EC 50 45 3
 // void ReadString(CParser* p, std::string* out, bool allowNewline): copies the current value's
 // text ("Unreadable String" error for multi-line text unless allowed). (0x1424c0ab0)
 SIG(kSigParserReadString, "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 40 41 0F B6 D8 48 8B FA 48 8B F1 0F 57 C0 0F 11 44 24 20 66 0F 6F 0D ?? ?? ?? ?? F3 0F 7F 4C 24 30 C6")
+// void Unexpected(CParser* p): reports "Unexpected token" (file/line in error.log) and skips the
+// value, as set_province_name does for unknown keys. (0x1424c2060)
+SIG(kSigParserUnexpected, "40 53 48 83 EC 40 48 8B D9 0F 57 C0 0F 11 44 24 20 B9 20 00 00 00 E8 ?? ?? ?? ?? 48 89 44 24 20 66 0F 6F 05 ?? ?? ?? ?? F3 0F 7F 44 24 30 0F 10")
 // std::string* Construct(std::string* raw, const char* p, size_t n): builds an engine-owned
 // string on raw storage (used by Localize for its result). (0x14011d970)
 SIG(kSigStringConstruct, "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 41 56 48 83 EC 20 48 BE FF FF FF FF FF FF FF 7F 49 8B D8 48 8B EA 4C 8B F1 4C 3B C6 0F 87")
