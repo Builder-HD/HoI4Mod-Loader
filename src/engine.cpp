@@ -13,6 +13,8 @@ namespace Engine {
 void* pLexerSync = nullptr;
 void* pGameEntered = nullptr;
 void* pRegionGetNameKey = nullptr;
+void* pFlagSet = nullptr;
+void* pFlagClear = nullptr;
 void** pRenameProvinceEntryVtable = nullptr;
 void** pRenameProvinceEffectVtable = nullptr;
 size_t renameProvinceEffectVtableSlots = 0;
@@ -38,6 +40,7 @@ using RegisterTrigger_t = void(__fastcall*)(void* registry, int token, void* ent
 using ReadString_t = void(__fastcall*)(void* parser, EngineString* out, bool allowNewline);
 using Unexpected_t = void(__fastcall*)(void* parser);
 using Construct_t = EngineString*(__fastcall*)(EngineString* raw, const char* p, size_t n);
+using CountryTagName_t = const EngineString*(__fastcall*)(const int* tag);
 
 IsLoaded_t g_isLoaded = nullptr;
 Intern_t g_intern = nullptr;
@@ -50,6 +53,7 @@ RegisterTrigger_t g_registerTrigger = nullptr;
 ReadString_t g_readString = nullptr;
 Unexpected_t g_unexpected = nullptr;
 Construct_t g_construct = nullptr;
+CountryTagName_t g_countryTagName = nullptr;
 void** g_ppTriggerRegistry = nullptr;
 
 void** g_ppGameState = nullptr;   // address of the engine's CGameState* global
@@ -65,9 +69,14 @@ const size_t kFlagEntryToken = 0x08;     // kSigFlagClear: lea r10,[rcx+8]; add 
 const size_t kFlagsData = 0x08, kFlagsCount = 0x14;  // kSigFlagClear: movsxd rax,[rcx+0x14]
 const size_t kRegionTemplate = 0x30;     // kSigRegionGetNameKey: mov rax,[rcx+0x30]
 const size_t kMapNamesDirty = 0x81;      // kSigMapManagerDirty
-// Not part of a signature: CScriptFlag set date (NOTES: save token 0x284a) and the template id
-// (save token 0xb). RegionTemplateId() is validated against the region array before use.
-const size_t kFlagEntryDate = 0x20;
+// Not part of a signature: CScriptFlag fields and the template id (save token 0xb).
+// RegionTemplateId() is validated against the region array before use. A flag entry is
+// { vtable, token @+8, CGameDate @+0x10 (set date int @+0x18; its second vtable @+0x20 is the
+// save-reader interface for token 0x284a), short value @+0x28, short days @+0x2a }: get-or-create
+// stores the current date at +0x18 on every set; flag_manager.daily counts days > 0 down and
+// removes the flag at 0 (NOTES.md Part D, region_names follow-up).
+const size_t kFlagEntryDate = 0x18;
+const size_t kFlagEntryValue = 0x28, kFlagEntryDays = 0x2a;
 const size_t kTemplateId = 0xa0;
 
 template <typename T>
@@ -351,6 +360,9 @@ bool Resolve() {
     }
     g_flagSet = (FlagSet_t)SigFindUnique("flag_set", kSigFlagSet);
     g_flagClear = (FlagClear_t)SigFindUnique("flag_clear", kSigFlagClear);
+    pFlagSet = (void*)g_flagSet;
+    pFlagClear = (void*)g_flagClear;
+    g_countryTagName = (CountryTagName_t)SigFindUnique("country_tag_name", kSigCountryTagName);
 
     pRegionGetNameKey = SigFindUnique("region_get_name_key", kSigRegionGetNameKey);
     if ((p = SigFindUnique("region_array", kSigRegionArray)) != nullptr) {
@@ -412,9 +424,19 @@ bool ForEachGlobalFlag(void (*fn)(const FlagEntry&, void*), void* ctx) {
     int count = Read<int>(flags, kFlagsCount);
     for (int i = 0; i < count && data; ++i) {
         uint8_t* e = data + (size_t)i * kFlagEntrySize;
-        fn(FlagEntry{Read<int>(e, kFlagEntryToken), Read<int>(e, kFlagEntryDate)}, ctx);
+        fn(FlagEntry{Read<int>(e, kFlagEntryToken), Read<int>(e, kFlagEntryDate), Read<short>(e, kFlagEntryValue),
+                     Read<short>(e, kFlagEntryDays)},
+           ctx);
     }
     return true;
+}
+
+void* GlobalFlags() { return HaveFlags() ? Flags() : nullptr; }
+
+std::string CountryTagName(int tag) {
+    if (!g_countryTagName || tag <= 0 || !GameState()) return std::to_string(tag);
+    const EngineString* s = g_countryTagName(&tag);
+    return s && s->size > 0 && s->size < 16 ? std::string(s->c_str(), (size_t)s->size) : std::to_string(tag);
 }
 
 bool SetGlobalFlag(int token) {

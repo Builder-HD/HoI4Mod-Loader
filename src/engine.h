@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <string>
+
 // MSVC std::string as laid out inside hoi4.exe (release STL): 16-byte inline buffer or heap
 // pointer, then size and capacity. The loader only reads engine strings and only hands out
 // strings it owns and never frees while the game runs.
@@ -28,6 +30,8 @@ bool Resolve();
 extern void* pLexerSync;        // void ()
 extern void* pGameEntered;      // void (CInGameIdler*)
 extern void* pRegionGetNameKey; // const EngineString* (CStrategicRegion*)
+extern void* pFlagSet;          // void (CScriptFlags*, int token, short value, short days)
+extern void* pFlagClear;        // void (CScriptFlags*, int token)
 
 // --- Groups ----------------------------------------------------------------------------------
 bool HaveLifecycle();  // LexerSync + GameEntered + IsLoadedFromSave
@@ -48,10 +52,13 @@ const char* TokenName(int token);       // token -> string ("" for unknown)
 // --- Global flags (main/game thread only) ----------------------------------------------------
 struct FlagEntry {
     int token;
-    int setDate;  // CDate as stored by the engine (larger = later)
+    int setDate;  // date of the last set (larger = later)
+    short value;
+    short days;   // > 0: the engine removes the flag when its daily countdown reaches 0
 };
 // Calls fn for every global flag. Returns false if flags are unavailable.
 bool ForEachGlobalFlag(void (*fn)(const FlagEntry&, void*), void* ctx);
+void* GlobalFlags();              // the global CScriptFlags container (null without a game)
 bool SetGlobalFlag(int token);    // value 1, no expiry
 bool ClearGlobalFlag(int token);
 
@@ -123,6 +130,8 @@ SessionInfo QuerySession(void* idler);
 
 // Local player's country tag (> 0), or 0 when observing. Main thread only.
 int PlayerCountryTag();
+// "FRA" etc.; the number as text if the name is unavailable.
+std::string CountryTagName(int tag);
 // True if some script defined an on_action of this name (on_action keys are dynamic).
 bool OnActionDefined(const char* name);
 // Fires the on_action like the engine fires on_startup: synced-RNG seed, events, random events

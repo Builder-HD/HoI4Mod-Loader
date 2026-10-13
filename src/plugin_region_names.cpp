@@ -35,9 +35,6 @@ const size_t kPrefixLen = sizeof(kPrefix) - 1;
 const size_t kMaxKeyLen = 100;   // flag names up to ~114 chars; see NOTES.md (flag names)
 const int kMaxRegions = 4096;
 
-// CEffect Execute slot (NOTES.md B1 #3), verified at init against the CEffect base vtable.
-const size_t kSlotExecute = 13;
-
 // Guards everything except the display table: rescans, caches, flag edits. Recursive because the
 // native effects edit flags and then rescan. Effects normally run on one game thread; this is
 // insurance, not a hot path.
@@ -130,6 +127,10 @@ struct Candidate {
 
 bool SelfCheck();
 
+// Visibility for the filtered change detection, logged and reset once per game entered.
+std::atomic<long> g_ignoredFlagChanges{0};  // global flag set/clear without the hoi4_srn_ prefix
+long g_quietRescans = 0;                    // rescans that changed nothing (game thread)
+
 void Rescan(const char* why) {
     std::lock_guard<std::recursive_mutex> guard(g_lock);
     if (!SelfCheck()) return;
@@ -171,8 +172,12 @@ void Rescan(const char* why) {
         Log("region_names: region %d -> %s", id, want.empty() ? "original name" : want.c_str());
         ++changes;
     }
-    if (changes) Engine::MarkMapNamesDirty();
-    Log("region_names: rescan (%s): %d change(s)", why, changes);
+    if (changes) {
+        Engine::MarkMapNamesDirty();
+        Log("region_names: rescan (%s): %d change(s)", why, changes);
+    } else {
+        ++g_quietRescans;
+    }
 }
 
 // --- Self-check: region ids from the template must match the region array -------------------
@@ -212,18 +217,55 @@ bool SelfCheck() {
     return true;
 }
 
-// --- Change detection: set_global_flag / clr_global_flag ------------------------------------
-using Execute_t = void(__fastcall*)(void*, void*, void*, void*);
-Execute_t g_origSetFlagExec = nullptr, g_origClearFlagExec = nullptr;
+// --- Change detection: the engine's flag set / clear functions -------------------------------
+// Every set_global_flag / clr_global_flag (and country/state flag) ends in these two with the
+// resolved token. Only global flags named hoi4_srn_* trigger a rescan: a prefix compare on the
+// engine's own token string, no allocation. Large mods set flags constantly.
+using FlagSet_t = void(__fastcall*)(void* flags, int token, short value, short days);
+using FlagClear_t = void(__fastcall*)(void* flags, int token);
+FlagSet_t g_origFlagSet = nullptr;
+FlagClear_t g_origFlagClear = nullptr;
+thread_local int g_ownEdit = 0;  // DoSet/DoReset edit flags themselves and rescan once afterwards
 
-void __fastcall SetFlagExecDetour(void* a, void* b, void* c, void* d) {
-    g_origSetFlagExec(a, b, c, d);
-    if (g_checkedFor > 0) Rescan("set_global_flag");
+void OnFlagChanged(void* flags, int token, const char* why) {
+    if (g_ownEdit || g_checkedFor <= 0 || flags != Engine::GlobalFlags()) return;
+    if (strncmp(Engine::TokenName(token), kPrefix, kPrefixLen) != 0) {
+        g_ignoredFlagChanges.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    Rescan(why);
 }
 
-void __fastcall ClearFlagExecDetour(void* a, void* b, void* c, void* d) {
-    g_origClearFlagExec(a, b, c, d);
-    if (g_checkedFor > 0) Rescan("clr_global_flag");
+void __fastcall FlagSetDetour(void* flags, int token, short value, short days) {
+    g_origFlagSet(flags, token, value, days);
+    OnFlagChanged(flags, token, "hoi4_srn flag set");
+}
+
+void __fastcall FlagClearDetour(void* flags, int token) {
+    g_origFlagClear(flags, token);
+    OnFlagChanged(flags, token, "hoi4_srn flag cleared");
+}
+
+// Diagnostic, once per game entered: every hoi4_srn flag with the fields that decide its life.
+// days > 0 means the engine deletes the flag when its daily countdown reaches 0.
+void LogRegionFlags() {
+    int total = 0, ours = 0;
+    struct Ctx {
+        int* total;
+        int* ours;
+    } ctx{&total, &ours};
+    Engine::ForEachGlobalFlag(
+        [](const Engine::FlagEntry& f, void* c) {
+            auto* x = (Ctx*)c;
+            ++*x->total;
+            const char* name = Engine::TokenName(f.token);
+            if (strncmp(name, kPrefix, kPrefixLen) != 0) return;
+            ++*x->ours;
+            Log("region_names: flag %s: value %d, days %d%s, set date %d", name, f.value, f.days,
+                f.days > 0 ? " (EXPIRES: the engine counts it down daily)" : "", f.setDate);
+        },
+        &ctx);
+    Log("region_names: %d hoi4_srn flag(s) among %d global flags", ours, total);
 }
 
 // --- Native commands (registered through the native script API) ----------------------------
@@ -265,9 +307,11 @@ void DoSet(int id, const char* key) {
         Log("set_strategic_region_name: ERROR localisation key '%s' is missing; region %d keeps its name", key, id);
         return;
     }
+    ++g_ownEdit;
     int cleared = ClearRegionFlags(id);
     int token = Engine::Intern(RegionFlagName(id, key).c_str());
     Engine::SetGlobalFlag(token);
+    --g_ownEdit;
     Log("set_strategic_region_name: region %d -> %s (%d old flag(s) cleared)", id, key, cleared);
     Rescan("set_strategic_region_name");
 }
@@ -278,7 +322,9 @@ void DoReset(int id) {
         Log("reset_strategic_region_name: ERROR region %d does not exist (valid 1..%d)", id, Engine::RegionCount() - 1);
         return;
     }
+    ++g_ownEdit;
     int cleared = ClearRegionFlags(id);
+    --g_ownEdit;
     Log("reset_strategic_region_name: region %d -> original name (%d flag(s) cleared)", id, cleared);
     Rescan("reset_strategic_region_name");
 }
@@ -310,24 +356,17 @@ void TooltipHasCustomName(const Args& a, const Scope&, bool negated, TooltipText
 void OnEntered(bool loaded) {
     {
         std::lock_guard<std::recursive_mutex> guard(g_lock);
+        long ignored = g_ignoredFlagChanges.exchange(0);
+        Log("region_names: since the last game entry: %ld global flag change(s) ignored (not hoi4_srn_), "
+            "%ld rescan(s) without change", ignored, g_quietRescans);
+        g_quietRescans = 0;
         if (g_checkedFor != -2) {
             g_checkedFor = -1;  // new game state: check again
             g_enabled.store(false);
         }
     }
     Rescan(loaded ? "save loaded" : "new game");
-}
-
-// The slots we rely on must be overridden (differ from CEffect's own implementation).
-bool SlotsLookRight(void** vt, size_t slots, std::initializer_list<size_t> want, void** base, size_t baseSlots,
-                    const char* what) {
-    for (size_t s : want) {
-        if (s >= slots || s >= baseSlots || vt[s] == base[s]) {
-            Log("region_names: %s slot %zu is not an override; engine ABI changed", what, s);
-            return false;
-        }
-    }
-    return true;
+    if (g_checkedFor > 0) LogRegionFlags();
 }
 
 }  // namespace
@@ -338,16 +377,9 @@ bool RegionNamesInit() {
             Engine::HaveTokens(), Engine::HaveFlags(), Engine::HaveRegions(), Engine::HaveLocalize());
         return false;
     }
-    size_t baseSlots = 0, setSlots = 0, clrSlots = 0;
-    void** base = Engine::FindVtableByRtti(".?AVCEffect@@", &baseSlots);
-    void** setVt = Engine::FindVtableByRtti(".?AVCSetGlobalFlagEffect@@", &setSlots);
-    void** clrVt = Engine::FindVtableByRtti(".?AVCClearGlobalFlagEffect@@", &clrSlots);
-    if (!base || !setVt || !clrVt || !SlotsLookRight(setVt, setSlots, {kSlotExecute}, base, baseSlots, "set_global_flag") ||
-        !SlotsLookRight(clrVt, clrSlots, {kSlotExecute}, base, baseSlots, "clr_global_flag"))
-        return false;
     if (!HookQueue(Engine::pRegionGetNameKey, (void*)&GetNameKeyDetour, (void**)&g_origGetNameKey, "region_get_name_key") ||
-        !HookQueue(setVt[kSlotExecute], (void*)&SetFlagExecDetour, (void**)&g_origSetFlagExec, "set_global_flag_execute") ||
-        !HookQueue(clrVt[kSlotExecute], (void*)&ClearFlagExecDetour, (void**)&g_origClearFlagExec, "clr_global_flag_execute"))
+        !HookQueue(Engine::pFlagSet, (void*)&FlagSetDetour, (void**)&g_origFlagSet, "flag_set") ||
+        !HookQueue(Engine::pFlagClear, (void*)&FlagClearDetour, (void**)&g_origFlagClear, "flag_clear"))
         return false;
     OnGameEntered(&OnEntered);
 

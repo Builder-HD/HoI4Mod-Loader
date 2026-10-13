@@ -558,8 +558,9 @@ native effects only manage them.
 - **Flags:**
   - `FUN_140cbfea0(flags, token, value, days)` sets; `FUN_140cbfe60(flags, token)` clears (both
     called from the effects' Execute).
-  - A flag entry (`CScriptFlag`, 0x30 bytes) holds the token at `+8`, the set date at `+0x20`
-    (save token `0x284a`), the value at `+0x28` and the days at `+0x2a`.
+  - A flag entry (`CScriptFlag`, 0x30 bytes) holds the token at `+8`, the set date at `+0x18`
+    (corrected in the D3 follow-up; `+0x20` is the date's secondary vtable, which the save
+    reader calls for token `0x284a`), the value at `+0x28` and the days at `+0x2a`.
 - **Localisation:** `FUN_142245e60(std::string* out, const char* key, 0, 0)` is `Localize()`
   (`localize.cpp`). `FUN_14011e010` is only a std::string copy; widgets localise keys themselves.
 - **Effect registry:** each registration stub is
@@ -1254,3 +1255,67 @@ logged with its RTTI name if readable, and counts as "not single player".
 - **The weekly fallback** migrates alone (`[features] game_loaded = 0`).
 - **Optional multiplayer run:** the logged session classes on host and client, and that
   nothing fires.
+
+### In-game results (2026-10-13, vanilla 1.19.3, single player)
+
+- **Steps 1-6 pass:**
+  - on a loaded save it fires right after loading ("fired 1"), and a second load shows 2;
+  - it never fires on a new game (`on_game_loaded: new game, not fired`);
+  - ironman behaves the same.
+- **Session and order:** the session logs as `CDummyServer, single player`. The `loader.log`
+  order is right: region rescan, plugin flag refresh, then `on_game_loaded fired`.
+- **Step 7 (migration through `on_game_loaded`):** works as expected.
+- **Still open:**
+  - **step 8:** the fallback on its own, with the kill switch;
+  - **step 9:** without the loader (no `error.log` line expected for `on_game_loaded`);
+  - **step 10:** multiplayer, including hot join: logged session classes, nothing fired, no
+    OOS.
+
+### Follow-up fixes after the D3 test
+
+- **region_names change detection:** it used to rescan (and log) on every `set_global_flag` /
+  `clr_global_flag` effect, five times per week from `hoi4_loader_init` alone.
+  - It now hooks the engine's flag set/clear functions (`kSigFlagSet` / `kSigFlagClear`,
+    already resolved) instead of the two effect `Execute` slots, so the resolved token is
+    available.
+  - It rescans only for the global flag container and a token whose engine string starts with
+    `hoi4_srn_`: a prefix `strncmp`, no allocation.
+  - Rescans are logged only when they change something.
+  - Once per game entered it logs "since the last game entry: N global flag change(s) ignored
+    (not hoi4_srn_), M rescan(s) without change".
+  - The native effects edit flags under a thread-local "own edit" marker and rescan once
+    afterwards.
+  - Coverage: everything that reaches the two engine functions. That's the same effects as
+    before plus anything else that calls them.
+- **on_game_loaded log line:** it names the tag (`ROOT = FRA`), via `kSigCountryTagName`, the
+  engine's tag → string function used by the telemetry `nation` field. It matches once on
+  vanilla 1.19.3, patched 1.19.3 and 1.19.2.
+
+### Bug found in the D3 log: the flag's set date was read from the wrong offset
+
+- **Where the date really is:** `CScriptFlag` = `{ vtable, token @+8, CGameDate @+0x10 (date int
+  @+0x18; secondary vtable @+0x20, which the save reader calls for token 0x284a), short value
+  @+0x28, short days @+0x2a }`.
+  - Get-or-create (`FUN_140cbf6d0`) writes the current date to `+0x18` on every set.
+  - `CGameDate`'s secondary `Read` (this = `+0x20`) stores at `this-8` = `+0x18`.
+- **The bug:** the loader read `+0x20`, the low half of a vtable pointer, identical for every
+  flag. So "most recently set flag wins" was really "alphabetically larger key wins". It's
+  fixed (`kFlagEntryDate = 0x18`). It only matters when a region has several `hoi4_srn` flags.
+
+### Open: a region name disappears about a week after loading
+
+- **What the log shows:** in the D3 log, region 42 showed name A after two loads of the same
+  save (22:18:59, 22:20:22). Both times it went back to its original name at the first weekly
+  flag burst (22:19:59, 22:20:59), with no reset and no `clr_global_flag` of the flag.
+- **The only engine removal path found besides clear effects: `flag_manager.daily`**
+  (`FUN_140cbfa90`). Every day it decrements `days` for each flag with `days > 0` and removes
+  the flag when the count reaches 0.
+  - The loader always sets `days = 0`.
+  - The save writer writes `days` only when > 0; the save reader reads it into `+0x2a`.
+- **Unconfirmed explanation:** a flag loaded from the save ends up with a small positive
+  `days` (e.g. load copies a flag object whose `days` was not initialised).
+- **Diagnostics added:** on every game entry `loader.log` lists each `hoi4_srn` flag with its
+  value, `days` (marked EXPIRES if > 0) and set date.
+- **Consequence of the new change detection:** an engine-side removal is no longer noticed at
+  the next unrelated flag change, only at the next `hoi4_srn` change or game entry. The display
+  keeps the name until then. The re-check below decides the real fix.

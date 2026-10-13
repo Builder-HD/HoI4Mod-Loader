@@ -47,7 +47,7 @@ void FireGameLoaded(bool loadedFromSave) {
         return;
     }
     if (tag > 0)
-        Log("on_game_loaded fired: ROOT = the player's country (tag id %d)", tag);
+        Log("on_game_loaded fired: ROOT = %s (the player's country)", Engine::CountryTagName(tag).c_str());
     else
         Log("on_game_loaded fired once without scope (observer: no human-controlled country)");
 }
