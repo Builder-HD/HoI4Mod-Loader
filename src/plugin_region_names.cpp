@@ -6,9 +6,10 @@
 // The most recently set flag for a region wins; no flag means the original name.
 //
 // Script can use the flags directly (works without the loader, no parse errors), or the native
-// effects this plugin registers, which only manage those flags:
+// commands this plugin registers through the native script API, which only manage those flags:
 //     set_strategic_region_name = { region = 42 name = MY_LOC_KEY }
 //     reset_strategic_region_name = { region = 42 }
+//     strategic_region_has_custom_name = { region = 42 }   (trigger)
 //
 // Display: CStrategicRegion::GetNameKey() is hooked and answers from a lock-free table. The
 // engine's own name override (region+0x38, saved natively) is never written, so saves stay
@@ -25,6 +26,7 @@
 #include "engine.h"
 #include "lifecycle.h"
 #include "loader.h"
+#include "native_script.h"
 
 namespace {
 
@@ -33,11 +35,8 @@ const size_t kPrefixLen = sizeof(kPrefix) - 1;
 const size_t kMaxKeyLen = 100;   // flag names up to ~114 chars; see NOTES.md (flag names)
 const int kMaxRegions = 4096;
 
-// CEffect virtual slots (NOTES.md B1 #3). Verified at init against the CEffect base vtable:
-// each must be overridden by the classes that use it.
-const size_t kSlotReadItem = 4, kSlotTooltip = 7, kSlotExecute = 13;
-// CRenameProvinceEffect fields filled by its block reader: `id` (int), `name` (std::string).
-const size_t kFieldId = 0x58, kFieldName = 0x60;
+// CEffect Execute slot (NOTES.md B1 #3), verified at init against the CEffect base vtable.
+const size_t kSlotExecute = 13;
 
 // Guards everything except the display table: rescans, caches, flag edits. Recursive because the
 // native effects edit flags and then rescan. Effects normally run on one game thread; this is
@@ -227,27 +226,7 @@ void __fastcall ClearFlagExecDetour(void* a, void* b, void* c, void* d) {
     if (g_checkedFor > 0) Rescan("clr_global_flag");
 }
 
-// --- Native effects -------------------------------------------------------------------------
-int g_tokRegion = 0, g_tokId = 0;
-void** g_setVtable = nullptr;    // clone of CRenameProvinceEffect's vtable, [-1] = its RTTI locator
-void** g_resetVtable = nullptr;
-
-using ReadItem_t = void(__fastcall*)(void* self, void* parser, int token);
-using Tooltip_t = EngineString*(__fastcall*)(void* self, EngineString* out, void* ctx);
-using Create_t = void*(__fastcall*)(void* entry);
-
-void __fastcall ReadItem(void* self, void* parser, int token) {
-    // `region = N` is read exactly like set_province_name's `id = N`.
-    auto orig = (ReadItem_t)Engine::pRenameProvinceEffectVtable[kSlotReadItem];
-    orig(self, parser, token == g_tokRegion ? g_tokId : token);
-}
-
-EngineString* __fastcall Tooltip(void*, EngineString* out, void*) {
-    // No tooltip line (see README): empty std::string.
-    memset(out, 0, sizeof *out);
-    out->cap = 15;
-    return out;
-}
+// --- Native commands (registered through the native script API) ----------------------------
 
 std::string RegionFlagName(int id, const std::string& key) { return kPrefix + std::to_string(id) + "_" + key; }
 
@@ -304,77 +283,29 @@ void DoReset(int id) {
     Rescan("reset_strategic_region_name");
 }
 
-// SEH wrappers: the effect object layout is not signature-verified, so a bad read must not
-// take the game down. No C++ objects with destructors in these functions.
-void SafeSet(void* self) {
-    __try {
-        int id = *(int*)((uint8_t*)self + kFieldId);
-        const EngineString* key = (const EngineString*)((uint8_t*)self + kFieldName);
-        if (key->size > 4096) {
-            Log("set_strategic_region_name: ERROR unreadable name; nothing changed");
-            return;
-        }
-        DoSet(id, key->c_str());
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        Log("set_strategic_region_name: ERROR exception 0x%08lX; nothing changed", GetExceptionCode());
-    }
+void ExecSet(const Args& a, const Scope&) { DoSet(a.i(0), a.key(1)); }
+void ExecReset(const Args& a, const Scope&) { DoReset(a.i(0)); }
+
+// Hot path (AI and UI, possibly several threads): atomics only, no locks, no allocation.
+bool EvalHasCustomName(const Args& a, const Scope&) {
+    if (!g_enabled.load(std::memory_order_acquire)) return false;
+    int id = a.i(0);
+    return id > 0 && id < kMaxRegions && g_names[id].load(std::memory_order_acquire) != nullptr;
 }
 
-void SafeReset(void* self) {
-    __try {
-        DoReset(*(int*)((uint8_t*)self + kFieldId));
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        Log("reset_strategic_region_name: ERROR exception 0x%08lX; nothing changed", GetExceptionCode());
-    }
+// Requirement line, e.g. "Strategic region Loader Test Sea A (42) has a custom name".
+void TooltipHasCustomName(const Args& a, const Scope&, bool negated, TooltipText& out) {
+    int id = a.i(0);
+    void* region = Engine::RegionById(id);
+    const EngineString* name = region ? GetNameKeyDetour(region) : nullptr;  // what the UI shows now
+    out.add("Strategic region ");
+    if (name)
+        out.add(name->c_str()).add(" (").add(id).add(")");
+    else
+        out.add(id);
+    out.add(negated ? " does NOT have a custom name" : " has a custom name");
 }
 
-void __fastcall SetExecute(void* self, void*, void*, void*) { SafeSet(self); }
-void __fastcall ResetExecute(void* self, void*, void*, void*) { SafeReset(self); }
-
-void** CloneVtable(void* readItem, void* tooltip, void* execute) {
-    size_t n = Engine::renameProvinceEffectVtableSlots;
-    auto** block = new void*[n + 1];
-    block[0] = Engine::pRenameProvinceEffectVtable[-1];  // RTTI complete object locator
-    memcpy(block + 1, Engine::pRenameProvinceEffectVtable, n * sizeof(void*));
-    void** vt = block + 1;
-    vt[kSlotReadItem] = readItem;
-    vt[kSlotTooltip] = tooltip;
-    vt[kSlotExecute] = execute;
-    return vt;
-}
-
-void* __fastcall EntryDestroy(void* self, unsigned) { return self; }  // static objects
-
-void* CreateWith(void* entry, void** vtable) {
-    auto create = (Create_t)Engine::pRenameProvinceEntryVtable[1];
-    void* obj = create(entry);
-    if (obj) *(void***)obj = vtable;
-    return obj;
-}
-void* __fastcall EntryCreateSet(void* entry) { return CreateWith(entry, g_setVtable); }
-void* __fastcall EntryCreateReset(void* entry) { return CreateWith(entry, g_resetVtable); }
-
-void* g_setEntryVtable[2] = {(void*)&EntryDestroy, (void*)&EntryCreateSet};
-void* g_resetEntryVtable[2] = {(void*)&EntryDestroy, (void*)&EntryCreateReset};
-Engine::EffectEntry g_setEntry = {g_setEntryVtable,
-                                  "set_strategic_region_name = { region = <strategic region id> name = <localisation key> }"
-                                  " - Rename a strategic region (hoi4_loader)"};
-Engine::EffectEntry g_resetEntry = {g_resetEntryVtable,
-                                    "reset_strategic_region_name = { region = <strategic region id> }"
-                                    " - Restore a strategic region's original name (hoi4_loader)"};
-bool g_nativeEffects = false;
-
-void RegisterNativeEffects() {
-    if (!g_nativeEffects) return;
-    g_tokRegion = Engine::Intern("region");
-    g_tokId = Engine::Intern("id");
-    int tokSet = Engine::Intern("set_strategic_region_name");
-    int tokReset = Engine::Intern("reset_strategic_region_name");
-    bool ok = g_tokRegion && g_tokId && tokSet && tokReset && Engine::RegisterEffect(tokSet, &g_setEntry) &&
-              Engine::RegisterEffect(tokReset, &g_resetEntry);
-    Log("region_names: native effects %s (tokens region=0x%x id=0x%x set=0x%x reset=0x%x)",
-        ok ? "registered" : "NOT registered", g_tokRegion, g_tokId, tokSet, tokReset);
-}
 
 void OnEntered(bool loaded) {
     {
@@ -414,23 +345,32 @@ bool RegionNamesInit() {
     if (!base || !setVt || !clrVt || !SlotsLookRight(setVt, setSlots, {kSlotExecute}, base, baseSlots, "set_global_flag") ||
         !SlotsLookRight(clrVt, clrSlots, {kSlotExecute}, base, baseSlots, "clr_global_flag"))
         return false;
-
-    // Native effects are optional: without them the flag protocol still works.
-    g_nativeEffects = Engine::HaveRegistry() &&
-                      SlotsLookRight(Engine::pRenameProvinceEffectVtable, Engine::renameProvinceEffectVtableSlots,
-                                     {kSlotReadItem, kSlotTooltip, kSlotExecute}, base, baseSlots, "set_province_name");
-    if (g_nativeEffects) {
-        g_setVtable = CloneVtable((void*)&ReadItem, (void*)&Tooltip, (void*)&SetExecute);
-        g_resetVtable = CloneVtable((void*)&ReadItem, (void*)&Tooltip, (void*)&ResetExecute);
-    } else {
-        Log("region_names: native effects unavailable; use the hoi4_srn_<id>_<key> flags");
-    }
-
     if (!HookQueue(Engine::pRegionGetNameKey, (void*)&GetNameKeyDetour, (void**)&g_origGetNameKey, "region_get_name_key") ||
         !HookQueue(setVt[kSlotExecute], (void*)&SetFlagExecDetour, (void**)&g_origSetFlagExec, "set_global_flag_execute") ||
         !HookQueue(clrVt[kSlotExecute], (void*)&ClearFlagExecDetour, (void**)&g_origClearFlagExec, "clr_global_flag_execute"))
         return false;
-    OnLexerReady(&RegisterNativeEffects);
     OnGameEntered(&OnEntered);
+
+    // Native commands. If one is refused the feature stays active (the flag protocol works) and
+    // the guard trigger hoi4_loader_feature_region_names says no.
+    const char* kFeature = "region_names";
+    register_native_effect({"set_strategic_region_name",
+                            "Rename a strategic region to a localisation key (hoi4_loader). Stored as global flag "
+                            "hoi4_srn_<region>_<key>: survives save and load; without the loader every region shows "
+                            "its original name. Invalid regions or missing keys change nothing and are logged.",
+                            Form::Block,
+                            {{"region", ParamType::Int, true}, {"name", ParamType::Key, true}},
+                            ScopeMask::Any, &ExecSet, nullptr},
+                           kFeature);
+    register_native_effect({"reset_strategic_region_name",
+                            "Restore a strategic region's original name (hoi4_loader): clears its hoi4_srn flags.",
+                            Form::Block, {{"region", ParamType::Int, true}}, ScopeMask::Any, &ExecReset, nullptr},
+                           kFeature);
+    register_native_trigger({"strategic_region_has_custom_name",
+                             "True if the strategic region currently shows a name provided by hoi4_loader. Guard it "
+                             "with hoi4_loader_feature_region_names = yes in the same AND block.",
+                             Form::Block, {{"region", ParamType::Int, true}}, ScopeMask::Any, &EvalHasCustomName,
+                             &TooltipHasCustomName},
+                            kFeature);
     return true;
 }
