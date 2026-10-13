@@ -90,5 +90,38 @@ ANCHOR(kAnchorRenameProvinceHelp, "set_province_name = { id = <province id> name
 // mov rbx,[registry] at A-0x2c.
 ANCHOR(kAnchorGlobalFlagTriggerHelp, "has global flag been set.Check flag val date set and days since set.\nExample: has_global_flag = test_flag\nhas_global_flag = { \n\tflag = <name> (mandatory)\n\tvalue < <int> (optional)\n\tdate > <date> (optional)\n\tdays > <int> (optional)\n}")
 
+// --- On actions / session (game_loaded; NOTES.md Part D) ------------------------------------
+// In the game-entered function, new games only: build a scope for the local player, use it,
+// destroy it:
+//   xor edx,edx; lea rcx,[scope]; call CEventScope::CEventScope(scope, seed)   ; E8 at +0x06
+//   mov edx,<observer tag offset>; mov eax,<player tag offset>                ; imm32 at +0x0d / +0x12
+//   cmp dword [rsi+<player tag offset>],0; cmovg edx,eax; add rdx,rsi; mov r8b,1
+//   lea rcx,[scope]; call SetCountry(scope, const int* tag, bool)              ; E8 at +0x2a
+//   call ...; lea rdx,[scope]; mov rcx,rax; call ...; nop
+//   lea rcx,[scope]; call CEventScope::~CEventScope(scope)                     ; E8 at +0x45
+// (0x140dd9cf2)
+SIG(kSigPlayerScope, "33 D2 48 8D 4D ?? E8 ?? ?? ?? ?? 90 BA ?? ?? 00 00 B8 ?? ?? 00 00 83 BE ?? ?? 00 00 00 0F 4F D0 48 03 D6 41 B0 01 48 8D 4D ?? E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8D 55 ?? 48 8B C8 E8 ?? ?? ?? ?? 90 48 8D 4D ?? E8 ?? ?? ?? ??")
+static const size_t kSigPlayerScopeCtorCall = 0x06, kSigPlayerScopeObserverImm = 0x0d, kSigPlayerScopePlayerImm = 0x12,
+                    kSigPlayerScopePlayerDisp = 0x18, kSigPlayerScopeSetCountryCall = 0x2a, kSigPlayerScopeDtorCall = 0x45;
+// Same function, before on_startup: if (!IsLoadedFromSave(gs)) { seed = SyncedRandom(file, line);
+// CEventScope scope(seed & 0x7fffffff); ... }. SyncedRandom is the OOS-checked game RNG.
+// E8 at +0x1c: SyncedRandom(const char* file, int line); E8 at +0x2b: CEventScope ctor. (0x140dd9d44)
+SIG(kSigOnStartupSeed, "48 8B CE E8 ?? ?? ?? ?? 84 C0 0F 85 ?? ?? ?? ?? BA ?? ?? 00 00 48 8D 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 0F BA F0 1F 8B D0 48 8D 4D ?? E8 ?? ?? ?? ??")
+static const size_t kSigOnStartupSeedRandomCall = 0x1c, kSigOnStartupSeedCtorCall = 0x2b;
+// Same function: list = Find(db, std::string("on_startup")); Fire(db, list, &scope, false).
+// +3: rel32 of the COnActionDataBase* global; +0x21: rel32 of the "on_startup" literal (checked);
+// E8 at +0x44: Find(db, const std::string*); E8 at +0x56: Fire(db, list, scope, bool). (0x140dd9dd3)
+SIG(kSigOnStartupFire, "48 8B 1D ?? ?? ?? ?? 0F 57 C0 0F 11 44 24 ?? 66 0F 6F 0D ?? ?? ?? ?? F3 0F 7F 4C 24 ?? F2 0F 10 05 ?? ?? ?? ?? F2 0F 11 44 24 ?? 0F B7 05 ?? ?? ?? ?? 66 89 44 24 ?? C6 44 24 ?? 00 48 8D 54 24 ?? 48 8B CB E8 ?? ?? ?? ?? 48 8B D0 45 33 C9 4C 8D 45 ?? 48 8B CB E8 ?? ?? ?? ??")
+static const size_t kSigOnStartupFireDbRel = 3, kSigOnStartupFireNameRel = 0x21, kSigOnStartupFireFindCall = 0x44,
+                    kSigOnStartupFireFireCall = 0x56;
+// playsession_start telemetry: session = idler->vtable[+disp32 at +8](); "hot_join" =
+// session->bIsHotjoin (disp32 at +0x1c). (0x14021c06a)
+SIG(kSigSessionHotjoin, "48 8B 06 48 8B CE FF 90 ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ?? 48 8D 15 ?? ?? ?? ?? 80 B8 ?? ?? ?? ?? 00 48 0F 45 D1")
+static const size_t kSigSessionGetterDisp = 8, kSigSessionHotjoinDisp = 0x1c;
+// Same telemetry: server = session->server (disp8 at +0xf), then dynamic_cast to CNetworkServer /
+// CProxyServer ("multiplayer"). (0x14021bcad)
+SIG(kSigSessionServer, "48 8B 06 48 8B CE FF 90 ?? ?? ?? ?? 48 8B 58 ?? C7 44 24 20 00 00 00 00 4C 8D 0D ?? ?? ?? ?? 4C 8D 05 ?? ?? ?? ?? 33 D2 48 8B CB E8")
+static const size_t kSigSessionServerDisp8 = 0xf;
+
 #undef SIG
 #undef ANCHOR
