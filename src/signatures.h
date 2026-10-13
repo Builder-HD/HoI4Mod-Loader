@@ -66,11 +66,26 @@ static const size_t kSigMapManagerPtrRel = 3;
 // std::string* Localize(std::string* out, const char* key, void* = 0, int = 0). (0x142245e60)
 SIG(kSigLocalize, "48 89 6C 24 18 48 89 74 24 20 57 41 56 41 57 48 83 EC 50 45 33 FF 41 8B E9 44 38 3D ?? ?? ?? ?? 4D 8B F0 48 8B F2 48 8B F9 74")
 
+// --- Script parsing / engine strings (native effect and trigger API) -----------------------
+// void ReadString(CParser* p, std::string* out, bool allowNewline): copies the current value's
+// text ("Unreadable String" error for multi-line text unless allowed). (0x1424c0ab0)
+SIG(kSigParserReadString, "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 40 41 0F B6 D8 48 8B FA 48 8B F1 0F 57 C0 0F 11 44 24 20 66 0F 6F 0D ?? ?? ?? ?? F3 0F 7F 4C 24 30 C6")
+// std::string* Construct(std::string* raw, const char* p, size_t n): builds an engine-owned
+// string on raw storage (used by Localize for its result). (0x14011d970)
+SIG(kSigStringConstruct, "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 41 56 48 83 EC 20 48 BE FF FF FF FF FF FF FF 7F 49 8B D8 48 8B EA 4C 8B F1 4C 3B C6 0F 87")
+
 // --- Effect registry -----------------------------------------------------------------------
 // set_province_name's static registration stub references its help text:
 //   mov rbx,[registry]; ... lea rcx,[help]; mov [rax+8],rcx; lea rcx,[entry vtable];
 //   mov [rax],rcx; mov r8,rax; mov edx,<token>; mov rcx,rbx; add rsp,20; pop rbx; jmp Register
 ANCHOR(kAnchorRenameProvinceHelp, "set_province_name = { id = <province id> name = <string> } - Set name for a province")
+
+// --- Trigger registry ----------------------------------------------------------------------
+// has_global_flag's registration stub (same shape as the effect stub, 0x18-byte entry with a
+// byte flag at +0x10): lea rcx,[help] at A; mov byte [rax+10h],1; mov [rax+8],rcx;
+// lea rcx,[entry vtable] at A+0x0f; ...; mov edx,<token> at A+0x1c; ...; jmp Register at A+0x29;
+// mov rbx,[registry] at A-0x2c.
+ANCHOR(kAnchorGlobalFlagTriggerHelp, "has global flag been set.Check flag val date set and days since set.\nExample: has_global_flag = test_flag\nhas_global_flag = { \n\tflag = <name> (mandatory)\n\tvalue < <int> (optional)\n\tdate > <date> (optional)\n\tdays > <int> (optional)\n}")
 
 #undef SIG
 #undef ANCHOR

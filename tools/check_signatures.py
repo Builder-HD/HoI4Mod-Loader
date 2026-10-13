@@ -26,7 +26,8 @@ def load_signatures(header):
             sigs.append((m.group(1), m.group(2)))
         m = ANCHOR_LINE.match(line)
         if m:
-            anchors.append((m.group(1), m.group(2)))
+            # C escapes (\n, \t, \\) as written in the header; anchors are ASCII.
+            anchors.append((m.group(1), m.group(2).encode('ascii').decode('unicode_escape')))
     return sigs, anchors
 
 
