@@ -6,6 +6,7 @@
 
 #include "engine.h"
 #include "lifecycle.h"
+#include "native_script.h"
 
 struct Feature {
     const char* name;      // script flag: hoi4_loader_plugin_<name>
@@ -88,6 +89,25 @@ static std::string DetectEffect() {
     return s;
 }
 
+// hoi4_loader_feature_<name>: a scripted trigger that is never stale (read from script each
+// session, not saved). Served only if the mod ships the stub file; generated on its first read,
+// i.e. after native registration (lexer ready comes before any script is parsed).
+static std::string GuardTrigger(const Feature& f) {
+    bool complete = NativeFeatureComplete(f.name);
+    bool yes = f.active && complete;
+    const char* why = !f.active ? "feature inactive"
+                      : complete ? "feature active, all native commands registered"
+                      : NativeScriptFinalized() ? "a native command of this feature was refused"
+                                                : "read BEFORE native registration ran";
+    Log("Guard trigger hoi4_loader_feature_%s = %s (%s)", f.name, yes ? "yes" : "no", why);
+    char buf[256];
+    sprintf_s(buf,
+              "# Served by hoi4_loader (version.dll): %s\r\n"
+              "hoi4_loader_feature_%s = { always = %s }\r\n",
+              why, f.name, yes ? "yes" : "no");
+    return buf;
+}
+
 // The served hoi4_loader_init refreshes flags only when script runs it (on_startup: new games;
 // on_weekly). With the lifecycle feature the loader also refreshes them itself right after a
 // save is loaded, so a save from a session with other features never shows stale flags.
@@ -134,9 +154,20 @@ void FeaturesInit(bool engineAllowed, const wchar_t* iniPath) {
         } else {
             Log("Lifecycle: token/flag functions missing; plugin flags refresh weekly only");
         }
+        // Native effects/triggers queued by the features above go into the engine right after
+        // the lexer is ready, before any script is parsed.
+        if (Engine::HaveTokens()) OnLexerReady(&NativeScriptRegisterWithEngine);
+    } else if (!NativeCommands().empty()) {
+        Log("Native script: %zu command(s) not registered, lifecycle feature inactive", NativeCommands().size());
     }
     register_virtual_file(L"common/scripted_triggers/hoi4_loader_detect.txt", &DetectTrigger);
     register_virtual_file(L"common/scripted_effects/hoi4_loader_detect.txt", &DetectEffect);
+    for (const Feature& f : g_features) {
+        wchar_t path[128];
+        swprintf_s(path, L"common/scripted_triggers/hoi4_loader_feature_%hs.txt", f.name);
+        const Feature* fp = &f;
+        register_virtual_file(path, [fp] { return GuardTrigger(*fp); }, /*lazy=*/true);
+    }
 }
 
 bool LifecycleFeatureInit() { return LifecycleInstall(); }

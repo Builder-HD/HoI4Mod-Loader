@@ -2,6 +2,7 @@
 #pragma once
 #include <windows.h>
 #include <stdint.h>
+#include <functional>
 #include <string>
 
 // Exposed to script as global variable hoi4_loader_version.
@@ -12,6 +13,8 @@
 // main.cpp
 // ---------------------------------------------------------------------------
 void Log(const char* fmt, ...);
+// <Documents>\Paradox Interactive\Hearts of Iron IV\<fileName> (where loader.log lives).
+std::wstring LoaderOutputPath(const wchar_t* fileName);
 
 // ---------------------------------------------------------------------------
 // hash.cpp
@@ -26,14 +29,17 @@ bool IsHashSupported(const wchar_t* iniPath, const char* hash, wchar_t* label, s
 // ---------------------------------------------------------------------------
 // vfs.cpp: virtual file API (file tier)
 // ---------------------------------------------------------------------------
-// Produces the replacement content. Called exactly once, inside VfsStart().
-using ContentGenerator = std::string (*)();
+// Produces the replacement content. Called exactly once: in VfsStart(), or on the first served
+// read for lazy files.
+using ContentGenerator = std::function<std::string()>;
 
 // Serve generated content instead of any existing file whose path ends with `pathSuffix`
 // (e.g. "common/scripted_triggers/foo.txt"; either slash, case-insensitive, matched on a path
 // component boundary). Only read-only OPEN_EXISTING opens of files that really exist are
-// redirected. Must be called before VfsStart().
-bool register_virtual_file(const wchar_t* pathSuffix, ContentGenerator generator);
+// redirected. Must be called before VfsStart(). `lazy`: generate the content on the first read
+// that is served (so it can reflect state that only exists later, e.g. native registration)
+// instead of at startup.
+bool register_virtual_file(const wchar_t* pathSuffix, ContentGenerator generator, bool lazy = false);
 
 // Generates every registered file once, writes them to %TEMP%\hoi4_loader and queues the
 // CreateFileW/A hooks (applied by main.cpp). Requires MH_Initialize() to have succeeded.

@@ -37,6 +37,9 @@ add_library(hoi4_loader SHARED
     src/engine.h
     src/lifecycle.cpp
     src/lifecycle.h
+    src/native_script.cpp
+    src/native_script_engine.cpp
+    src/native_script.h
     src/loader.h
     src/signatures.h
     src/sha256.h
@@ -79,4 +82,10 @@ if(HOI4_LOADER_BUILD_TESTS)
         add_custom_command(TARGET ${target} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:hoi4_loader> $<TARGET_FILE_DIR:${target}>)
     endforeach()
+
+    # Native script API core with a fake engine backend (no game, no DLL).
+    add_executable(native_script_test tests/native_script_test.cpp src/native_script.cpp)
+    target_compile_features(native_script_test PRIVATE cxx_std_17)
+    target_compile_definitions(native_script_test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    set_target_properties(native_script_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/$<0:>)
 endif()

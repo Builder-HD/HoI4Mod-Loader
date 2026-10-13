@@ -74,6 +74,12 @@ static bool GetDocumentsDir(wchar_t* out, DWORD cch) {
     return n && n < cch && wcscat_s(out, cch, L"\\Documents") == 0;
 }
 
+std::wstring LoaderOutputPath(const wchar_t* fileName) {
+    wchar_t dir[MAX_PATH * 2];
+    if (!GetDocumentsDir(dir, MAX_PATH)) return L"";
+    return std::wstring(dir) + L"\\Paradox Interactive\\Hearts of Iron IV\\" + fileName;
+}
+
 static void OpenLog() {
     wchar_t path[MAX_PATH * 2];
     if (!GetDocumentsDir(path, MAX_PATH)) return;

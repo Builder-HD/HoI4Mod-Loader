@@ -14,12 +14,15 @@
 struct VirtualFile {
     std::wstring suffix;      // lowercase, backslashes, no leading separator
     ContentGenerator generator;
+    bool lazy;                // generate on first read instead of in VfsStart
     std::wstring servedPath;  // generated file, set by VfsStart
+    volatile LONG state;      // 0 = not generated yet (lazy), 1 = ready, 2 = generation failed
 };
 
-// Written only before the hooks are enabled; read-only afterwards.
+// Written only before the hooks are enabled; afterwards only `state` changes (under g_genLock).
 static std::vector<VirtualFile> g_files;
 static bool g_started = false;
+static SRWLOCK g_genLock = SRWLOCK_INIT;
 
 static wchar_t FoldChar(wchar_t c) {
     if (c == L'/') return L'\\';
@@ -55,7 +58,7 @@ static bool ContainsAscii(const Ch* s, const char* needle) {
     return false;
 }
 
-bool register_virtual_file(const wchar_t* pathSuffix, ContentGenerator generator) {
+bool register_virtual_file(const wchar_t* pathSuffix, ContentGenerator generator, bool lazy) {
     if (g_started) {
         Log("ERROR: register_virtual_file(%ls) called after start; ignored", pathSuffix ? pathSuffix : L"(null)");
         return false;
@@ -77,7 +80,7 @@ bool register_virtual_file(const wchar_t* pathSuffix, ContentGenerator generator
             return false;
         }
     }
-    g_files.push_back({s, generator, L""});
+    g_files.push_back({s, generator, lazy, L"", 0});
     return true;
 }
 
@@ -99,6 +102,33 @@ static CreateFileW_t g_origCreateFileW = nullptr;
 static CreateFileA_t g_origCreateFileA = nullptr;
 static volatile LONG g_scriptOpensLogged = 0;
 
+// Runs the generator and writes the file. Returns false (and logs) on failure.
+static bool Generate(VirtualFile& f, const char* when) {
+    std::string content;
+    try {
+        content = f.generator();
+    } catch (...) {
+        Log("ERROR: content generator for '%ls' threw; file not served", f.suffix.c_str());
+        return false;
+    }
+    if (!WriteWholeFile(f.servedPath, content)) {
+        Log("ERROR: cannot write %ls (error %lu); file not served", f.servedPath.c_str(), GetLastError());
+        return false;
+    }
+    Log("Virtual file '%ls' (%zu bytes, %s) -> %ls", f.suffix.c_str(), content.size(), when, f.servedPath.c_str());
+    return true;
+}
+
+// Lazy files: generated once, on the first open that will be served.
+static bool EnsureGenerated(const VirtualFile& cf) {
+    if (cf.state == 1) return true;
+    auto& f = const_cast<VirtualFile&>(cf);
+    AcquireSRWLockExclusive(&g_genLock);
+    if (f.state == 0) f.state = Generate(f, "generated on first read") ? 1 : 2;
+    ReleaseSRWLockExclusive(&g_genLock);
+    return f.state == 1;
+}
+
 // Virtual file to serve for this open, or nullptr. Only plain read opens of existing files qualify.
 template <typename Ch>
 static const VirtualFile* FindVirtualFile(const Ch* name, DWORD access, DWORD disposition, const char* api) {
@@ -113,6 +143,7 @@ static const VirtualFile* FindVirtualFile(const Ch* name, DWORD access, DWORD di
         // The engine probes every search root (game dir, DLC, tweakergui_assets, mods) for each
         // file; only a copy that really exists gets replaced.
         if (!FileExists(name)) return nullptr;
+        if (!EnsureGenerated(f)) return nullptr;  // serve the original file instead
         Log(sizeof(Ch) == 1 ? "Serving virtual file for %hs (via %s)" : "Serving virtual file for %ls (via %s)", name, api);
         return &f;
     }
@@ -157,31 +188,27 @@ bool VfsStart() {
     std::wstring dir = std::wstring(tmp) + L"hoi4_loader";
     CreateDirectoryW(dir.c_str(), nullptr);
 
-    // Generate every file exactly once. A file that fails is simply not served.
+    // Eager files are generated now, exactly once; lazy ones on their first served read. A file
+    // that fails is simply not served.
     int ready = 0;
     for (size_t i = 0; i < g_files.size(); ++i) {
         VirtualFile& f = g_files[i];
-        std::string content;
-        try {
-            content = f.generator();
-        } catch (...) {
-            Log("ERROR: content generator for '%ls' threw; file not served", f.suffix.c_str());
-            continue;
-        }
         // e.g. %TEMP%\hoi4_loader\00_common_scripted_triggers_hoi4_loader_detect.txt
         wchar_t prefix[8];
         swprintf_s(prefix, L"%02zu_", i);
         std::wstring flat = f.suffix;
         for (wchar_t& c : flat)
             if (c == L'\\') c = L'_';
-        std::wstring path = dir + L"\\" + prefix + flat;
-        if (!WriteWholeFile(path, content)) {
-            Log("ERROR: cannot write %ls (error %lu); file not served", path.c_str(), GetLastError());
+        f.servedPath = dir + L"\\" + prefix + flat;
+        if (f.lazy) {
+            Log("Virtual file '%ls' registered (generated on first read)", f.suffix.c_str());
+        } else if (Generate(f, "generated at startup")) {
+            f.state = 1;
+        } else {
+            f.servedPath.clear();
             continue;
         }
-        f.servedPath = path;
         ++ready;
-        Log("Virtual file '%ls' (%zu bytes) -> %ls", f.suffix.c_str(), content.size(), path.c_str());
     }
     if (!ready) {
         Log("ERROR: no virtual files could be generated");

@@ -15,6 +15,9 @@ void* pRegionGetNameKey = nullptr;
 void** pRenameProvinceEntryVtable = nullptr;
 void** pRenameProvinceEffectVtable = nullptr;
 size_t renameProvinceEffectVtableSlots = 0;
+Vtable effectBase, triggerBase, effectTemplate, effectValueReader, triggerTemplate;
+void** effectTemplateEntryVtable = nullptr;
+void** triggerTemplateEntryVtable = nullptr;
 
 namespace {
 
@@ -30,6 +33,10 @@ using FlagSet_t = void(__fastcall*)(void* flags, int token, short value, short d
 using FlagClear_t = void(__fastcall*)(void* flags, int token);
 using Localize_t = EngineString*(__fastcall*)(EngineString* out, const char* key, void* p3, int p4);
 using Register_t = void(__fastcall*)(void* registry, int token, EffectEntry* entry);
+using RegisterTrigger_t = void(__fastcall*)(void* registry, int token, void* entry);
+using ReadString_t = void(__fastcall*)(void* parser, EngineString* out, bool allowNewline);
+using Unexpected_t = void(__fastcall*)(void* parser);
+using Construct_t = EngineString*(__fastcall*)(EngineString* raw, const char* p, size_t n);
 
 IsLoaded_t g_isLoaded = nullptr;
 Intern_t g_intern = nullptr;
@@ -38,6 +45,11 @@ FlagSet_t g_flagSet = nullptr;
 FlagClear_t g_flagClear = nullptr;
 Localize_t g_localize = nullptr;
 Register_t g_register = nullptr;
+RegisterTrigger_t g_registerTrigger = nullptr;
+ReadString_t g_readString = nullptr;
+Unexpected_t g_unexpected = nullptr;
+Construct_t g_construct = nullptr;
+void** g_ppTriggerRegistry = nullptr;
 
 void** g_ppGameState = nullptr;   // address of the engine's CGameState* global
 uint32_t g_flagsOffset = 0;       // CGameState -> global flags container
@@ -87,6 +99,62 @@ void ResolveRegistry() {
     pRenameProvinceEffectVtable = FindVtableByRtti(".?AVCRenameProvinceEffect@@", &renameProvinceEffectVtableSlots);
     Log("Effect registry at %s, register %s, set_province_name token 0x%x", SigDescribe(g_ppRegistry).c_str(),
         SigDescribe((void*)g_register).c_str(), Read<uint32_t>(movTok, 1));
+}
+
+void ResolveTriggerRegistry() {
+    // has_global_flag registration stub (layout in signatures.h), anchored on its help text.
+    uint8_t* lea = AnchorFindLea("has_global_flag help", kAnchorGlobalFlagTriggerHelp);
+    if (!lea) return;
+    uint8_t* movReg = lea - 0x2c;  // mov rbx,[registry]
+    uint8_t* leaVt = lea + 0x0f;   // lea rcx,[entry vtable]
+    uint8_t* movTok = lea + 0x1c;  // mov edx,<token>
+    uint8_t* jmpReg = lea + 0x29;  // jmp Register
+    if (!(movReg[0] == 0x48 && movReg[1] == 0x8B && movReg[2] == 0x1D) ||
+        !(leaVt[0] == 0x48 && leaVt[1] == 0x8D && leaVt[2] == 0x0D) || movTok[0] != 0xBA || jmpReg[0] != 0xE9) {
+        Log("ERROR: trigger registry: has_global_flag stub has an unexpected layout");
+        return;
+    }
+    g_ppTriggerRegistry = (void**)SigRipTarget(movReg, 3, 7);
+    g_registerTrigger = (RegisterTrigger_t)SigFollowRel32(jmpReg);
+    Log("Trigger registry at %s, register %s, has_global_flag token 0x%x", SigDescribe(g_ppTriggerRegistry).c_str(),
+        SigDescribe((void*)g_registerTrigger).c_str(), Read<uint32_t>(movTok, 1));
+}
+
+Vtable RttiVtable(const char* name) {
+    Vtable v;
+    v.vt = FindVtableByRtti(name, &v.slots);
+    return v;
+}
+
+void ResolveNativeScript() {
+    g_readString = (ReadString_t)SigFindUnique("parser_read_string", kSigParserReadString);
+    g_unexpected = (Unexpected_t)SigFindUnique("parser_unexpected", kSigParserUnexpected);
+    g_construct = (Construct_t)SigFindUnique("string_construct", kSigStringConstruct);
+    ResolveTriggerRegistry();
+    effectBase = RttiVtable(".?AVCEffect@@");
+    triggerBase = RttiVtable(".?AVCTrigger@@");
+    effectTemplate = RttiVtable(".?AVCRenameProvinceEffect@@");
+    effectValueReader = RttiVtable(".?AVCSetStateNameEffect@@");
+    triggerTemplate = RttiVtable(".?AVCAlwaysTrigger@@");
+    size_t n = 0;
+    triggerTemplateEntryVtable = FindVtableByRtti(".?AV?$CTriggerEntry@VCAlwaysTrigger@@@@", &n);
+    effectTemplateEntryVtable = pRenameProvinceEntryVtable;
+}
+
+// MSVC std::map<int, T*> lookup, read-only: map object { head*, size }; node { left, parent,
+// right, color, isnil @+0x19, key @+0x20, value @+0x28 } (as walked by the engine's Register).
+bool MapHasKey(void* mapObj, int key) {
+    if (!mapObj) return false;
+    uint8_t* head = Read<uint8_t*>(mapObj, 0);
+    if (!head) return false;
+    uint8_t* node = Read<uint8_t*>(head, 8);  // root
+    for (int guard = 0; node && Read<uint8_t>(node, 0x19) == 0 && guard < 64; ++guard) {
+        int k = Read<int>(node, 0x20);
+        if (key < k) node = Read<uint8_t*>(node, 0);
+        else if (k < key) node = Read<uint8_t*>(node, 0x10);
+        else return true;
+    }
+    return false;
 }
 
 }  // namespace
@@ -155,6 +223,7 @@ bool Resolve() {
     g_localize = (Localize_t)SigFindUnique("localize", kSigLocalize);
 
     ResolveRegistry();
+    ResolveNativeScript();
 
     Log("Engine: gamestate %s, flags +0x%x, regions +0x%x/+0x%x", g_ppGameState ? SigDescribe(g_ppGameState).c_str() : "-",
         g_flagsOffset, g_regionArrayOffset, g_regionCountOffset);
@@ -259,6 +328,34 @@ bool RegisterEffect(int token, EffectEntry* entry) {
     if (!registry || !g_register || !token) return false;
     g_register(registry, token, entry);
     return true;
+}
+
+bool HaveNativeScript() {
+    // Slots the binding relies on (NOTES.md C1): effect value reader slot 3 and trigger value
+    // reader slot 5 must be real overrides of the base implementations.
+    return HaveRegistry() && g_ppTriggerRegistry && g_registerTrigger && g_readString && g_unexpected && g_construct &&
+           effectBase.slots >= 25 && triggerBase.slots >= 23 && effectTemplate.slots >= 25 &&
+           effectValueReader.slots >= 25 && triggerTemplate.slots >= 23 && effectTemplateEntryVtable &&
+           triggerTemplateEntryVtable && effectValueReader.vt[3] != effectBase.vt[3] &&
+           triggerTemplate.vt[5] != triggerBase.vt[5];
+}
+
+bool EffectRegistered(int token) { return g_ppRegistry && MapHasKey(*g_ppRegistry, token); }
+bool TriggerRegistered(int token) { return g_ppTriggerRegistry && MapHasKey(*g_ppTriggerRegistry, token); }
+
+bool RegisterTrigger(int token, void* entry) {
+    void* registry = g_ppTriggerRegistry ? *g_ppTriggerRegistry : nullptr;
+    if (!registry || !g_registerTrigger || !token) return false;
+    g_registerTrigger(registry, token, entry);
+    return true;
+}
+
+void ParserReadString(void* parser, EngineString* out) { g_readString(parser, out, false); }
+void ParserUnexpected(void* parser) { g_unexpected(parser); }
+
+void ConstructEngineString(EngineString* raw, const char* p, size_t n) {
+    memset(raw, 0, sizeof *raw);
+    g_construct(raw, p, n);
 }
 
 }  // namespace Engine

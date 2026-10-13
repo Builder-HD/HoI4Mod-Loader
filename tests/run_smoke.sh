@@ -17,6 +17,11 @@ CACHE="$LA/hoi4_loader/hash_cache.ini"
 DOCS="$(cygpath -u "$(powershell -NoProfile -Command "[Environment]::GetFolderPath('MyDocuments')" | tr -d '\r')")/Paradox Interactive/Hearts of Iron IV"
 rc=0
 
+echo "===== 0) native script API core (fake engine backend)"
+out=$("$BUILD/tests/native_script_test.exe"); trc=$?
+echo "$out" | grep -E 'FAIL|PASSED|FAILED'
+[ "$trc" = 0 ] || rc=1
+
 for d in "$SIG" "$NOSIG"; do
     [ -f "$d/hoi4.exe" ] && [ -f "$d/version.dll" ] || { echo "missing $d/hoi4.exe or version.dll; build first"; exit 2; }
 done

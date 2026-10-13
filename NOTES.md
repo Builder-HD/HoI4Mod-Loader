@@ -779,19 +779,19 @@ struct Scope {                              // read-only view of the engine's CE
     int stateId() const; int countryTag() const; int strategicRegionId() const;
     Scope root() const; Scope from() const; Scope prev() const;   // invalid view if unset
 };
-struct TextOut { void add(const char* utf8); };   // builds the engine-owned tooltip string
+struct TooltipText { void add(const char* utf8); };   // builds the engine-owned tooltip string
 
 struct NativeEffect {
     const char* name; const char* help; Form form; std::vector<ParamSpec> params;
     uint32_t scopes;                        // ScopeMask, 0 = any
     void (*execute)(const Args&, const Scope&);
-    void (*tooltip)(const Args&, const Scope&, TextOut&);           // optional
+    void (*tooltip)(const Args&, const Scope&, TooltipText&);           // optional
 };
 struct NativeTrigger {
     const char* name; const char* help; Form form; std::vector<ParamSpec> params;
     uint32_t scopes;
     bool (*evaluate)(const Args&, const Scope&);                     // hot path
-    void (*tooltip)(const Args&, const Scope&, bool negated, TextOut&);  // optional
+    void (*tooltip)(const Args&, const Scope&, bool negated, TooltipText&);  // optional
 };
 bool register_native_effect(const NativeEffect&);    // call from the feature's init
 bool register_native_trigger(const NativeTrigger&);
@@ -833,7 +833,7 @@ bool register_native_trigger(const NativeTrigger&);
     the README will say so.
   - `evaluate` gets lock-free, allocation-free access to `Args` and `Scope` (plain reads).
 - **Tooltips.**
-  - `TextOut` assembles UTF-8 text and hands it to the engine through `std::string::assign`
+  - `TooltipText` assembles UTF-8 text and hands it to the engine through `std::string::assign`
     (engine allocator); a trailing `\n` is added as vanilla does.
   - Triggers without a tooltip get a generic line (`<name>: <param>=<value> ...`).
   - Effects without a tooltip show nothing, as now.
