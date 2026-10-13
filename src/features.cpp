@@ -22,6 +22,7 @@ static Feature g_features[] = {
     {"engine_probe", Tier::Engine, &EngineProbeInit, nullptr, false, 0},
     {"lifecycle", Tier::Engine, &LifecycleFeatureInit, nullptr, false, 0},
     {"region_names", Tier::Engine, &RegionNamesInit, "lifecycle", false, 0},
+    {"game_loaded", Tier::Engine, &GameLoadedInit, "lifecycle", false, 0},
 };
 static int g_presentToken = 0;
 
@@ -122,6 +123,14 @@ static void InternFlagTokens() {
 
 static void RefreshFlagsOnGameEntered(bool loadedFromSave) {
     if (!loadedFromSave) return;  // new games: on_startup runs hoi4_loader_init
+    // Writing flags here happens on this machine only: never in multiplayer or after a hot join
+    // (NOTES.md Part D). There the weekly hoi4_loader_init, which runs on every machine in the
+    // same tick, refreshes them.
+    const char* why = nullptr;
+    if (!SessionAllowsLocalWrites(&why)) {
+        Log("Plugin flags NOT refreshed after loading: %s (the weekly hoi4_loader_init refreshes them)", why);
+        return;
+    }
     Engine::SetGlobalFlag(g_presentToken);
     for (const Feature& f : g_features)
         f.active ? Engine::SetGlobalFlag(f.flagToken) : Engine::ClearGlobalFlag(f.flagToken);

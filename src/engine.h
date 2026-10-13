@@ -107,4 +107,27 @@ void ParserUnexpected(void* parser);                      // "Unexpected token" 
 // Builds an engine-owned std::string on raw storage (the engine frees it with its allocator).
 void ConstructEngineString(EngineString* raw, const char* p, size_t n);
 
+// --- On actions and the game session (game_loaded; NOTES.md Part D) --------------------------
+bool HaveOnActions();  // on_action database, find, fire, event scope, player tag, synced RNG
+bool HaveSession();    // session getter, its server object and hot-join flag
+
+// The local game session as the engine's own telemetry classifies it (main thread, while a game
+// is running). known = false if anything was unreadable; callers must then assume multiplayer.
+struct SessionInfo {
+    bool known = false;
+    const char* serverClass = "?";  // class of the session's server object, e.g. "CDummyServer"
+    bool singlePlayer = false;      // server is a CDummyServer (no network)
+    bool hotJoin = false;           // CSession::bIsHotjoin: this machine joined a running game
+};
+SessionInfo QuerySession(void* idler);
+
+// Local player's country tag (> 0), or 0 when observing. Main thread only.
+int PlayerCountryTag();
+// True if some script defined an on_action of this name (on_action keys are dynamic).
+bool OnActionDefined(const char* name);
+// Fires the on_action like the engine fires on_startup: synced-RNG seed, events, random events
+// and effect. countryTag > 0: ROOT = that country; 0: no scope. name: at most 15 characters.
+// Returns false (and logs) on failure; an exception inside is contained.
+bool FireOnAction(const char* name, int countryTag);
+
 }  // namespace Engine

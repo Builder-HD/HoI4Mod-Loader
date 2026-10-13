@@ -33,6 +33,7 @@ add_library(hoi4_loader SHARED
     src/features.cpp
     src/plugin_engine_probe.cpp
     src/plugin_region_names.cpp
+    src/plugin_game_loaded.cpp
     src/engine.cpp
     src/engine.h
     src/lifecycle.cpp

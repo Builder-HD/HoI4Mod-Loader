@@ -106,6 +106,11 @@ int main(int argc, char** argv) {
               "guard engine_probe = no (served, feature inactive)");
     CHECK(has(gr, "hoi4_loader_feature_region_names = { always = no }") && has(gr, "Served by hoi4_loader"),
           "guard region_names = no (served; feature cannot start without the game)");
+    std::wstring guardLoaded = m + L"\\common\\scripted_triggers\\hoi4_loader_feature_game_loaded.txt";
+    Write(guardLoaded, "hoi4_loader_feature_game_loaded = { always = no }\n");
+    std::string gl = ReadW(guardLoaded.c_str());
+    CHECK(has(gl, "hoi4_loader_feature_game_loaded = { always = no }") && has(gl, "Served by hoi4_loader"),
+          "guard game_loaded = no (served; feature cannot start without the game)");
 
     // 3. Writes to the stub path must go to the real file, never the generated one.
     Write(trig, "hoi4_loader_present = { always = no } # rewritten\n");

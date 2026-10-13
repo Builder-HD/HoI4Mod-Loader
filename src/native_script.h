@@ -131,6 +131,11 @@ bool NativeFeatureComplete(const char* feature);
 // True once NativeScriptFinalize ran (the registration window is closed).
 bool NativeScriptFinalized();
 
+// Documents an on_action that the loader fires (section "On actions" of loader_script_docs.md).
+// On_action keys are dynamic in the engine, so the on_action itself needs no registration.
+// Call from the feature's init, before engine registration writes the docs.
+void document_on_action(const char* name, const char* feature, const char* help);
+
 // ===========================================================================================
 // Internal: core <-> engine binding (native_script.cpp / native_script_engine.cpp)
 // ===========================================================================================

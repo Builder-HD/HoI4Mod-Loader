@@ -129,6 +129,7 @@ int main() {
     // 3. Engine registration.
     FakeBackend be;
     be.failBind.insert("bind_fails");
+    document_on_action("on_test_loaded", "feat_d", "Fires in tests.");
     int n = NativeScriptFinalize(be, L"");
     CHECK(n == 4, "4 commands registered (got %d)", n);
     CHECK(NativeScriptFinalized(), "window closed after finalize");
@@ -239,6 +240,12 @@ int main() {
         CHECK(docs.find(e) != std::string::npos, "docs contain: %.60s", e);
     CHECK(docs.find("too_late") == std::string::npos && docs.find("Bad-Name") == std::string::npos,
           "refused-at-registration commands are not documented as commands");
+    CHECK(docs.find("\n## On actions\n\n### on_test_loaded\n\n"
+                    "- Feature: feat_d (`hoi4_loader_feature_feat_d = yes` means supported, not fired)\n"
+                    "- Usage: `on_actions = { on_test_loaded = { effect = { ... } } }`\n\nFires in tests.\n") != std::string::npos &&
+              docs.find("## On actions") > docs.find("## Triggers"),
+          "docs: on_actions section after the triggers");
+    CHECK(NativeFeatureComplete("feat_d"), "documenting an on_action adds no native command to its feature");
 
     printf("%s (%d failure(s))\n", g_fail ? "FAILED" : "PASSED", g_fail);
     return g_fail;

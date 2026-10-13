@@ -186,6 +186,17 @@ bool register_native_trigger(const NativeTrigger& d, const char* feature) {
 
 bool NativeScriptFinalized() { return g_finalized; }
 
+namespace {
+struct OnActionDoc {
+    std::string name, feature, help;
+};
+std::vector<OnActionDoc> g_onActionDocs;
+}  // namespace
+
+void document_on_action(const char* name, const char* feature, const char* help) {
+    g_onActionDocs.push_back({name ? name : "", feature ? feature : "?", help ? help : ""});
+}
+
 bool NativeFeatureComplete(const char* feature) {
     bool any = false;
     for (const Command* c : g_commands) {
@@ -265,6 +276,15 @@ std::string NativeScriptDocs() {
             s += "\n" + c->help + "\n";
         }
         if (!any) s += "\n(none)\n";
+    }
+    if (!g_onActionDocs.empty()) {
+        s += "\n## On actions\n";
+        for (const OnActionDoc& d : g_onActionDocs) {
+            s += "\n### " + d.name + "\n\n";
+            s += "- Feature: " + d.feature + " (`hoi4_loader_feature_" + d.feature + " = yes` means supported, not fired)\n";
+            s += "- Usage: `on_actions = { " + d.name + " = { effect = { ... } } }`\n";
+            s += "\n" + d.help + "\n";
+        }
     }
     return s;
 }
@@ -408,5 +428,6 @@ std::string NativeTooltip(const ParsedCommand* pc, const void* engineScope, bool
 void NativeScriptResetForTests() {
     for (Command* c : g_commands) delete c;
     g_commands.clear();
+    g_onActionDocs.clear();
     g_finalized = false;
 }

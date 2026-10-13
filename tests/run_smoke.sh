@@ -47,6 +47,7 @@ expect_log "engine_probe active" "Feature engine_probe (engine tier): active"
 expect_log "signature resolved" "Signature 'physfs_platformOpenRead' -> hoi4.exe+0x"
 expect_log "lifecycle fails safe without its signatures" "Feature lifecycle (engine tier): FAILED, left inactive"
 expect_log "region_names skipped without lifecycle" "Feature region_names (engine tier): DISABLED, requires lifecycle"
+expect_log "game_loaded skipped without lifecycle" "Feature game_loaded (engine tier): DISABLED, requires lifecycle"
 
 run "$SIG" engine "2) same exe again -> hash from cache"
 expect_log "cache hit" "(from hash cache,"

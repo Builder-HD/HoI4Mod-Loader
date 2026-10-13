@@ -2,6 +2,7 @@
 // src/signatures.h (byte signatures, a string anchor) or RTTI names; see NOTES.md Part B1.
 #include "engine.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "loader.h"
@@ -157,6 +158,145 @@ bool MapHasKey(void* mapObj, int key) {
     return false;
 }
 
+// --- On actions and the game session (Part D) --------------------------------------------------
+using SyncedRandom_t = uint32_t(__fastcall*)(const char* file, int line);
+using ScopeCtor_t = void*(__fastcall*)(void* scope, int seed);
+using ScopeDtor_t = void(__fastcall*)(void* scope);
+using ScopeSetCountry_t = void(__fastcall*)(void* scope, const int* tag, bool);
+using OnActionFind_t = void*(__fastcall*)(void* db, const EngineString* name);
+using OnActionFire_t = void(__fastcall*)(void* db, void* list, void* scope, bool ignoreGameRunningCheck);
+using SessionGetter_t = uint8_t*(__fastcall*)(void* idler);
+
+SyncedRandom_t g_syncedRandom = nullptr;
+ScopeCtor_t g_scopeCtor = nullptr;
+ScopeDtor_t g_scopeDtor = nullptr;
+ScopeSetCountry_t g_scopeSetCountry = nullptr;
+OnActionFind_t g_onActionFind = nullptr;
+OnActionFire_t g_onActionFire = nullptr;
+void** g_ppOnActionDb = nullptr;      // address of the COnActionDataBase* global
+uint32_t g_playerTagOffset = 0;       // CGameState -> local player's country tag
+uint32_t g_sessionGetterDisp = 0;     // idler vtable byte offset of GetSession()
+uint32_t g_sessionServerOffset = 0;   // CSession -> CServer*
+uint32_t g_sessionHotjoinOffset = 0;  // CSession -> bIsHotjoin
+const char* const kServerClasses[] = {"CDummyServer", "CNetworkServer", "CProxyServer", "CDedicatedServer"};
+void** g_serverVtables[4] = {};
+// CEventScope is 0xb0 bytes in 1.19.x (the engine's stack slot); generous room for growth.
+const size_t kEventScopeBuffer = 0x400;
+const char* const kNoSuchOnAction = "hoi4_loader_nx";  // never defined: Find returns the null object
+
+void ResolveOnActions() {
+    uint8_t* p;
+    if ((p = SigFindUnique("player_scope", kSigPlayerScope)) != nullptr) {
+        uint32_t player = Read<uint32_t>(p, kSigPlayerScopePlayerImm);
+        if (player == Read<uint32_t>(p, kSigPlayerScopePlayerDisp)) {
+            g_playerTagOffset = player;
+            g_scopeCtor = (ScopeCtor_t)SigFollowRel32(p + kSigPlayerScopeCtorCall);
+            g_scopeSetCountry = (ScopeSetCountry_t)SigFollowRel32(p + kSigPlayerScopeSetCountryCall);
+            g_scopeDtor = (ScopeDtor_t)SigFollowRel32(p + kSigPlayerScopeDtorCall);
+        } else {
+            Log("ERROR: player_scope: player tag offsets disagree (0x%x / 0x%x)", player,
+                Read<uint32_t>(p, kSigPlayerScopePlayerDisp));
+        }
+    }
+    if ((p = SigFindUnique("on_startup_seed", kSigOnStartupSeed)) != nullptr) {
+        if ((void*)SigFollowRel32(p + kSigOnStartupSeedCtorCall) == (void*)g_scopeCtor)
+            g_syncedRandom = (SyncedRandom_t)SigFollowRel32(p + kSigOnStartupSeedRandomCall);
+        else
+            Log("ERROR: on_startup_seed: event scope constructor differs from player_scope's");
+    }
+    if ((p = SigFindUnique("on_startup_fire", kSigOnStartupFire)) != nullptr) {
+        // movsd xmm0,[rip+x] loads the first 8 bytes of "on_startup": opcode at NameRel-4, length 8.
+        const char* literal = (const char*)SigRipTarget(p + kSigOnStartupFireNameRel - 4, 4, 8);
+        if (memcmp(literal, "on_startup", 11) == 0) {
+            g_ppOnActionDb = (void**)SigRipTarget(p, kSigOnStartupFireDbRel, kSigOnStartupFireDbRel + 4);
+            g_onActionFind = (OnActionFind_t)SigFollowRel32(p + kSigOnStartupFireFindCall);
+            g_onActionFire = (OnActionFire_t)SigFollowRel32(p + kSigOnStartupFireFireCall);
+        } else {
+            Log("ERROR: on_startup_fire: the matched code does not fire on_startup");
+        }
+    }
+    uint8_t* hj = SigFindUnique("session_hotjoin", kSigSessionHotjoin);
+    uint8_t* sv = SigFindUnique("session_server", kSigSessionServer);
+    if (hj && sv) {
+        uint32_t getter = Read<uint32_t>(hj, kSigSessionGetterDisp);
+        if (getter == Read<uint32_t>(sv, kSigSessionGetterDisp) && getter % 8 == 0 && getter < 0x800) {
+            g_sessionGetterDisp = getter;
+            g_sessionHotjoinOffset = Read<uint32_t>(hj, kSigSessionHotjoinDisp);
+            g_sessionServerOffset = Read<uint8_t>(sv, kSigSessionServerDisp8);
+        } else {
+            Log("ERROR: session_hotjoin / session_server disagree on the session getter");
+        }
+    }
+    for (size_t i = 0; i < 4; ++i) {
+        char rtti[64];
+        sprintf_s(rtti, ".?AV%s@@", kServerClasses[i]);
+        size_t n = 0;
+        g_serverVtables[i] = FindVtableByRtti(rtti, &n);
+    }
+}
+
+// RTTI class name of a vtable (".?AVCFoo@@" -> "CFoo" is left to the caller), or null.
+const char* VtableRttiName(void** vt) {
+    uint8_t *rdata, *data;
+    size_t rsize, dsize;
+    if (!vt || !ImageSection(".rdata", &rdata, &rsize) || !ImageSection(".data", &data, &dsize)) return nullptr;
+    if (!In(vt - 1, rdata, rsize)) return nullptr;
+    uint8_t* col = (uint8_t*)vt[-1];
+    if (!In(col, rdata, rsize - 24)) return nullptr;
+    uint8_t* td = (uint8_t*)GetModuleHandleW(nullptr) + Read<uint32_t>(col, 12);
+    return In(td + 0x10, data, dsize) ? (const char*)(td + 0x10) : nullptr;
+}
+
+// No C++ objects in the next three, so SEH can contain a fault.
+bool ReadSessionRaw(void* idler, void*** serverVt, uint8_t* hotjoin) {
+    __try {
+        void** vt = *(void***)idler;
+        uint8_t* session = ((SessionGetter_t)vt[g_sessionGetterDisp / 8])(idler);
+        if (!session) return false;
+        void* server = *(void**)(session + g_sessionServerOffset);
+        *hotjoin = session[g_sessionHotjoinOffset];
+        *serverVt = server ? *(void***)server : nullptr;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool FindOnActionRaw(void* db, const EngineString* name, const EngineString* none, bool* defined) {
+    __try {
+        *defined = g_onActionFind(db, name) != g_onActionFind(db, none);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool FireOnActionRaw(void* db, const EngineString* name, int tag, DWORD* code) {
+    alignas(16) uint8_t scope[kEventScopeBuffer];
+    __try {
+        void* list = g_onActionFind(db, name);
+        uint32_t seed = g_syncedRandom("hoi4_loader on_game_loaded", 1);
+        g_scopeCtor(scope, (int)(seed & 0x7fffffff));
+        if (tag > 0) g_scopeSetCountry(scope, &tag, true);
+        g_onActionFire(db, list, scope, false);
+        g_scopeDtor(scope);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *code = GetExceptionCode();
+        return false;
+    }
+}
+
+bool ShortEngineString(const char* s, EngineString* out) {
+    size_t n = strlen(s);
+    if (n > 15) return false;
+    memset(out, 0, sizeof *out);
+    memcpy(out->buf, s, n);
+    out->size = n;
+    out->cap = 15;
+    return true;
+}
+
 }  // namespace
 
 void** FindVtableByRtti(const char* rttiName, size_t* slots) {
@@ -224,6 +364,7 @@ bool Resolve() {
 
     ResolveRegistry();
     ResolveNativeScript();
+    ResolveOnActions();
 
     Log("Engine: gamestate %s, flags +0x%x, regions +0x%x/+0x%x", g_ppGameState ? SigDescribe(g_ppGameState).c_str() : "-",
         g_flagsOffset, g_regionArrayOffset, g_regionCountOffset);
@@ -356,6 +497,64 @@ void ParserUnexpected(void* parser) { g_unexpected(parser); }
 void ConstructEngineString(EngineString* raw, const char* p, size_t n) {
     memset(raw, 0, sizeof *raw);
     g_construct(raw, p, n);
+}
+
+bool HaveOnActions() {
+    return g_ppGameState && g_ppOnActionDb && g_onActionFind && g_onActionFire && g_scopeCtor && g_scopeDtor &&
+           g_scopeSetCountry && g_syncedRandom && g_playerTagOffset;
+}
+
+bool HaveSession() { return g_sessionGetterDisp && g_sessionServerOffset && g_sessionHotjoinOffset && g_serverVtables[0]; }
+
+SessionInfo QuerySession(void* idler) {
+    SessionInfo info;
+    void** serverVt = nullptr;
+    uint8_t hotjoin = 0;
+    if (!HaveSession() || !idler || !ReadSessionRaw(idler, &serverVt, &hotjoin) || !serverVt) return info;
+    info.known = true;
+    info.hotJoin = hotjoin != 0;
+    info.serverClass = "unknown";
+    for (size_t i = 0; i < 4; ++i)
+        if (g_serverVtables[i] && serverVt == g_serverVtables[i]) info.serverClass = kServerClasses[i];
+    if (strcmp(info.serverClass, "unknown") == 0) {
+        const char* rtti = VtableRttiName(serverVt);
+        Log("Session: server object has an unexpected class (%s)", rtti ? rtti : "no RTTI");
+    }
+    info.singlePlayer = serverVt == g_serverVtables[0];
+    return info;
+}
+
+int PlayerCountryTag() {
+    void* gs = GameState();
+    int tag = gs && g_playerTagOffset ? Read<int>(gs, g_playerTagOffset) : 0;
+    return tag > 0 ? tag : 0;
+}
+
+bool OnActionDefined(const char* name) {
+    EngineString s, none;
+    void* db = g_ppOnActionDb ? *g_ppOnActionDb : nullptr;
+    bool defined = false;
+    if (!HaveOnActions() || !db || !ShortEngineString(name, &s) || !ShortEngineString(kNoSuchOnAction, &none)) return false;
+    if (!FindOnActionRaw(db, &s, &none, &defined)) {
+        Log("ERROR: looking up on_action %s crashed", name);
+        return false;
+    }
+    return defined;
+}
+
+bool FireOnAction(const char* name, int countryTag) {
+    EngineString s;
+    void* db = g_ppOnActionDb ? *g_ppOnActionDb : nullptr;
+    if (!HaveOnActions() || !db || !ShortEngineString(name, &s)) {
+        Log("ERROR: cannot fire on_action %s (engine functions or database unavailable)", name);
+        return false;
+    }
+    DWORD code = 0;
+    if (!FireOnActionRaw(db, &s, countryTag, &code)) {
+        Log("ERROR: firing on_action %s crashed (exception 0x%08lX)", name, code);
+        return false;
+    }
+    return true;
 }
 
 }  // namespace Engine
