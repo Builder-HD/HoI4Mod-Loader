@@ -166,4 +166,30 @@ hoi4_loader_test_category = {
 		}
 		ai_will_do = { base = 0 }
 	}
+
+	# --- on_game_loaded / save migration (no loader needed for these decisions) ---------------
+
+	# Turns this game into a "data version 1" save: old flag set, new flag cleared, version 1.
+	# Pause, take it, and save right away: the weekly fallback would migrate it otherwise.
+	hoi4_loader_test_make_old_save = {
+		icon = generic_research
+		cost = 0
+		complete_effect = {
+			set_variable = { global.hoi4_loader_test_mod_version = 1 }
+			set_global_flag = hoi4_loader_test_old_flag
+			clr_global_flag = hoi4_loader_test_new_flag
+			clear_variable = global.hoi4_loader_test_migrated_by
+			country_event = { id = hoi4_loader_test.3 }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	hoi4_loader_test_show_save_data = {
+		icon = generic_research
+		cost = 0
+		complete_effect = {
+			country_event = { id = hoi4_loader_test.3 }
+		}
+		ai_will_do = { base = 0 }
+	}
 }

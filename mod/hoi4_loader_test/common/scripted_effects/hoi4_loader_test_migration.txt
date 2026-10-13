@@ -1,0 +1,32 @@
+# Save migration demo for hoi4_loader's on_game_loaded (README "on_game_loaded").
+#
+# Data version 1 kept the demo setting in the flag hoi4_loader_test_old_flag; data version 2
+# keeps it in hoi4_loader_test_new_flag. global.hoi4_loader_test_mod_version records the data
+# version of the save (new games start at 2, see on_startup).
+#
+# Idempotent: the first run migrates and stores version 2; every later run (on_game_loaded
+# again, on_weekly, another human country) sees version 2 and does nothing. It is called from
+# on_game_loaded (right after loading, with the loader) AND from on_weekly (the fallback that
+# also works without the loader and in multiplayer). Never skip the fallback because
+# hoi4_loader_feature_game_loaded = yes: that guard means "supported", not "fired".
+hoi4_loader_test_migrate = {
+	if = {
+		limit = { NOT = { check_variable = { global.hoi4_loader_test_mod_version > 1 } } }
+		if = {
+			limit = { has_global_flag = hoi4_loader_test_old_flag }
+			clr_global_flag = hoi4_loader_test_old_flag
+			set_global_flag = hoi4_loader_test_new_flag
+		}
+		set_variable = { global.hoi4_loader_test_mod_version = 2 }
+		if = {
+			limit = { has_global_flag = hoi4_loader_test_in_on_game_loaded }
+			set_variable = { global.hoi4_loader_test_migrated_by = 1 }
+			log = "hoi4_loader_test: save migrated to data version 2 by on_game_loaded"
+		}
+		else = {
+			set_variable = { global.hoi4_loader_test_migrated_by = 2 }
+			log = "hoi4_loader_test: save migrated to data version 2 by the on_weekly fallback"
+		}
+		country_event = { id = hoi4_loader_test.4 }
+	}
+}

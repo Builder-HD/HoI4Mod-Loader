@@ -1110,7 +1110,7 @@ OnAction_Fire(db, list, &scope, 0)                       // FUN_140a79ba0
 - **No error expected:** the key is accepted (see above), so `error.log` should say nothing
   about `on_game_loaded`; the list just never fires. To be confirmed in game (D3 test plan).
 
-## D2: options (awaiting approval)
+## D2: options (approved 2026-10-13: Option 1, see "D2 decisions")
 
 ### Option 1 (recommended): real on_action, fired by the loader (single player in v1)
 
@@ -1177,3 +1177,80 @@ plan) gathers it.
 ### Also proposed
 
 Apply the same hot-join guard to `lifecycle`'s flag refresh: skip it on a hot-join client.
+
+## D2 decisions (2026-10-13)
+
+1. **Option 1, single player only in v1:** approved.
+2. **Scope, permanent and forward-compatible with a multiplayer version:**
+   - once per human-controlled country, in alphabetical tag order, ROOT = that country;
+   - in single player that is just the player's country;
+   - with no human-controlled country (observer), once without scope, like `on_startup`.
+3. **Hot-join guard on the plugin-flag refresh:** same rule as `on_game_loaded`.
+   - **The region rescan stays unguarded,** because it only reads game state. It reads the
+     `hoi4_srn` flags and writes the loader's own display table (`g_names`), which the
+     `GetNameKey` hook serves. Nothing it writes is game state, saved, or compared between
+     machines (the OOS checksum covers game state), so running it on one machine cannot
+     desync.
+4. **Guard semantics:** documenting is enough. `hoi4_loader_feature_game_loaded` means
+   "supported", not "fired". README recommends idempotent migrations run from `on_game_loaded`
+   AND a fallback (`on_weekly`), and warns against using the guard to skip the fallback.
+
+## D3: implementation
+
+### Signatures (all unique on vanilla 1.19.3, patched 1.19.3 and 1.19.2, identical extracted values)
+
+| Signature | Where | Yields |
+|---|---|---|
+| `kSigPlayerScope` | game-entered, new-game player scope | `CEventScope` ctor, set-country, dtor; player tag `+0x520` (imm and disp must agree) |
+| `kSigOnStartupSeed` | game-entered, before `on_startup` | `SyncedRandom(file, line)`; ctor cross-checked against `kSigPlayerScope` |
+| `kSigOnStartupFire` | game-entered, `on_startup` fire | `COnActionDataBase*` global, `Find`, `Fire`; literal checked to be `"on_startup"` |
+| `kSigSessionHotjoin` | `playsession_start` telemetry | idler session getter (vtable `+0x88`), `bIsHotjoin` `+0x73e` |
+| `kSigSessionServer` | same | session getter (cross-checked), server `+0x58` |
+
+**Server classes:** the vtables of `CDummyServer`, `CNetworkServer`, `CProxyServer` and
+`CDedicatedServer` are found by RTTI name. A server whose vtable matches none of them is
+logged with its RTTI name if readable, and counts as "not single player".
+
+### Code
+
+- **`Engine::QuerySession(idler)`:** session → server vtable and `bIsHotjoin`, read under SEH.
+- **`Engine::OnActionDefined(name)`:** compares `Find(name)` with `Find("hoi4_loader_nx")`
+  (the null object). So there's no hardcoded "is null" offset.
+- **`Engine::FireOnAction(name, tag)`** does what the engine does for `on_startup`:
+  - seed from the synced RNG (file string "hoi4_loader on_game_loaded");
+  - `CEventScope(seed & 0x7fffffff)` in a 0x400-byte buffer (engine size 0xb0);
+  - `SetCountry(scope, &tag, true)` if `tag > 0`;
+  - `Fire(db, list, scope, false)`, then the destructor;
+  - all under SEH; a fault deactivates the feature.
+- **lifecycle:**
+  - queries the session on every game entry and logs it, e.g. "session: CDummyServer, single
+    player";
+  - adds `OnGameEnteredLate` (runs after all `OnGameEntered` callbacks: region rescan, flag
+    refresh);
+  - adds `SessionAllowsLocalWrites`: true only inside a game-entered callback, with a known
+    session, single player, no hot join. An unknown session counts as multiplayer (fail
+    closed).
+- **`plugin_game_loaded.cpp`:** on a loaded save, if `SessionAllowsLocalWrites` and the
+  on_action is defined, it fires once with ROOT = the player's country, or once without scope
+  when observing. Every skip is logged with its reason.
+  - **v1 human countries = the local player:** single player has at most one human country.
+    A multiplayer version would collect every human country and sort them by tag at that
+    point.
+- **Docs:** `document_on_action` adds an "On actions" section to `loader_script_docs.md`.
+
+### Tests
+
+- `native_script_test`: on_actions docs section, 66 checks.
+- Smoke runs: `game_loaded` "DISABLED, requires lifecycle" on the stand-in exe; guard file
+  served `no`.
+
+### Still to verify in game
+
+- **Fires once** per load path: main menu, in-game load, Continue, ironman.
+- **Order:** after the flag refresh.
+- **Scope:** ROOT is the player's country.
+- **Session:** the class logged in single player is `CDummyServer`.
+- **No error** for the on_action without the loader.
+- **The weekly fallback** migrates alone (`[features] game_loaded = 0`).
+- **Optional multiplayer run:** the logged session classes on host and client, and that
+  nothing fires.

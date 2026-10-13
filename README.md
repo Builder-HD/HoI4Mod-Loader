@@ -30,6 +30,7 @@ Current features:
 | `engine_probe` | engine | `hoi4_loader_plugin_engine_probe` | diagnostic only: resolves two PhysFS signatures and cross-checks them; patches nothing |
 | `lifecycle` | engine | `hoi4_loader_plugin_lifecycle` | "lexer ready" and "game entered" (new game *and* loaded save) callbacks for other features; refreshes the plugin flags right after a save is loaded |
 | `region_names` | engine (needs `lifecycle`) | `hoi4_loader_plugin_region_names` | runtime strategic region names, see below |
+| `game_loaded` | engine (needs `lifecycle`) | `hoi4_loader_plugin_game_loaded` | the `on_game_loaded` on_action, see below |
 
 On an unknown build the file tier stays on, the engine tier is off, and `loader.log` lists the
 disabled features and prints the exact line to add to `loader_config.ini`. A feature whose init
@@ -84,8 +85,10 @@ When to call `hoi4_loader_init` (the test mod's `common/on_actions` file shows b
 
 Have your stub `hoi4_loader_init` clear the flags too, so a save loaded without the loader loses
 them at the next weekly refresh. `hoi4_loader_present = yes` is always current. With the
-`lifecycle` feature the loader refreshes the plugin flags itself right after a save is loaded; on
-builds without it, a `hoi4_loader_plugin_*` flag can lag up to a week after loading a save.
+`lifecycle` feature the loader refreshes the plugin flags itself right after a save is loaded, in
+single player. In multiplayer (and after a hot join) it doesn't, because a change made on one
+machine only would desync the game; there the weekly refresh does it. On builds without
+`lifecycle`, a `hoi4_loader_plugin_*` flag can lag up to a week after loading a save.
 
 ## Strategic region names (`region_names`)
 
@@ -149,6 +152,71 @@ naval invasion and blockade texts, radar, theaters, trigger tooltips and map lab
 **Multiplayer:** names are cosmetic; the flags are ordinary game state set by script on every
 client. All players need the loader anyway, because it changes the files the game reads, which
 affects the checksum.
+
+## `on_game_loaded` (`game_loaded`)
+
+Vanilla `on_startup` fires for new games only. `on_game_loaded` is its counterpart for loaded
+saves. Use it like any on_action; any number of files and mods can add to it:
+
+```
+on_actions = {
+    on_game_loaded = {
+        effect = { ... }
+    }
+}
+```
+
+**Semantics (permanent):**
+- **When:** it fires each time a saved game is loaded: from the main menu, Continue, from the
+  in-game menu, and ironman. It never fires for a new game; use `on_startup` for that.
+- **Order:** it runs after the loader's own refresh (plugin flags, region names), so the
+  effect sees current state.
+- **Scope:** once per **human-controlled country**, in alphabetical tag order, with ROOT = that
+  country. `country_event`, country flags and so on work directly, with no `every_country`
+  workaround. If no country is human-controlled (observer), it fires once without scope, like
+  `on_startup`.
+
+**This version fires in single player only.** In multiplayer (host, client or hot join) it
+doesn't fire, and `loader.log` says why. Firing from the loader happens on one machine. In
+multiplayer every machine would have to do it at the same moment, and a hot-joining player
+loads alone, so the game would desync. See NOTES.md Part D.
+
+**Without the loader** the game accepts the `on_game_loaded` block silently (on_action names
+are free-form) and simply never fires it. There is no error.
+
+**Guard:** `hoi4_loader_feature_game_loaded = yes` (ship the stub, see "Checking for features
+in script") means **supported, not fired**. It is `yes` in multiplayer too, where the on_action
+never fires. Use it for UI ("this loader can run migrations on load"), never to decide whether
+something already happened.
+
+**Pattern for save migrations:** store a data version in the save, and make the migration
+idempotent: the first run migrates, every later run does nothing. Run it from
+`on_game_loaded` **and** from a fallback such as `on_weekly`:
+
+```
+# common/scripted_effects/my_mod_migrate.txt
+my_mod_migrate = {
+    if = {
+        limit = { NOT = { check_variable = { global.my_mod_data_version > 1 } } }
+        # ... convert version 1 data to version 2 ...
+        set_variable = { global.my_mod_data_version = 2 }
+    }
+}
+
+# common/on_actions/my_mod_on_actions.txt
+on_actions = {
+    on_startup = { effect = { set_variable = { global.my_mod_data_version = 2 } } }  # new games are current
+    on_game_loaded = { effect = { my_mod_migrate = yes } }             # right after loading, with the loader
+    on_weekly = { effect = { if = { limit = { is_ai = no } my_mod_migrate = yes } } }  # fallback
+}
+```
+
+**Do not** skip the fallback when `hoi4_loader_feature_game_loaded = yes`. Without the loader,
+in multiplayer, or with the feature switched off, the fallback is the only thing that runs.
+The test mod's "Save migration" decisions are built exactly this way.
+
+**Switch off:** `[features] game_loaded = 0` in `loader_config.ini`. Every
+`on_game_loaded` block then stays silent and the fallbacks take over.
 
 ## Native script commands (for mod authors)
 
@@ -272,6 +340,7 @@ src/signatures.h              all engine-tier byte signatures
 src/features.cpp              feature registry, tier gating, core detection files
 src/plugin_engine_probe.cpp   engine_probe feature
 src/plugin_region_names.cpp   region_names feature (flags, GetNameKey hook, native commands)
+src/plugin_game_loaded.cpp    game_loaded feature (fires on_game_loaded after a save is loaded)
 src/native_script.h, .cpp     native effect/trigger API: schemas, registration, parsing, docs
 src/native_script_engine.cpp  native API engine binding (vtable clones, registries, Scope)
 src/engine.cpp, engine.h      engine access: all hoi4.exe functions/data the features use

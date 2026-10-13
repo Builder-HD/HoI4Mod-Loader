@@ -42,3 +42,29 @@ country_event = {
 		name = hoi4_loader_test.2.a
 	}
 }
+
+# Save data status. Fired by on_game_loaded (hoi4_loader) and by the status decision.
+country_event = {
+	id = hoi4_loader_test.3
+	title = hoi4_loader_test.3.t
+	desc = hoi4_loader_test.3.d
+	picture = GFX_report_event_generic_read_write
+	is_triggered_only = yes
+
+	option = {
+		name = hoi4_loader_test.3.a
+	}
+}
+
+# Fired once by hoi4_loader_test_migrate when it converts a data version 1 save.
+country_event = {
+	id = hoi4_loader_test.4
+	title = hoi4_loader_test.4.t
+	desc = hoi4_loader_test.4.d
+	picture = GFX_report_event_generic_read_write
+	is_triggered_only = yes
+
+	option = {
+		name = hoi4_loader_test.4.a
+	}
+}

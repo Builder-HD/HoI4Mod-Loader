@@ -49,6 +49,54 @@ defined_text = {
 	}
 }
 
+# on_game_loaded guard: "supported", not "fired".
+defined_text = {
+	name = GetHoi4LoaderGameLoadedGuard
+	text = {
+		trigger = { hoi4_loader_feature_game_loaded = yes }
+		localization_key = hoi4_loader_test_yes
+	}
+	text = {
+		localization_key = hoi4_loader_test_no
+	}
+}
+
+# Save migration state (hoi4_loader_test_migrate).
+defined_text = {
+	name = GetHoi4LoaderTestMigration
+	text = {
+		trigger = { check_variable = { global.hoi4_loader_test_migrated_by = 1 } }
+		localization_key = hoi4_loader_test_migrated_by_load
+	}
+	text = {
+		trigger = { check_variable = { global.hoi4_loader_test_migrated_by = 2 } }
+		localization_key = hoi4_loader_test_migrated_by_weekly
+	}
+	text = {
+		trigger = { check_variable = { global.hoi4_loader_test_mod_version > 1 } }
+		localization_key = hoi4_loader_test_migration_not_needed
+	}
+	text = {
+		localization_key = hoi4_loader_test_migration_pending
+	}
+}
+
+# Which of the demo flags the save has.
+defined_text = {
+	name = GetHoi4LoaderTestDemoFlag
+	text = {
+		trigger = { has_global_flag = hoi4_loader_test_new_flag }
+		localization_key = hoi4_loader_test_demo_new
+	}
+	text = {
+		trigger = { has_global_flag = hoi4_loader_test_old_flag }
+		localization_key = hoi4_loader_test_demo_old
+	}
+	text = {
+		localization_key = hoi4_loader_test_demo_none
+	}
+}
+
 # Name of region 42 according to the hoi4_srn flags (the test decisions only use A, B and C).
 # Script cannot read the engine's displayed name, so this is the stored state, not the UI.
 defined_text = {
