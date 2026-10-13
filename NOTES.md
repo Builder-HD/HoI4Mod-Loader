@@ -510,13 +510,13 @@ or dropped after an update, without touching persistence.
   - Spaces, quotes, `:`, `@`, `[`, `]`, `$`, `=` and `#` do not occur in keys, and some of them
     are special in script.
 
-  Plan: accept `[A-Za-z0-9_.]` as-is; test `-` in B3 and, if it fails, reject such keys with
-  a log line.
+  **Result (B3, in game):** `[A-Za-z0-9_.-]` is accepted. `-` works in the effect argument and
+  in `has_global_flag`.
 - **Length.** Vanilla keys are up to 111 characters (99th percentile 54); vanilla flag names
-  reach 68. `hoi4_srn_<id>_` adds up to 13, giving 124 at most. No engine limit was found:
-  flags are interned tokens backed by strings, and binary saves store strings with a 16-bit
-  length. B3 will test a 124-character flag through set, save, load and `has_global_flag`;
-  until verified, the loader logs and ignores names over a conservative cap.
+  reach 68. No engine limit was found: flags are interned tokens backed by strings, and binary
+  saves store strings with a 16-bit length. **Result (B3):** the loader caps keys at 100
+  characters (flags at 112). A 112-character flag is verified through script parsing and
+  `set`/`has_global_flag`; save/load with it is still open (see B3 results). The cap stays.
 - **Parsing.** The flag carries `<id>` then `_` then `<key>`. The id is all digits, so the first
   `_` after the prefix is unambiguous even when the key contains `_`. The reserved key `reset`
   means "original name". A key equal to `reset` would be unusable, which is acceptable.
@@ -607,9 +607,21 @@ Re-test after the fix (2026-10-13, new game and loaded save):
   up was the test decision's own description, which contained `{` (HOI4 localisation treats `{`
   as markup and swallowed `{ r`). The descriptions were reworded.
 
+Dash and long-key test (2026-10-13 19:47 session, new game; checked from `loader.log`,
+`logs/error.log` and the save folder):
+- **`-` in keys works:** `HOI4_LOADER_TEST-REGION-NAME-DASH` renamed region 42 to "Loader Test
+  Sea Dash-Key".
+- **The 100-character key (112-character flag) works.** Long names are cut off in labels and
+  tooltips exactly like vanilla's long sea zone names.
+- **Script parsing is verified for both:** the decisions file
+  (`set_strategic_region_name = { ... name = <key> }`) and the scripted localisation
+  (`has_global_flag = hoi4_srn_42_<key>`) were parsed at startup with no `error.log` entries.
+- **Save/load is NOT verified for these two flags.** That session never loaded a save, and no
+  save made after the renames exists. Save/load is verified for the shorter keys (A, B).
+
 Still open:
-1. **Flag name characters:** `-` in a key is accepted by the loader but untested in script
-   flags; flags longer than vanilla's 68 characters are untested.
+1. **Save/load with the dash and 112-character flags:** take one of the two decisions, save,
+   restart, load, and expect `region 42 -> <key>` after `game entered (loaded save)`.
 2. **Unchecked UI places:** the region panel/tooltip and naval mission screens were not
    explicitly reported. They use the same `GetNameKey` path as the places that work.
 

@@ -98,6 +98,10 @@ If several `hoi4_srn` flags exist for one region, the most recently set one wins
 **Rules:**
 - The key may contain `A-Z a-z 0-9 _ . -` and be up to 100 characters long, and it must exist
   in the localisation.
+  - Both `-` and the full length (a 112-character `hoi4_srn` flag) are tested in game,
+    including script parsing of the flag in `has_global_flag`.
+  - Long display names are cut off in labels and tooltips the same way vanilla's long sea zone
+    names are.
 - Invalid region ids, malformed or missing keys are ignored with a line in `loader.log`; the
   region keeps its name.
 - The effects add no tooltip line; use `custom_effect_tooltip` if a decision needs one.
