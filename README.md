@@ -47,9 +47,33 @@ region_names = 0
 # Is the loader there at all? (Only true when the loader served the trigger this session.)
 hoi4_loader_present = yes
 
-# Is a given feature active? (Requires hoi4_loader_init to have run, e.g. from on_startup.)
+# Is a feature usable right now? (Never stale; the mod must ship the stub file, see below.)
+hoi4_loader_feature_region_names = yes
+
+# Was a feature active when hoi4_loader_init last ran? (Saved with the game; can be stale.)
 has_global_flag = hoi4_loader_plugin_engine_probe
 ```
+
+**Feature guard triggers** `hoi4_loader_feature_<feature>` exist for every feature. A mod that
+uses one ships a stub, one file per feature:
+
+```
+# common/scripted_triggers/hoi4_loader_feature_region_names.txt
+hoi4_loader_feature_region_names = { always = no }
+```
+
+The loader serves `always = yes` instead, but only if that feature is active **and** every native
+command it declares was registered this session. Otherwise it serves `always = no`, with the
+reason as a comment.
+- **Generated late:** the content is generated on the first read of the file. Native commands
+  are registered when the lexer becomes ready, before any script file is read (about 2.5 s into
+  startup, against about 6 s for the first script file in the tests). If the file were ever read
+  before registration, it gets `no` (fail closed) and `loader.log` says
+  `read BEFORE native registration ran`.
+- **Never stale:** guard triggers are read from script each session and never saved, so they
+  can't go stale.
+- **Unknown features:** a mod that ships a stub for a feature the installed loader doesn't know
+  keeps its stub (`no`). Either way there's no undefined-trigger error.
 
 When to call `hoi4_loader_init` (the test mod's `common/on_actions` file shows both):
 - from `on_startup`, inside a country scope such as `every_country = { limit = { is_ai = no } ... }`,
@@ -74,7 +98,18 @@ reset_strategic_region_name = { region = 42 }
 
 These are native effects, usable in any effect block (decisions, events, focuses, on_actions,
 `meta_effect`). They exist only while `region_names` is active. Without the loader, or on an
-unsupported build, the game logs `Unknown effect` for every use when parsing.
+unsupported build, the game logs `Unknown effect` for every use when parsing. Only `region` is
+accepted; the `id` alias of earlier versions is gone.
+
+There is also a native trigger, true while the region shows a loader-provided name:
+
+```
+hoi4_loader_feature_region_names = yes             # guard: required, see "Native script commands"
+strategic_region_has_custom_name = { region = 42 }
+```
+
+Its requirement line reads e.g. "Strategic region Loader Test Sea A (42) has a custom name"
+(negated: "does NOT have a custom name").
 
 **Storage: a plain global flag per region**, `hoi4_srn_<region id>_<localisation key>`. The
 native effects only manage these flags: set clears the region's other `hoi4_srn` flags, then
@@ -115,6 +150,115 @@ naval invasion and blockade texts, radar, theaters, trigger tooltips and map lab
 client. All players need the loader anyway, because it changes the files the game reads, which
 affects the checksum.
 
+## Native script commands (for mod authors)
+
+Features can add real script effects and triggers. Every registered command, with its
+parameters, scopes and help, is listed in
+`<Documents>\Paradox Interactive\Hearts of Iron IV\loader_script_docs.md`, written at each start.
+
+**Without the loader** (or on an unsupported build, or with the feature off) the game doesn't
+know these commands and logs `Unknown effect` / `Unknown trigger` while parsing. What that
+means differs:
+- **An unknown effect** is dropped: nothing happens. That's safe.
+- **An unknown trigger** is dropped too. Its condition disappears, so the surrounding `visible`,
+  `available`, `limit` or `trigger` block can become **true**.
+
+So every native trigger needs the feature guard **in the same AND block**:
+
+```
+visible = {
+    hoi4_loader_feature_region_names = yes
+    strategic_region_has_custom_name = { region = 42 }
+}
+```
+
+The plugin flag `has_global_flag = hoi4_loader_plugin_region_names` is **not** a safe guard:
+- Global flags are saved with the game. A save made with the loader keeps the flag when it is
+  loaded without the loader, or on a build where the engine tier is off (no lifecycle refresh),
+  until the weekly refresh runs.
+- In that window the native trigger has been dropped and the flag is still set, so the condition
+  is true.
+- `hoi4_loader_feature_region_names` is read from script each session, so it is `no` from the
+  first frame. The test mod's "UNGUARDED" decision demonstrates the difference.
+
+**NOT and OR:** keep the guard next to the native trigger, never let the native trigger stand
+alone in a block:
+
+```
+# "Region 42 has its original name", false without the loader (fail closed):
+hoi4_loader_feature_region_names = yes
+NOT = { strategic_region_has_custom_name = { region = 42 } }
+
+# Same, but true without the loader (no loader = no custom names):
+OR = {
+    NOT = { hoi4_loader_feature_region_names = yes }
+    NOT = { strategic_region_has_custom_name = { region = 42 } }
+}
+
+# OR with other conditions: wrap the native trigger with its guard.
+OR = {
+    has_war = yes
+    AND = {
+        hoi4_loader_feature_region_names = yes
+        strategic_region_has_custom_name = { region = 42 }
+    }
+}
+```
+
+If a native trigger fails at runtime (a plugin bug), it evaluates to false and `loader.log`
+gets one line. Inside `NOT` that counts as true.
+
+## Writing a native effect or trigger (for plugin authors)
+
+Declare commands in your feature's init (see `src/plugin_region_names.cpp`); the API in
+`src/native_script.h` handles parsing, registration, errors and docs:
+
+```cpp
+static void ExecSet(const Args& a, const Scope& s) { DoSomething(a.i(0), a.key(1)); }
+static bool EvalHas(const Args& a, const Scope& s) { return g_table[a.i(0)].load() != nullptr; }
+
+bool MyFeatureInit() {
+    register_native_effect({"set_my_thing", "Help text shown in loader_script_docs.md.", Form::Block,
+                            {{"region", ParamType::Int, true}, {"name", ParamType::Key, true}},
+                            ScopeMask::Any, &ExecSet, /*tooltip*/ nullptr},
+                           "my_feature");
+    register_native_trigger({"has_my_thing", "Help text.", Form::Block, {{"region", ParamType::Int, true}},
+                             ScopeMask::Country, &EvalHas, /*tooltip*/ nullptr},
+                            "my_feature");
+    return true;
+}
+```
+
+- **Forms:**
+  - `Form::Value` (`name = <value>`) takes exactly one required parameter.
+  - `Form::Block` (`name = { key = value ... }`) takes named parameters.
+  - Types: `Int`, `Bool` (`yes`/`no`) and `Key` (one word, up to 255 characters).
+  - Unknown keys, type errors and missing required parameters are reported by the engine (with
+    file and line) and logged once per command; that use then does nothing.
+- **When:** register from the feature's init only. Engine registration happens at lexer-ready,
+  before any script is parsed; later calls are refused. The feature needs the engine tier and
+  the `lifecycle` feature.
+- **Name conflicts:** a name the game already has, or one the loader already registered, is
+  refused, so vanilla commands are never replaced. One refused command makes
+  `hoi4_loader_feature_<feature>` say `no`.
+- **Callbacks:**
+  - every callback runs under SEH; a crash is logged once, after which effects do nothing and
+    triggers return false;
+  - `Scope` offers read-only `stateId()`, `countryTag()`, `strategicRegionId()`, `types()` and
+    `root()`/`from()`/`prev()`;
+  - scopes are checked by the engine against the declared `ScopeMask`.
+- **Tooltips:**
+  - effects without a tooltip callback show no line;
+  - triggers without one show `name: param=value ...`;
+  - tooltip text is plain UTF-8 (colour codes allowed, no `{`).
+- **Trigger performance:** `evaluate` runs for AI and UI, often, possibly on several threads at
+  once. **No locks, no allocation, no logging** in it; read lock-free data (atomics, immutable
+  tables).
+- **Determinism (multiplayer):** `execute` and `evaluate` may only read and write game state: no
+  randomness, no wall-clock time, no file I/O, nothing thread-dependent. Every client runs the
+  same script and must get the same result, or multiplayer desyncs. Display-only state, such as
+  `region_names`' name table, must be derived from game state (its flags).
+
 ## Layout
 
 ```
@@ -127,7 +271,9 @@ src/sigscan.cpp               signature scanner over hoi4.exe .text
 src/signatures.h              all engine-tier byte signatures
 src/features.cpp              feature registry, tier gating, core detection files
 src/plugin_engine_probe.cpp   engine_probe feature
-src/plugin_region_names.cpp   region_names feature (flags, GetNameKey hook, native effects)
+src/plugin_region_names.cpp   region_names feature (flags, GetNameKey hook, native commands)
+src/native_script.h, .cpp     native effect/trigger API: schemas, registration, parsing, docs
+src/native_script_engine.cpp  native API engine binding (vtable clones, registries, Scope)
 src/engine.cpp, engine.h      engine access: all hoi4.exe functions/data the features use
 src/lifecycle.cpp, .h         lexer-ready / game-entered callbacks (lifecycle feature)
 src/proxy.asm, version.def    version.dll export stubs
@@ -202,9 +348,21 @@ cmake --build build --config Release
 sh tests/run_smoke.sh build        # from Git Bash
 ```
 
-It runs two stand-in `hoi4.exe` builds through eight scenarios: engine tier on/off, unknown hash,
-missing ini, missing signatures, and cache hit/miss/mtime/size/corrupt. It checks the served
-content and the log lines. It overwrites `loader.log` unless the game is running.
+It first runs `native_script_test` (64 checks on the native script API core with a fake engine).
+That covers:
+- schema validation;
+- duplicate, vanilla-name and late registrations;
+- feature completeness;
+- int, bool and key parsing and their errors;
+- missing parameters;
+- crash containment;
+- generic tooltips;
+- the exact docs file content.
+
+Then it runs two stand-in `hoi4.exe` builds through eight scenarios: engine tier on/off, unknown
+hash, missing ini, missing signatures, and cache hit/miss/mtime/size/corrupt. Each one checks
+the served content, including the lazily generated guard triggers, and the log lines. It
+overwrites `loader.log` unless the game is running.
 
 ## Uninstall
 

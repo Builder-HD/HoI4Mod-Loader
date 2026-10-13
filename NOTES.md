@@ -761,7 +761,14 @@ directly. The state, country and region fields are plain reads; the 8-byte ids n
 5. **Tooltips allocate.** That is acceptable in UI code, but the tooltip callback must still be
    bounded and must never touch game-state locks.
 
-## C2: proposed API (pending approval)
+## C2: API design (approved 2026-10-13)
+
+Decisions:
+- design approved as below;
+- no comparison operators in v1 (numeric `name > 5` triggers are the next step);
+- the `id` alias is dropped (only `region`);
+- a generic tooltip line for triggers without a tooltip callback;
+- **addition: per-feature guard triggers**, see C3.
 
 ### Shape
 
@@ -870,3 +877,83 @@ The smoke tests link the core directly with a fake registry and check:
 - the exact docs file content.
 
 The engine binding is covered by the in-game test plan.
+
+## C3-C5: implementation
+
+### Files
+
+| File | Content |
+|---|---|
+| `src/native_script.h` | Public plugin API (`ParamSpec`, `Args`, `Scope`, `TooltipText`, `NativeEffect`, `NativeTrigger`, `register_native_*`, `NativeFeatureComplete`) and the internal core/binding contract (`Command`, `ParsedCommand`, `NativeBackend`). |
+| `src/native_script.cpp` | Engine-free core: schema checks, window, loader-side duplicates, finalize (engine-name conflict, token interning, bind), typed `NativeSetArg`, `NativeValidate`, SEH-wrapped `NativeExecute` / `NativeEvaluate` / `NativeTooltip`, docs writer. |
+| `src/native_script_engine.cpp` | Binding: vtable clones, generic slots, entries and factories, `Scope` accessors, `NativeScriptRegisterWithEngine()` (lexer-ready). |
+| `src/engine.cpp` | Trigger registry from the `has_global_flag` anchor; `MapHasKey` (read-only `std::map` walk) for both registries; `ParserReadString`, `ParserUnexpected`, `ConstructEngineString`; RTTI vtables of the templates. |
+| `src/vfs.cpp` | Lazy virtual files (generated on the first served read, under an SRW lock). |
+| `src/features.cpp` | Guard triggers per feature; native registration queued at lexer-ready after the features' own callbacks. |
+
+### Binding details
+
+| | Effect (template `CRenameProvinceEffect`, 0x80) | Trigger (template `CAlwaysTrigger`, 0x60) |
+|---|---|---|
+| Clause reader | block: `CEffect` slot 3; value: `CSetStateNameEffect` slot 3 | block: `CTrigger` slot 5; value: `CAlwaysTrigger` slot 5 |
+| Per-key / value | slot 4 / slot 6 | slot 6 / slot 4 |
+| Validate | slot 5 | slot 7 |
+| Tooltip | slot 7 (empty without callback) | slot 21 (+`\n`; generic line without callback) |
+| Run | slot 13 execute | slot 22 evaluate |
+| Scopes | slot 19 | slot 14 (slot 15 = 0) |
+| Entry | `{vtable, help, cmd, objVt}` | `{vtable, help, 1, cmd, objVt}` |
+
+- **Records:** objects come from the template's factory; the binding swaps in its vtable and
+  stores a `ParsedCommand*` at `+0x58`, the template's private area, used only by replaced slots.
+- **Values are read as text:** `ParserReadString` for block items, the parser value struct
+  (`+8` text, `+0x14` length) for single values. The core converts the text: the engine's int
+  readers have 11 and 4 identical copies, so they can't be signatures, while the text reader is
+  unique.
+- **Unknown block keys:** they go to `ParserUnexpected` (the engine's "Unexpected token" with
+  file/line, which skips the value). They are **not** passed to the base per-key slot: `CEffect`
+  is itself an effect container, and its slot 4 would parse the key as a nested effect.
+- **Leaks, deliberate and bounded by script size:** parse-time allocations (records and engine
+  strings over 15 characters from `ParserReadString`) are never freed.
+- **Engine-owned strings:** tooltip strings are built with the engine's own string
+  construction, so the engine frees them with its allocator.
+
+### Guard triggers (approved addition)
+
+- **What is served:** for every feature, `common/scripted_triggers/hoi4_loader_feature_<name>.txt`
+  is a lazy virtual file:
+  - `always = yes` iff the feature is active **and** `NativeFeatureComplete` (every native
+    command of the feature registered; true for features without any);
+  - otherwise `always = no`, with the reason as a comment, also logged as
+    `Guard trigger hoi4_loader_feature_<name> = ...`.
+- **Ordering:** in-game logs so far show the lexer-ready callback at about +2.5 s and the first
+  script file read at about +6 s. A guard file read before registration would get `no` (fail
+  closed) and log "read BEFORE native registration ran".
+- **Runtime deactivation:** a feature deactivated later in the session (e.g. a `region_names`
+  self-check failure) keeps its served guard value for that session. Its native triggers then
+  evaluate false anyway (the name table is disabled).
+
+### Behaviour changes in region_names
+
+- **Native commands are declarations now:** `set_` and `reset_strategic_region_name` are schemas
+  through the API. Behaviour is unchanged except that only `region` is accepted (`id` is gone).
+- **New trigger** `strategic_region_has_custom_name = { region = N }`: a lock-free check of the
+  display table (false while the self-check hasn't passed). The tooltip names the region as it
+  currently shows.
+
+### Out-of-game tests
+
+`tests/native_script_test.cpp`: 64 checks on the core with a fake backend, all passing. The
+stand-in exe checks the guard files: `engine_probe` = yes or no by tier, `region_names` = no.
+
+### To verify in game
+
+1. **Registration:** `loader.log` shows the trigger registry, the three region commands
+   registered, and the docs file written.
+2. **Regression:** the region effects behave as before.
+3. **Requirement tooltips:** the trigger's tooltip in decision requirements (`available`, plus
+   `NOT`) looks right.
+4. **Parse errors:** unknown or invalid parameters produce engine errors with file and line,
+   not crashes.
+5. **No loader:** the guard keeps guarded decisions hidden immediately after loading a save
+   made with the loader, while the "UNGUARDED" decision shows up.
+6. **Docs file:** `loader_script_docs.md` content.

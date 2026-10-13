@@ -1,15 +1,67 @@
 # Test decisions for the region_names plugin. Region 42 = Bay of Biscay (STRATEGICREGION_42).
 #
-# The native effects (set_/reset_strategic_region_name) exist only while hoi4_loader's
-# region_names feature is active. Without it the game logs "Unknown effect" for them when
-# parsing this file; the decisions are then hidden and harmless. The last decision uses the plain
-# flag protocol, which never produces parse errors.
+# The native effects (set_/reset_strategic_region_name) and the native trigger
+# (strategic_region_has_custom_name) exist only while hoi4_loader's region_names feature is
+# active. Without it the game logs "Unknown effect"/"Unknown trigger" for them when parsing this
+# file. Every decision that uses them is guarded with hoi4_loader_feature_region_names = yes
+# (never stale), so it is hidden then. The flag-protocol decision never produces parse errors.
 hoi4_loader_test_category = {
+
+	# --- strategic_region_has_custom_name (native trigger) -----------------------------------
+
+	# Correct pattern: guard and native trigger in the same AND block. Visible only while region
+	# 42 shows a loader-provided name AND the loader's region_names feature is fully available.
+	hoi4_srn_test_guarded = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_region_names = yes
+			strategic_region_has_custom_name = { region = 42 }
+		}
+		complete_effect = { country_event = { id = hoi4_loader_test.2 } }
+		ai_will_do = { base = 0 }
+	}
+
+	# WRONG pattern, kept to demonstrate the problem: guarded only by the plugin flag. Without the
+	# loader the native trigger is dropped at parse time and a save made with the loader still
+	# carries the flag, so this decision shows up although nothing is renamed.
+	hoi4_srn_test_unguarded = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			has_global_flag = hoi4_loader_plugin_region_names
+			strategic_region_has_custom_name = { region = 42 }
+		}
+		complete_effect = { country_event = { id = hoi4_loader_test.2 } }
+		ai_will_do = { base = 0 }
+	}
+
+	# Requirement tooltip: the trigger in `available` shows its line with a check mark.
+	hoi4_srn_test_requires_custom = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_region_names = yes }
+		available = { strategic_region_has_custom_name = { region = 42 } }
+		complete_effect = { country_event = { id = hoi4_loader_test.2 } }
+		ai_will_do = { base = 0 }
+	}
+
+	# Negated requirement tooltip (NOT).
+	hoi4_srn_test_requires_original = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_region_names = yes }
+		available = { NOT = { strategic_region_has_custom_name = { region = 42 } } }
+		complete_effect = { country_event = { id = hoi4_loader_test.2 } }
+		ai_will_do = { base = 0 }
+	}
+
+	# --- set_/reset_strategic_region_name (native effects) -----------------------------------
 
 	hoi4_srn_test_rename_a = {
 		icon = generic_research
 		cost = 0
-		visible = { has_global_flag = hoi4_loader_plugin_region_names }
+		visible = { hoi4_loader_feature_region_names = yes }
 		complete_effect = {
 			set_strategic_region_name = { region = 42 name = HOI4_LOADER_TEST_REGION_NAME_A }
 			country_event = { id = hoi4_loader_test.2 hours = 1 }
@@ -20,7 +72,7 @@ hoi4_loader_test_category = {
 	hoi4_srn_test_rename_b = {
 		icon = generic_research
 		cost = 0
-		visible = { has_global_flag = hoi4_loader_plugin_region_names }
+		visible = { hoi4_loader_feature_region_names = yes }
 		complete_effect = {
 			set_strategic_region_name = { region = 42 name = HOI4_LOADER_TEST_REGION_NAME_B }
 			country_event = { id = hoi4_loader_test.2 hours = 1 }
@@ -31,7 +83,7 @@ hoi4_loader_test_category = {
 	hoi4_srn_test_reset = {
 		icon = generic_research
 		cost = 0
-		visible = { has_global_flag = hoi4_loader_plugin_region_names }
+		visible = { hoi4_loader_feature_region_names = yes }
 		complete_effect = {
 			reset_strategic_region_name = { region = 42 }
 			country_event = { id = hoi4_loader_test.2 hours = 1 }
@@ -44,7 +96,7 @@ hoi4_loader_test_category = {
 	hoi4_srn_test_dash = {
 		icon = generic_research
 		cost = 0
-		visible = { has_global_flag = hoi4_loader_plugin_region_names }
+		visible = { hoi4_loader_feature_region_names = yes }
 		complete_effect = {
 			set_strategic_region_name = { region = 42 name = HOI4_LOADER_TEST-REGION-NAME-DASH }
 			country_event = { id = hoi4_loader_test.2 hours = 1 }
@@ -57,7 +109,7 @@ hoi4_loader_test_category = {
 	hoi4_srn_test_long = {
 		icon = generic_research
 		cost = 0
-		visible = { has_global_flag = hoi4_loader_plugin_region_names }
+		visible = { hoi4_loader_feature_region_names = yes }
 		complete_effect = {
 			set_strategic_region_name = { region = 42 name = HOI4_LOADER_TEST_REGION_NAME_THAT_IS_DELIBERATELY_VERY_LONG_TO_CHECK_FLAG_NAME_LIMITS_IN_SAVE_AND_UI }
 			country_event = { id = hoi4_loader_test.2 hours = 1 }
@@ -69,7 +121,7 @@ hoi4_loader_test_category = {
 	hoi4_srn_test_invalid_region = {
 		icon = generic_research
 		cost = 0
-		visible = { has_global_flag = hoi4_loader_plugin_region_names }
+		visible = { hoi4_loader_feature_region_names = yes }
 		complete_effect = {
 			set_strategic_region_name = { region = 9999 name = HOI4_LOADER_TEST_REGION_NAME_A }
 			country_event = { id = hoi4_loader_test.2 hours = 1 }
@@ -82,7 +134,7 @@ hoi4_loader_test_category = {
 	hoi4_srn_test_missing_key = {
 		icon = generic_research
 		cost = 0
-		visible = { has_global_flag = hoi4_loader_plugin_region_names }
+		visible = { hoi4_loader_feature_region_names = yes }
 		complete_effect = {
 			set_strategic_region_name = { region = 42 name = HOI4_LOADER_TEST_KEY_THAT_DOES_NOT_EXIST }
 			country_event = { id = hoi4_loader_test.2 hours = 1 }

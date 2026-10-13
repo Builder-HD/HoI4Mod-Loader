@@ -22,6 +22,33 @@ defined_text = {
 	}
 }
 
+# Native trigger result for region 42, guarded so it is "no" without the loader.
+defined_text = {
+	name = GetHoi4LoaderRegion42HasCustomName
+	text = {
+		trigger = {
+			hoi4_loader_feature_region_names = yes
+			strategic_region_has_custom_name = { region = 42 }
+		}
+		localization_key = hoi4_loader_test_yes
+	}
+	text = {
+		localization_key = hoi4_loader_test_no
+	}
+}
+
+# Guard trigger value.
+defined_text = {
+	name = GetHoi4LoaderRegionNamesGuard
+	text = {
+		trigger = { hoi4_loader_feature_region_names = yes }
+		localization_key = hoi4_loader_test_yes
+	}
+	text = {
+		localization_key = hoi4_loader_test_no
+	}
+}
+
 # Name of region 42 according to the hoi4_srn flags (the test decisions only use A, B and C).
 # Script cannot read the engine's displayed name, so this is the stored state, not the UI.
 defined_text = {

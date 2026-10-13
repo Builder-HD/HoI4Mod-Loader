@@ -1,0 +1,5 @@
+# Stub, used when hoi4_loader is absent or its region_names feature is not fully available.
+# The loader serves "always = yes" only if region_names is active AND all its native commands
+# registered this session. Unlike the hoi4_loader_plugin_region_names flag this is never saved,
+# so it is never stale. Use it as the guard for native triggers (see README).
+hoi4_loader_feature_region_names = { always = no }
