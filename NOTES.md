@@ -984,7 +984,8 @@ stand-in exe checks the guard files: `engine_probe` = yes or no by tier, `region
 - **Test-mod fix from this run:** the flag-protocol decision used the saved
   `hoi4_loader_present` flag, which was stale without the loader. It now uses the
   `hoi4_loader_present = yes` trigger. The status decision is always visible.
-- **Still open:**
-  - `error.log` with the loader (no `Unexpected token` lines for the test mod);
-  - the content of `loader_script_docs.md`;
-  - the dash and long-key save/load check.
+- **Follow-up run (2026-10-13), all passed:**
+  - `error.log` with the loader has no test-mod errors;
+  - `loader_script_docs.md` lists all three commands as registered;
+  - the dash-key and long-key names survive save and load.
+  The dash/long save/load item from Part B step 0 is closed by this run.
