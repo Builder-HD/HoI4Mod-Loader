@@ -114,6 +114,11 @@ strategic_region_has_custom_name = { region = 42 }
 Its requirement line reads e.g. "Strategic region Loader Test Sea A (42) has a custom name"
 (negated: "does NOT have a custom name").
 
+**Timing:** a rename shows from the next frame. The loader applies flag changes on the main
+thread at the start of a frame, not inside the effect (see "Threads and hooks"). So right after
+`set_strategic_region_name`, in the same effect block, the trigger still answers for the old
+name.
+
 **Storage: a plain global flag per region**, `hoi4_srn_<region id>_<localisation key>`. The
 native effects only manage these flags: set clears the region's other `hoi4_srn` flags, then
 sets its own; reset clears them. Consequences:
@@ -327,6 +332,40 @@ bool MyFeatureInit() {
   same script and must get the same result, or multiplayer desyncs. Display-only state, such as
   `region_names`' name table, must be derived from game state (its flags).
 
+## Threads and hooks (for plugin authors)
+
+The details are in NOTES.md, "Threading model".
+
+**How the game uses threads:**
+- **Main thread:** HOI4 changes game state only here, in serial code. That covers the tick
+  (hourly, daily, weekly, monthly), on_actions, events, decisions and every flag change.
+- **TBB worker threads:** the tick runs some sections in parallel on them, for example states,
+  regions, diplomacy and parts of the country update. The main thread waits until they finish.
+- **Other threads:** loading and audio.
+- **No locks:** game state has none. Flags, for example, are a plain array that is reallocated
+  when it grows.
+
+**Rules:**
+- **Assume a hook can run on any thread.** A hook into an engine function may run on a worker
+  thread, a loading thread, or on the main thread in the middle of a tick: during long ticks the
+  game draws frames between countries.
+- **Don't read game state in a hook:** no flags, no countries, no lists you would iterate.
+  Record what you saw (an atomic flag or counter) and return.
+- **Do the work on the main thread.** Defer it with `lifecycle.h`:
+  - `OnMainThreadFrame(fn)`: register at init. It runs at the start of every frame, at a safe
+    point where no tick, parallel section or nested frame is running (main menu included). Keep
+    it cheap: check your flag and return.
+  - `RunOnMainThread(fn, ctx)`: runs `fn(ctx)` once at the next safe point. Callable from any
+    thread.
+  - `IsMainThread()`: true only on the main thread, and only once the first frame has run.
+  - If `MainThreadQueueAvailable()` is false (the frame hook's signature was not found), none of
+    this runs. A feature that depends on it must then stay off.
+- **Callbacks that run on the main thread:** game-entered callbacks run there, outside the tick,
+  so they may read and write game state. So do native effects. Native triggers can be evaluated
+  on any thread, so they follow the rules above.
+- **Example:** `region_names` does exactly this. Its flag hooks only set dirty bits; the rescan
+  runs from `OnMainThreadFrame`.
+
 ## Layout
 
 ```
@@ -344,7 +383,7 @@ src/plugin_game_loaded.cpp    game_loaded feature (fires on_game_loaded after a 
 src/native_script.h, .cpp     native effect/trigger API: schemas, registration, parsing, docs
 src/native_script_engine.cpp  native API engine binding (vtable clones, registries, Scope)
 src/engine.cpp, engine.h      engine access: all hoi4.exe functions/data the features use
-src/lifecycle.cpp, .h         lexer-ready / game-entered callbacks (lifecycle feature)
+src/lifecycle.cpp, .h         lexer-ready / game-entered callbacks, main-thread queue (lifecycle feature)
 src/proxy.asm, version.def    version.dll export stubs
 src/sha256.h                  self-contained SHA-256
 tools/check_signatures.py     check src/signatures.h against hoi4.exe copies

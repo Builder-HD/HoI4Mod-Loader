@@ -14,6 +14,10 @@
 // Display: CStrategicRegion::GetNameKey() is hooked and answers from a lock-free table. The
 // engine's own name override (region+0x38, saved natively) is never written, so saves stay
 // vanilla and show original names without the loader.
+//
+// Threading (NOTES.md, "Threading model"): the flag hooks may run on any thread, so they only
+// mark the table dirty. The rescan (flags -> table) runs on the main thread at the next frame
+// start, or directly on game entry. Display-only state: one frame of delay is fine.
 #include <atomic>
 #include <ctype.h>
 #include <stdio.h>
@@ -35,9 +39,8 @@ const size_t kPrefixLen = sizeof(kPrefix) - 1;
 const size_t kMaxKeyLen = 100;   // flag names up to ~114 chars; see NOTES.md (flag names)
 const int kMaxRegions = 4096;
 
-// Guards everything except the display table: rescans, caches, flag edits. Recursive because the
-// native effects edit flags and then rescan. Effects normally run on one game thread; this is
-// insurance, not a hot path.
+// Guards everything except the display table and the dirty bits: rescans, caches, flag edits.
+// Rescans and effects all run on the main thread; this is insurance, not a hot path.
 std::recursive_mutex g_lock;
 
 // --- Display table (read from any thread) ------------------------------------------------------
@@ -129,7 +132,8 @@ bool SelfCheck();
 
 // Visibility for the filtered change detection, logged and reset once per game entered.
 std::atomic<long> g_ignoredFlagChanges{0};  // global flag set/clear without the hoi4_srn_ prefix
-long g_quietRescans = 0;                    // rescans that changed nothing (game thread)
+std::atomic<long> g_offMainFlagChanges{0};  // any flag set/clear seen off the main thread
+long g_quietRescans = 0;                    // rescans that changed nothing (main thread)
 
 void Rescan(const char* why) {
     std::lock_guard<std::recursive_mutex> guard(g_lock);
@@ -219,31 +223,55 @@ bool SelfCheck() {
 
 // --- Change detection: the engine's flag set / clear functions -------------------------------
 // Every set_global_flag / clr_global_flag (and country/state flag) ends in these two with the
-// resolved token. Only global flags named hoi4_srn_* trigger a rescan: a prefix compare on the
-// engine's own token string, no allocation. Large mods set flags constantly.
+// resolved token. They may run on any thread, so they only mark the table dirty: a pointer
+// compare against the global container, a prefix compare on the engine's own token string, an
+// atomic OR. No allocation, no reading of the container. Large mods set flags constantly.
 using FlagSet_t = void(__fastcall*)(void* flags, int token, short value, short days);
 using FlagClear_t = void(__fastcall*)(void* flags, int token);
 FlagSet_t g_origFlagSet = nullptr;
 FlagClear_t g_origFlagClear = nullptr;
-thread_local int g_ownEdit = 0;  // DoSet/DoReset edit flags themselves and rescan once afterwards
 
-void OnFlagChanged(void* flags, int token, const char* why) {
-    if (g_ownEdit || g_checkedFor <= 0 || flags != Engine::GlobalFlags()) return;
+// Why a rescan is pending; consumed by the next rescan.
+enum : unsigned { kDirtyFlagSet = 1, kDirtyFlagClear = 2, kDirtySetEffect = 4, kDirtyResetEffect = 8 };
+std::atomic<unsigned> g_dirty{0};
+std::atomic<void*> g_globalFlags{nullptr};  // global flag container of the current game (set on game entry)
+thread_local int g_ownEdit = 0;             // DoSet/DoReset edit flags themselves and mark their own reason
+
+void OnFlagChanged(void* flags, int token, unsigned reason) {
+    if (!IsMainThread() && MainThreadQueueAvailable()) g_offMainFlagChanges.fetch_add(1, std::memory_order_relaxed);
+    if (g_ownEdit || flags == nullptr || flags != g_globalFlags.load(std::memory_order_relaxed)) return;
     if (strncmp(Engine::TokenName(token), kPrefix, kPrefixLen) != 0) {
         g_ignoredFlagChanges.fetch_add(1, std::memory_order_relaxed);
         return;
     }
-    Rescan(why);
+    g_dirty.fetch_or(reason, std::memory_order_release);
 }
 
 void __fastcall FlagSetDetour(void* flags, int token, short value, short days) {
     g_origFlagSet(flags, token, value, days);
-    OnFlagChanged(flags, token, "hoi4_srn flag set");
+    OnFlagChanged(flags, token, kDirtyFlagSet);
 }
 
 void __fastcall FlagClearDetour(void* flags, int token) {
     g_origFlagClear(flags, token);
-    OnFlagChanged(flags, token, "hoi4_srn flag cleared");
+    OnFlagChanged(flags, token, kDirtyFlagClear);
+}
+
+// Main thread, every frame (lifecycle safe point): one atomic exchange unless something changed.
+void OnFrame() {
+    unsigned why = g_dirty.exchange(0, std::memory_order_acquire);
+    if (!why) return;
+    std::string reason;
+    auto add = [&](unsigned bit, const char* text) {
+        if (!(why & bit)) return;
+        if (!reason.empty()) reason += ", ";
+        reason += text;
+    };
+    add(kDirtyFlagSet, "hoi4_srn flag set");
+    add(kDirtyFlagClear, "hoi4_srn flag cleared");
+    add(kDirtySetEffect, "set_strategic_region_name");
+    add(kDirtyResetEffect, "reset_strategic_region_name");
+    Rescan(reason.c_str());
 }
 
 // Diagnostic, once per game entered: every hoi4_srn flag with the fields that decide its life.
@@ -313,7 +341,7 @@ void DoSet(int id, const char* key) {
     Engine::SetGlobalFlag(token);
     --g_ownEdit;
     Log("set_strategic_region_name: region %d -> %s (%d old flag(s) cleared)", id, key, cleared);
-    Rescan("set_strategic_region_name");
+    g_dirty.fetch_or(kDirtySetEffect, std::memory_order_release);  // shown from the next frame
 }
 
 void DoReset(int id) {
@@ -326,7 +354,7 @@ void DoReset(int id) {
     int cleared = ClearRegionFlags(id);
     --g_ownEdit;
     Log("reset_strategic_region_name: region %d -> original name (%d flag(s) cleared)", id, cleared);
-    Rescan("reset_strategic_region_name");
+    g_dirty.fetch_or(kDirtyResetEffect, std::memory_order_release);  // shown from the next frame
 }
 
 void ExecSet(const Args& a, const Scope&) { DoSet(a.i(0), a.key(1)); }
@@ -357,13 +385,17 @@ void OnEntered(bool loaded) {
     {
         std::lock_guard<std::recursive_mutex> guard(g_lock);
         long ignored = g_ignoredFlagChanges.exchange(0);
+        long offMain = g_offMainFlagChanges.exchange(0);
         Log("region_names: since the last game entry: %ld global flag change(s) ignored (not hoi4_srn_), "
-            "%ld rescan(s) without change", ignored, g_quietRescans);
+            "%ld rescan(s) without change, %ld flag change(s) off the main thread", ignored, g_quietRescans, offMain);
         g_quietRescans = 0;
         if (g_checkedFor != -2) {
             g_checkedFor = -1;  // new game state: check again
             g_enabled.store(false);
         }
+        // Main thread (game entered): the container of this game; the rescan below covers anything pending.
+        g_globalFlags.store(Engine::GlobalFlags(), std::memory_order_relaxed);
+        g_dirty.store(0, std::memory_order_relaxed);
     }
     Rescan(loaded ? "save loaded" : "new game");
     if (g_checkedFor > 0) LogRegionFlags();
@@ -377,11 +409,16 @@ bool RegionNamesInit() {
             Engine::HaveTokens(), Engine::HaveFlags(), Engine::HaveRegions(), Engine::HaveLocalize());
         return false;
     }
+    if (!MainThreadQueueAvailable()) {
+        Log("region_names: main-thread queue unavailable (flag changes could not be applied safely)");
+        return false;
+    }
     if (!HookQueue(Engine::pRegionGetNameKey, (void*)&GetNameKeyDetour, (void**)&g_origGetNameKey, "region_get_name_key") ||
         !HookQueue(Engine::pFlagSet, (void*)&FlagSetDetour, (void**)&g_origFlagSet, "flag_set") ||
         !HookQueue(Engine::pFlagClear, (void*)&FlagClearDetour, (void**)&g_origFlagClear, "flag_clear"))
         return false;
     OnGameEntered(&OnEntered);
+    OnMainThreadFrame(&OnFrame);
 
     // Native commands. If one is refused the feature stays active (the flag protocol works) and
     // the guard trigger hoi4_loader_feature_region_names says no.
@@ -399,8 +436,10 @@ bool RegionNamesInit() {
                             Form::Block, {{"region", ParamType::Int, true}}, ScopeMask::Any, &ExecReset, nullptr},
                            kFeature);
     register_native_trigger({"strategic_region_has_custom_name",
-                             "True if the strategic region currently shows a name provided by hoi4_loader. Guard it "
-                             "with hoi4_loader_feature_region_names = yes in the same AND block.",
+                             "True if the strategic region currently shows a name provided by hoi4_loader. A rename "
+                             "shows from the next frame, so in the same effect block that renamed it this is still "
+                             "the old state. Guard it with hoi4_loader_feature_region_names = yes in the same AND "
+                             "block.",
                              Form::Block, {{"region", ParamType::Int, true}}, ScopeMask::Any, &EvalHasCustomName,
                              &TooltipHasCustomName},
                             kFeature);

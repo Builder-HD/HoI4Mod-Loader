@@ -1367,3 +1367,174 @@ logged with its RTTI name if readable, and counts as "not single player".
   - **Residual risk in the new build:** it still rescans inside the flag set/clear hook, but
     only for `hoi4_srn_` flags. A wrong read could only follow a mod's own region-name change.
     The next change or game entry corrects it.
+  - **Superseded:** the rescan is now deferred to the main thread (see "Threading model"
+    below), so no hook reads the container any more.
+
+---
+
+# Threading model (the loader's platform rules)
+
+This section holds for every hook into game state, not only `region_names`.
+
+**Method:** Ghidra on the 1.19.3 copy. Evidence came from:
+- profiler zone names (`country.daily_parallel`, `flag_manager.daily`, ...);
+- RTTI and the template names of the TBB `start_for<...>` vtables;
+- the engine's own debug assertions (`ThreadIsMainThread()`, `_ThreadForbidCount`);
+- cross-references to the flag functions.
+
+Addresses are 1.19.3. The new signature is checked on all three builds.
+
+## Threads
+
+- **Main thread:**
+  - `main` (`FUN_140126e50`) registers it as "Main Thread": `FUN_1424d3fb0` sets a per-thread
+    flag, and `ThreadIsMainThread()` (`FUN_1424d3f90`) reads it.
+  - It then runs `CApplication::Run` (`FUN_14222e7e0`): `while (!quit) { ...;
+    DoFrame(app, true); }`.
+- **TBB worker threads:** `tbb.dll`'s task scheduler, used through `PdxParallelFor` /
+  `PdxParallelForContainer` (`tbb::parallel_for` with an auto partitioner). The calling thread
+  waits for each loop to finish.
+- **Others, seen in strings but not traced:** the audio update thread (`AudioUpdateThread`), the
+  XInput haptic thread, and threaded loading (`threadedload`) while the databases load.
+
+## One frame: `CApplication::DoFrame(app, bool topLevel)` (`FUN_14222eeb0`)
+
+In order:
+1. The main-thread assertion.
+2. The synced RNG is switched to "forbidden" for the frame.
+3. Events are pumped.
+4. The current idler's `Update` runs (`app+0x38`, vtable `+0x20`).
+5. If an idler switch is pending, it happens (this is where "game entered", `FUN_140dd9b20`,
+   runs).
+6. Frame pacing.
+
+**In game**, `CInGameIdler` runs `CSession::Update` (`FUN_142252d00`, `session.cpp`). It executes
+the queued commands (vtable `+0x50`, with `session+0x73c` set while one executes): player input,
+network commands, and `CHourlyTickCommand::Execute` (`FUN_140f06bf0`, RTTI). That calls
+`CGameState::Update` (`FUN_1401dd370`):
+
+| Part | Function |
+|---|---|
+| hourly | `FUN_1401df400` |
+| daily, `gamestate.daily` | `FUN_1401d4810` |
+| weekly, `gamestate.weekly` | `FUN_1401f2430` |
+| monthly | `FUN_1401e34f0` |
+| yearly | `gamestate.yearly` |
+
+**Nested frames:**
+- During long ticks the tick functions call `DoFrame(app, false)` themselves: 60+ call sites,
+  for example every 5 countries in the daily and weekly country loops and between phases. This
+  is gated on `gamestate+0x4c0` and a global switch, and keeps the UI responsive.
+- So UI code, and any loader hook into UI functions, can run **on the main thread in the middle
+  of a tick**, between two countries. These calls never overlap a parallel section, because
+  they are made from the serial code.
+- Only `CApplication::Run` calls `DoFrame` with `true`. This is verified on 1.19.3 and 1.19.2
+  (`B2 01 48 8B CB E8 <DoFrame>`).
+
+## What runs where
+
+| Work | Thread | Evidence |
+|---|---|---|
+| `on_weekly`: per country, `CCountry::WeeklyUpdate` `FUN_140718ca0` fires the list cached at `db+0x98` | main, serial loop over countries | `FUN_1401f2430` |
+| Country daily on_actions (e.g. `on_border_war_lost`), country flag expiry: `country.daily` `FUN_1406e76a0` | main, serial loop | `FUN_1401d4810`, after `country.daily_parallel` |
+| Global flag expiry: `flag_manager.daily` on `gamestate+0x258` | main, serial | `FUN_1401d4810` |
+| `on_startup`, `on_game_loaded` (loader) | main, in "game entered" | Part D |
+| Commands: decisions, player actions, MP | main, `CSession::Update` | |
+| Script effects and triggers called from all of the above | main | |
+| `state.daily_parallel` (`CStateDailyUpdateThreaded`), `daily.strategic_region_update`, `country.daily_parallel`, a per-country member update, `CUpdateDiplomacyFirstPass`/`SecondPass`, `country.post_daily_parallel` (`CCountryPostDailyUpdateThreaded`), `hourly_parallel`, weekly career profiles | TBB workers; main waits | `start_for<...>` vtables in `FUN_1401d4810`, `FUN_1401f2430`, `FUN_1401d85a0` |
+
+**Who writes flags.** Callers of `FlagSet` / `FlagClear`:
+- the `Execute` slot (13) of the 15 `Set*/Modify*/Clear*FlagEffect` classes: global, country,
+  state, character, industrial organisation, project;
+- three console commands.
+
+The loader on the save is `CFlagManager::Read`, which creates entries directly. Nothing else
+calls them.
+
+## Guards the engine has (and does not have)
+
+- **No lock on flags.** `CFlagManager` holds a `CPdxArray` of 0x30-byte `CScriptFlag` entries:
+  pointer `+8`, capacity `+0x10`, count `+0x14`, allocator `+0x18`.
+  - Set is a linear search, then an append.
+  - Growth allocates a new buffer and moves the entries while **count is temporarily 0**, then
+    frees the old buffer.
+  - Clear erases in place.
+  - So a reader on another thread can see count 0, shifted entries or freed memory.
+  - The same pattern (`CPdxArray`, no lock) holds for game state generally.
+- **The checks are debug-only.**
+  - Gamestate accessors assert `_ThreadForbidCount == 0 && "Current thread is forbidden to
+    access gamestate"` (TLS `+0x10`).
+  - Many functions assert `ThreadIsMainThread()`: "Should not be called in a thread", "You are
+    not allowed to do this here", "Refreshing abilities from non-serialcontext, OOS may occur!".
+  - All of these are gated on the assertion switch `DAT_1435e1b52`. In this release build
+    nothing writes the forbid counter: the only TLS `+0x10` writer found is profiler code. **The
+    engine enforces nothing at runtime; the convention is the protection.**
+- **Synced RNG:** it is switched to forbidden around every parallel section and in each frame
+  (`FUN_1422345b0`, `CRandom::IsForbidden()`), and `"ChangeGameStateSeed == false ||
+  ThreadIsMainThread()"`.
+- **Some subsystems have their own `SRWLock`** (e.g. `DAT_14332f6a0+0xa18`, taken at the end of
+  the daily and weekly update). Flags have none.
+
+## Rules for the loader
+
+1. **Game state is written only on the main thread, in serial code.** Flags in particular are
+   written only from effects, the console and save loading.
+2. **A hook into an engine function may run on any thread:**
+   - a TBB worker, for anything reachable from the parallel sections (state, country and
+     diplomacy updates, AI helpers, map and UI helpers);
+   - a loading thread;
+   - the main thread in the middle of a tick (nested frames).
+
+   **Don't read game state in a hook.** Record what you saw with an atomic and defer the work.
+3. **Safe point: the start of a top-level frame.** That is the outermost `DoFrame` on the main
+   thread, before the frame's commands and tick. No tick, no parallel section and no nested
+   frame is running there.
+   - `lifecycle` hooks it (`kSigAppDoFrame`) and offers `OnMainThreadFrame` (every frame) and
+     `RunOnMainThread` (one-shot, from any thread).
+   - It runs in the main menu too.
+4. **"Game entered" runs on the main thread, outside the tick** (an idler switch inside a
+   frame). Its callbacks may read and write game state. `loader.log` now warns if one ever runs
+   on another thread.
+5. **Native effects run where effects run (main thread). Native triggers may be evaluated on any
+   thread**, as vanilla triggers are: atomics only, no locks, no allocation.
+6. **Lexer-ready:** no game exists yet. `loader.log` now records its thread and whether it is the
+   main thread.
+
+## Not proven statically (runtime checks added)
+
+- **That no TBB task body executes script effects.** The calls are virtual, so the call graph is
+  incomplete. Every on_action, event and command entry point found is serial.
+  - **Runtime check:** the flag hooks count every flag set/clear (any container) made off the main
+    thread. Each game entry logs it as "N flag change(s) off the main thread". 0 is expected.
+- **Which threads call `GetNameKey`** (map labels may be built on workers): the `region_names`
+  detour reads only atomics, so it is safe either way.
+- **The old disappearing name:** no explanation has been confirmed. If the counter ever shows
+  off-main flag writes, the cause is found. Either way, the deferred design no longer reads the
+  container from a hook.
+
+## Implementation: deferred rescan and main-thread queue (2026-10-14)
+
+- **`kSigAppDoFrame`:** `DoFrame`'s prologue. Unique on vanilla 1.19.3 (`0x14222eeb0`), patched
+  1.19.3 and 1.19.2 (`0x142219f70`).
+- **`lifecycle`:**
+  - **Frame detour:** at nesting depth 0 it records the main thread on the first frame, then runs
+    `RunMainThreadWork`: the frame callbacks, then the queued tasks, which are swapped out under a
+    mutex and run outside it, each under SEH.
+  - **API:** `OnMainThreadFrame`, `RunOnMainThread`, `IsMainThread`, `MainThreadQueueAvailable`.
+  - **The frame hook is optional:** without it, lifecycle callbacks still work and features
+    needing the queue stay off.
+  - **New log lines:** "Lifecycle: main thread N (first frame); lexer callbacks ran on ...",
+    and the lexer thread id.
+- **`region_names`:**
+  - **Hooks:** `flag_set` / `flag_clear` only compare the container pointer (cached on game
+    entry), compare the token prefix, and OR a reason bit into `g_dirty`. They also count calls
+    made off the main thread.
+  - **`OnFrame`:** exchanges `g_dirty`; if any bit is set it rescans and logs the combined reason
+    (e.g. "hoi4_srn flag set, set_strategic_region_name").
+  - **Native effects:** they still edit flags inline (main thread), then only mark dirty.
+  - **Game entry still rescans synchronously,** which keeps the order rescan → plugin flag
+    refresh → `on_game_loaded`.
+  - **It now requires the main-thread queue.**
+  - **`strategic_region_has_custom_name`** reflects the display, so right after a rename in the
+    same effect block it answers for the old name. Its help text and the README say so.
+- **README:** a new section, "Threads and hooks (for plugin authors)".
