@@ -1538,3 +1538,25 @@ calls them.
   - **`strategic_region_has_custom_name`** reflects the display, so right after a rename in the
     same effect block it answers for the old name. Its help text and the README say so.
 - **README:** a new section, "Threads and hooks (for plugin authors)".
+
+## In-game results (2026-10-14, vanilla 1.19.3, DLL `de1d0118…`)
+
+- **Startup:** `app_do_frame` resolves to `+0x222eeb0` and its hook is queued.
+- **Threads:** in three runs, "Lifecycle: main thread N (first frame); lexer callbacks ran on
+  the main thread". So lexer-ready runs on the main thread too.
+- **Renames:** A, B, reset and C each give one rescan line, written ~16 ms (one frame) after the
+  effect's own line. The C decision gives a single `rescan (hoi4_srn flag set, hoi4_srn flag
+  cleared): 1 change(s)`.
+- **Entry summaries so far:** "0 flag change(s) off the main thread". These are only the first
+  entries of fresh sessions, so they cover no play time yet. A count over weeks of play is
+  still open.
+- **No "game entered off the main thread" warning.**
+- **The D3 step 8 and 9 attempts did not test what they should have:**
+  - **Step 8:** `loader_config.ini` was unchanged (last modified 2026-10-13), so `game_loaded`
+    stayed active. The log has `on_game_loaded fired: ROOT = FRA`, and the "immediate"
+    migration was `on_game_loaded`'s.
+  - **Step 9:** the loader was still loaded (`loader.log` 22:36, pid 46308; `version.dll` in the
+    game folder untouched since 21:17). `game.log`: "save migrated to data version 2 by
+    on_game_loaded".
+  - **Steps 8 and 9 stay open.** One positive result: a version-1 save loaded with the loader was
+    migrated by `on_game_loaded` right on load.
