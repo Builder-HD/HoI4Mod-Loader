@@ -24,6 +24,10 @@ static const size_t kSigPhysfsOpenReadCallOffset = 15;
 // In-game idler "game entered": runs for a new game and for a loaded save; fires on_startup
 // only when !IsLoadedFromSave(gamestate). Function start. (0x140dd9b20)
 SIG(kSigGameEntered, "48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20 55 41 54 41 55 41 56 41 57 48 8D 6C 24 C9 48 81 EC 00 01 00 00 48 8B F9 E8 ?? ?? ?? ?? 48 8B 8F ?? ?? ?? ?? E8 ?? ?? ?? ?? E8")
+// void CApplication::DoFrame(bool topLevel): one frame on the main thread (events, current idler,
+// whose session executes commands, including the hourly tick). CApplication::Run calls it with
+// true; long ticks call it with false to keep the UI alive. Function start. (0x14222eeb0)
+SIG(kSigAppDoFrame, "40 53 55 56 57 41 56 48 83 EC 70 0F 29 74 24 60 0F 29 7C 24 50 44 0F 29 44 24 40 44 0F B6 F2 48 8B F1 48 8D 3D ?? ?? ?? ?? 80 3D ?? ?? ?? ?? 00 74 ?? 80 3D ?? ?? ?? ?? 00 75 ?? E8 ?? ?? ?? ?? 84 C0 75 ??")
 // bool CGameState::IsLoadedFromSave() { return this->_bLoaded; } (0x1401e2930)
 SIG(kSigIsLoadedFromSave, "0F B6 81 34 0A 00 00 C3")
 // CSetGlobalFlagEffect::Execute: mov rax,[gamestate]; ...; mov rdi,[rax+<flags>].

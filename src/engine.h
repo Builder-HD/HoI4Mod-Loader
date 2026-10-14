@@ -29,6 +29,7 @@ bool Resolve();
 // --- Hook targets (null if not found) ---------------------------------------------------------
 extern void* pLexerSync;        // void ()
 extern void* pGameEntered;      // void (CInGameIdler*)
+extern void* pAppDoFrame;       // void (CApplication*, bool topLevel); main thread, every frame
 extern void* pRegionGetNameKey; // const EngineString* (CStrategicRegion*)
 extern void* pFlagSet;          // void (CScriptFlags*, int token, short value, short days)
 extern void* pFlagClear;        // void (CScriptFlags*, int token)

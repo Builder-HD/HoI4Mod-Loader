@@ -12,6 +12,7 @@ namespace Engine {
 
 void* pLexerSync = nullptr;
 void* pGameEntered = nullptr;
+void* pAppDoFrame = nullptr;
 void* pRegionGetNameKey = nullptr;
 void* pFlagSet = nullptr;
 void* pFlagClear = nullptr;
@@ -349,6 +350,7 @@ bool Resolve() {
 
     pLexerSync = SigFindUnique("lexer_sync", kSigLexerSync);
     pGameEntered = SigFindUnique("game_entered", kSigGameEntered);
+    pAppDoFrame = SigFindUnique("app_do_frame", kSigAppDoFrame);
     g_isLoaded = (IsLoaded_t)SigFindUnique("is_loaded_from_save", kSigIsLoadedFromSave);
 
     g_intern = (Intern_t)SigFindUnique("token_intern", kSigTokenIntern);
