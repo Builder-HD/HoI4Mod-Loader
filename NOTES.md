@@ -1349,3 +1349,21 @@ logged with its RTTI name if readable, and counts as "not single player".
     this save.
   - Still open: whether the flag survives four weeks of play (status event, then save and
     reload).
+- **Step 5, second half: passes.**
+  - **What was tested:** from the loaded name-A save, the game ran 3 March to 10 April (5+
+    weekly flag bursts, 39 non-`hoi4_srn` flag changes ignored). The map kept "Loader Test Sea A"
+    throughout. The game was then saved and reloaded.
+  - **Result:** the reload lists the same flag unchanged (`value 1, days 0, set date 60759371`).
+    The flag was never removed.
+- **Conclusion on the disappearing name:** it does not reproduce with `17c75ef`, so it is
+  closed. The flag itself survived; what reverted was the old build's display.
+  - **Where it came from:** the old build re-read the global flags after every
+    `set_global_flag` / `clr_global_flag` effect `Execute`. Twice it found no `hoi4_srn` flag
+    there and reset the name, although the flag existed: the same set date survives in the
+    save.
+  - **Exact cause:** not identified. One unverified explanation is that those `Execute` calls
+    ran while another thread was changing the flag container. The irregular 19:29:51 burst (5
+    sets spread over 120 ms) would fit.
+  - **Residual risk in the new build:** it still rescans inside the flag set/clear hook, but
+    only for `hoi4_srn_` flags. A wrong read could only follow a mod's own region-name change.
+    The next change or game entry corrects it.
