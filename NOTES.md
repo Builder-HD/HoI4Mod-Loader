@@ -1331,3 +1331,21 @@ logged with its RTTI name if readable, and counts as "not single player".
     long-key flag stayed. The old DLL then logged "region 42 has 2 hoi4_srn flags; using
     '…VERY_LONG…'": the alphabetically larger key, not the newer C. That matches the
     `kFlagEntryDate` bug fixed in `17c75ef`. With the fix, C must win.
+
+### Re-check with `17c75ef` (2026-10-14, DLL `a0ac28dd…`)
+
+- **Steps 1-4 pass:**
+  - **Startup:** `country_tag_name` resolves; the hooks are `flag_set` / `flag_clear`.
+  - **No noise:** no rescan lines during play. Entry summaries "15 ignored, 1 rescan without
+    change" and "29 ignored, 3 without change" (the entry rescan plus the two `hoi4_srn` clears
+    of the C decision).
+  - **Renames:** A, B, reset, dash, long and C each log one change. C now wins over the
+    remaining long-key flag ("has 2 hoi4_srn flags; using '…_C'"), so the date fix is confirmed
+    in game.
+  - **Tag:** `on_game_loaded fired: ROOT = FRA`.
+- **Step 5, first half:** the name-A save loads with `hoi4_srn_42_…_A: value 1, days 0, set date
+  60759371`.
+  - `days 0` means the flag has no expiry countdown, so the expiry hypothesis is ruled out for
+    this save.
+  - Still open: whether the flag survives four weeks of play (status event, then save and
+    reload).
