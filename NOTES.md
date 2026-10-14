@@ -1319,3 +1319,15 @@ logged with its RTTI name if readable, and counts as "not single player".
 - **Consequence of the new change detection:** an engine-side removal is no longer noticed at
   the next unrelated flag change, only at the next `hoi4_srn` change or game entry. The display
   keeps the name until then. The re-check below decides the real fix.
+- **Second observation (2026-10-14, re-check run accidentally still on the old DLL, build
+  `a0d36d00…`):**
+  - **When it happened:** after loading the name-A save (19:28:20), the name survived the first
+    two weekly flag bursts (19:28:58, 19:29:03). It reverted at the third (19:29:51), again with
+    no reset and no `clr_global_flag`.
+  - **What that suggests:** the flag vanishes a varying number of days after a load (within a
+    week in the D3 log, two to three weeks here). That fits an uninitialised `days` better than
+    a fixed timer. Still unconfirmed: the flag dump needs the new DLL.
+  - **Same run, date-offset bug:** "Rename to C via flags" clears only the A and B flags, so the
+    long-key flag stayed. The old DLL then logged "region 42 has 2 hoi4_srn flags; using
+    '…VERY_LONG…'": the alphabetically larger key, not the newer C. That matches the
+    `kFlagEntryDate` bug fixed in `17c75ef`. With the fix, C must win.
