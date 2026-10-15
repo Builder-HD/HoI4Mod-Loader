@@ -1,0 +1,3 @@
+# Stub, used when hoi4_loader is absent or its production_data feature is not available.
+# The loader serves "always = yes" when the feature is active and all its triggers registered.
+hoi4_loader_feature_production_data = { always = no }

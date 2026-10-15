@@ -68,3 +68,16 @@ country_event = {
 		name = hoi4_loader_test.4.a
 	}
 }
+
+# Numeric data triggers read as game variables (decision hoi4_loader_data_show_variables).
+country_event = {
+	id = hoi4_loader_test.5
+	title = hoi4_loader_test.5.t
+	desc = hoi4_loader_test.5.d
+	picture = GFX_report_event_generic_read_write
+	is_triggered_only = yes
+
+	option = {
+		name = hoi4_loader_test.5.a
+	}
+}

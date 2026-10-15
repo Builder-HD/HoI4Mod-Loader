@@ -1,0 +1,3 @@
+# Stub, used when hoi4_loader is absent or its military_counts feature is not available.
+# The loader serves "always = yes" when the feature is active and all its triggers registered.
+hoi4_loader_feature_military_counts = { always = no }

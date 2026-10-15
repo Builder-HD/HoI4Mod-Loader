@@ -1,0 +1,234 @@
+# Test decisions for hoi4_loader's numeric data triggers (README "Data triggers", NOTES.md Part E).
+# Test country: France (FRA). Places: state 16 = Ile de France, region 19 = Northern France,
+# region 18 = Channel, region 42 = Bay of Biscay.
+#
+# Every decision is guarded with its feature's guard trigger, so without the loader they are
+# hidden (the game still logs "Unknown trigger" for the native triggers when parsing this file).
+#
+# "Status" decisions: hover over the requirements to read the current values; each line ends with
+# "(currently ...)". They do not need to be takeable.
+# Operator decisions: their availability shows how each comparison behaves.
+
+hoi4_loader_data_category = {
+
+	# --- thresholds for the variable tests ----------------------------------------------------
+	hoi4_loader_data_threshold_low = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_present = yes }
+		complete_effect = {
+			set_variable = { global.hoi4_loader_test_threshold = 0.25 }
+			set_variable = { global.hoi4_loader_test_count = 1 }
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_data_threshold_high = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_present = yes }
+		complete_effect = {
+			set_variable = { global.hoi4_loader_test_threshold = 0.75 }
+			set_variable = { global.hoi4_loader_test_count = 10 }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# --- region_control -------------------------------------------------------------------
+	hoi4_loader_data_region_status = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_region_control = yes }
+		available = {
+			hoi4_loader_feature_region_control = yes
+			air_superiority = { region = 19 value > 0 }
+			air_superiority = { region = 42 value > 0 }
+			naval_dominance = { region = 42 value > 0 }
+			naval_dominance = { region = 18 value > 0 }
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_data_air_above = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_region_control = yes }
+		available = { hoi4_loader_feature_region_control = yes air_superiority = { region = 19 value > 0.5 } }
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_data_air_below = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_region_control = yes }
+		available = { hoi4_loader_feature_region_control = yes air_superiority = { region = 19 value < 0.5 } }
+		ai_will_do = { base = 0 }
+	}
+	# Ratio "=" behaves like ">" (vanilla): available exactly when "above 50%" is.
+	hoi4_loader_data_air_equal = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_region_control = yes }
+		available = { hoi4_loader_feature_region_control = yes air_superiority = { region = 19 value = 0.5 } }
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_data_naval_var = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_region_control = yes }
+		available = {
+			hoi4_loader_feature_region_control = yes
+			naval_dominance = { region = 42 value > global.hoi4_loader_test_threshold }
+		}
+		ai_will_do = { base = 0 }
+	}
+	# NOT around a trigger whose region is missing outside a region scope: the trigger is false,
+	# so this is TRUE (documented caveat). loader.log: "'region' not given and not available".
+	hoi4_loader_data_missing_scope = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_region_control = yes }
+		available = { hoi4_loader_feature_region_control = yes NOT = { air_superiority > 0 } }
+		ai_will_do = { base = 0 }
+	}
+
+	# --- military_counts ------------------------------------------------------------------
+	hoi4_loader_data_military_status = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_military_counts = yes }
+		available = {
+			hoi4_loader_feature_military_counts = yes
+			battles_count = { state = 16 count > 0 }
+			battles_count = { region = 19 count > 0 }
+			battles_count = { involving = ROOT count > 0 }
+			divisions_count = { state = 16 count > 0 }
+			divisions_count = { region = 19 owner = own count > 0 }
+			divisions_count = { region = 19 owner = enemy count > 0 }
+			ships_count = { region = 42 count > 0 }
+			ships_count = { region = 18 owner = own count > 0 }
+			planes_count = { region = 19 owner = own count > 0 }
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_data_divisions_equal_zero = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_military_counts = yes }
+		available = { hoi4_loader_feature_military_counts = yes divisions_count = { state = 16 count = 0 } }
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_data_divisions_below = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_military_counts = yes }
+		available = { hoi4_loader_feature_military_counts = yes divisions_count = { state = 16 count < 3 } }
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_data_divisions_var = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_military_counts = yes }
+		available = {
+			hoi4_loader_feature_military_counts = yes
+			divisions_count = { state = 16 owner = own count > global.hoi4_loader_test_count }
+		}
+		ai_will_do = { base = 0 }
+	}
+	# Reserved owner value: loader.log must say "'owner' expects one of own, got 'enemy'" once,
+	# and this requirement is never met.
+	hoi4_loader_data_planes_reserved = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_military_counts = yes }
+		available = { hoi4_loader_feature_military_counts = yes planes_count = { region = 19 owner = enemy count > 0 } }
+		ai_will_do = { base = 0 }
+	}
+
+	# --- army_condition -------------------------------------------------------------------
+	hoi4_loader_data_army_status = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_army_condition = yes }
+		available = {
+			hoi4_loader_feature_army_condition = yes
+			avg_division_strength > 0
+			avg_division_organisation > 0
+			avg_division_strength = { state = 16 value > 0 }
+			avg_division_organisation = { state = 16 country = ROOT value > 0 }
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_data_army_var = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_army_condition = yes }
+		available = { hoi4_loader_feature_army_condition = yes avg_division_organisation > global.hoi4_loader_test_threshold }
+		ai_will_do = { base = 0 }
+	}
+
+	# --- production_data ------------------------------------------------------------------
+	hoi4_loader_data_production_status = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_production_data = yes }
+		available = {
+			hoi4_loader_feature_production_data = yes
+			factories_assigned > 0
+			factories_assigned = { equipment = infantry_equipment count > 0 }
+			factories_assigned = { equipment = infantry_equipment_1 count > 0 }
+			factories_assigned = { equipment = fighter_equipment count > 0 }
+			factories_assigned = { equipment = ship_hull_light count > 0 }
+			factories_assigned = { equipment = no_such_equipment count > 0 }
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_data_production_var = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_production_data = yes }
+		available = {
+			hoi4_loader_feature_production_data = yes
+			factories_assigned = { equipment = infantry_equipment count > global.hoi4_loader_test_count }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# --- game variables read from the triggers -----------------------------------------------
+	hoi4_loader_data_show_variables = {
+		icon = generic_research
+		cost = 0
+		visible = { OR = { hoi4_loader_feature_army_condition = yes hoi4_loader_feature_production_data = yes } }
+		complete_effect = {
+			set_variable = { hoi4_loader_test_avg_strength = avg_division_strength }
+			set_variable = { hoi4_loader_test_avg_org = avg_division_organisation }
+			set_variable = { hoi4_loader_test_factories = factories_assigned }
+			country_event = { id = hoi4_loader_test.5 }
+		}
+		ai_will_do = { base = 0 }
+	}
+}
+
+# AI-evaluated use for the cost measurement (loader_config.ini [diagnostics] trigger_timing = 1).
+# Visible to every country while the features are active; the last modifier makes the AI never
+# take it, so it only costs evaluation time.
+hoi4_loader_ai_cost_category = {
+
+	hoi4_loader_ai_cost_probe = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_army_condition = yes
+			hoi4_loader_feature_military_counts = yes
+			hoi4_loader_feature_region_control = yes
+			hoi4_loader_feature_production_data = yes
+		}
+		ai_will_do = {
+			base = 1
+			modifier = { factor = 1 avg_division_strength < 0.5 }
+			modifier = { factor = 1 avg_division_organisation < 0.5 }
+			modifier = { factor = 1 battles_count = { involving = ROOT count > 0 } }
+			modifier = { factor = 1 divisions_count = { region = 19 owner = enemy count > 0 } }
+			modifier = { factor = 1 air_superiority = { region = 19 value > 0.5 } }
+			modifier = { factor = 1 factories_assigned = { equipment = infantry_equipment count > 5 } }
+			modifier = { factor = 0 always = yes }
+		}
+	}
+}
