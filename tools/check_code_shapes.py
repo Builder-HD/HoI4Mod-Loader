@@ -119,6 +119,9 @@ def check(path, codes):
     army = img.vtable('.?AVCArmy@@')
     ok = bool(army) and len(army[1]) > 39 and all(img.match_at(army[1][i], codes['kCodeArmyRatio']) for i in (34, 39))
     results.append(('kCodeArmyRatio (CArmy slots 34, 39)', ok, hex(army[0]) if army else '-'))
+    ok = (bool(army) and len(army[1]) > 35 and img.match_at(army[1][35], codes['kCodeArmyFightingStrength']) and
+          struct.unpack_from('<i', img.d, img.va2off(army[1][35]) + 0x1a)[0] == 34 * 8)
+    results.append(('kCodeArmyFightingStrength (CArmy slot 35 -> slot 34)', ok, hex(army[0]) if army else '-'))
     avail = img.vtable('.?AVCNumOfAvailableMilitaryFactoriesTrigger@@')
     results.append(('kCodeAvailableMilitaryFactories (slot 23)',
                     bool(avail) and img.match_at(avail[1][23], codes['kCodeAvailableMilitaryFactories']), '-'))

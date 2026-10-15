@@ -174,7 +174,7 @@ hoi4_loader_data_category = {
 			factories_assigned > 0
 			factories_assigned = { equipment = infantry_equipment count > 0 }
 			factories_assigned = { equipment = infantry_equipment_1 count > 0 }
-			factories_assigned = { equipment = fighter_equipment count > 0 }
+			factories_assigned = { equipment = small_plane_airframe count > 0 }
 			factories_assigned = { equipment = ship_hull_light count > 0 }
 			factories_assigned = { equipment = no_such_equipment count > 0 }
 		}

@@ -305,7 +305,9 @@ bool IsSameCountry(int a, int b) { return HaveCountries() && SameCountry(a, b); 
 // --- army_condition: CArmy strength / organisation ratios (RTTI + kCodeArmyRatio) ---------------
 namespace {
 void** g_armyVtable = nullptr;
-const size_t kArmyStrengthSlot = 34, kArmyOrgSlot = 39;
+// Strength: slot 35, the fighting strength the division UI shows (manpower ratio, slot 34, times the
+// equipment ratio). Organisation: slot 39.
+const size_t kArmyManpowerSlot = 34, kArmyStrengthSlot = 35, kArmyOrgSlot = 39;
 using Ratio_t = int64_t*(__fastcall*)(void* unit, int64_t* out);
 }  // namespace
 
@@ -313,7 +315,9 @@ void ResolveArmyCondition() {
     size_t slots = 0;
     void** vt = FindVtableByRtti(".?AVCArmy@@", &slots);
     if (!vt || slots <= kArmyOrgSlot) return;
-    if (!SigMatchAt((uint8_t*)vt[kArmyStrengthSlot], kCodeArmyRatio) || !SigMatchAt((uint8_t*)vt[kArmyOrgSlot], kCodeArmyRatio)) {
+    if (!SigMatchAt((uint8_t*)vt[kArmyManpowerSlot], kCodeArmyRatio) || !SigMatchAt((uint8_t*)vt[kArmyOrgSlot], kCodeArmyRatio) ||
+        !SigMatchAt((uint8_t*)vt[kArmyStrengthSlot], kCodeArmyFightingStrength) ||
+        Rd<int32_t>(vt[kArmyStrengthSlot], kCodeArmyFightingInnerSlotDisp) != (int32_t)(kArmyManpowerSlot * 8)) {
         Log("ERROR: data triggers: CArmy strength/organisation slots have an unexpected shape");
         return;
     }
@@ -415,6 +419,67 @@ bool FactoriesAssigned(int tag, const void* equipment, int64_t* out) {
         if (f > 0) *out += f;
     }
     return true;
+}
+
+namespace {
+// Diagnostics (LogProductionLines): RTTI class of an object, and an equipment object's name token,
+// found as the int field t inside it for which the engine's own lookup gives the object back.
+const char* SafeRttiName(const void* obj) {
+    __try {
+        const uint32_t* col = (const uint32_t*)(*(void* const* const*)obj)[-1];
+        if (col[0] != 1) return "?";
+        return (const char*)GetModuleHandleW(nullptr) + col[3] + 0x10;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return "?";
+    }
+}
+
+int SafeEquipmentToken(const void* obj) {
+    if (!obj) return 0;
+    __try {
+        for (uint32_t off = 0; off < 0x800; off += 4) {
+            int t = Rd<int>(obj, off);
+            if (t > 0 && t < 0x40000 && EquipmentByToken(t) == obj) return t;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+    return 0;
+}
+
+const char* EquipName(const void* obj) {
+    int t = SafeEquipmentToken(obj);
+    return t ? TokenName(t) : obj ? "(no name)" : "-";
+}
+
+bool SafeLogLine(int i, void* line) {
+    __try {
+        void** vt = *(void***)line;
+        bool counted = vt == g_militaryLineVt || (g_navalLineVt && vt == g_navalLineVt);
+        void* equip = Rd<void*>(line, g_lineEquipment);
+        void* type = equip ? Rd<void*>(equip, g_equipType) : nullptr;
+        void* archetype = type ? Rd<void*>(type, g_typeArchetype) : nullptr;
+        Log("  line %d: %s%s, factories %d; equipment %p (%s) -> type %p (%s) -> archetype %p (%s)", i,
+            SafeRttiName(line), counted ? "" : " (not counted)", Rd<int>(line, g_lineFactories), equip, EquipName(equip), type,
+            EquipName(type), archetype, EquipName(archetype));
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+}  // namespace
+
+void LogProductionLines(int tag) {
+    if (!HaveProduction()) return;
+    void* country = CountryByTag(tag);
+    void* production = country ? Rd<void*>(country, g_countryProduction) : nullptr;
+    if (!production) {
+        Log("Production lines of %s: unreadable", CountryTagName(tag).c_str());
+        return;
+    }
+    PtrList lines = ListAt(production, g_lines, g_lineCount);
+    Log("Production lines of %s: %d", CountryTagName(tag).c_str(), lines.count);
+    for (int i = 0; i < lines.count; ++i)
+        if (!lines.data[i] || !SafeLogLine(i, lines.data[i])) Log("  line %d: unreadable", i);
 }
 
 bool DivisionRatios(void* unit, int64_t* strength, int64_t* org) {

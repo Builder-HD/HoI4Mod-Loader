@@ -226,6 +226,11 @@ CODE(kCodeBlockValueCheck, "83 BE C0 00 00 00 03")
 // CArmy strength / organisation ratio (RTTI .?AVCArmy@@ slots 34 and 39): cur (slot at +0x1f) *
 // 100000 / max (slot at +0x34), clamped to 0..1. Both slots must have this shape.
 CODE(kCodeArmyRatio, "48 89 5C 24 18 48 89 74 24 20 57 48 83 EC 20 48 8B 01 48 8B FA 48 8D 54 24 30 48 8B D9 FF 90 ?? ?? ?? ?? 4C 8B 03 48 8D 54 24 38 48 8B CB 48 8B F0 41 FF 90 ?? ?? ?? ?? 48 8B 08 48 85 C9")
+// CArmy fighting strength (slot 35), what the division UI shows as "Strength": the strength ratio
+// (call [rax+disp32 at +0x1a], must be slot 34) * the equipment ratio [rbx+disp32 at +0x30] / 1e5,
+// clamped to 0..1.
+CODE(kCodeArmyFightingStrength, "48 89 5C 24 10 57 48 83 EC 20 48 8B 01 48 8B FA 48 8D 54 24 30 48 8B D9 FF 90 ?? ?? ?? ?? 4C 8B 00 48 B8 09 E1 D1 C6 11 6B F1 29 4C 0F AF 83")
+static const size_t kCodeArmyFightingInnerSlotDisp = 0x1a;
 // After the "production.daily_serial" lea (+0x13): the production object's line list.
 CODE(kCodeProductionDaily, "48 8D 8B ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B 83 ?? ?? ?? ?? 4C 8B B0 ?? ?? ?? ?? 48 8B 7B ?? 48 63 43 ?? 48 8D 34 C7 48 3B FE 74 ?? 49 8B D6 48 8B 0F E8")
 // CNumOfAvailableMilitaryFactoriesTrigger slot 23: production = TagToCountry(tag)->[disp32 +0x32].

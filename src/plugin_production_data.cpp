@@ -2,7 +2,7 @@
 //
 //   factories_assigned > 20                                   country scope: all production lines
 //   factories_assigned = { equipment = infantry_equipment count > 10 }      an archetype
-//   factories_assigned = { equipment = fighter_equipment_1 country = GER count < 5 }   a type
+//   factories_assigned = { equipment = small_plane_airframe_1 country = GER count < 5 }   a type
 //
 // Sums the factories of the country's military production lines (and the dockyards of its naval
 // lines) that produce the equipment: an equipment type, or any type of an archetype. Without
@@ -69,7 +69,7 @@ bool ProductionDataInit() {
     register_native_numeric_trigger(
         {"factories_assigned",
          "Factories a country has assigned to production lines: military factories on equipment lines plus "
-         "dockyards on naval lines. `equipment`: an equipment type (fighter_equipment_1) or an archetype "
+         "dockyards on naval lines. `equipment`: an equipment type (infantry_equipment_1) or an archetype "
          "(infantry_equipment, every type of it); unknown names make it false. Without `equipment`: all lines. "
          "`country` defaults to the country scope.",
          NumericKind::Count, {{"equipment", ParamType::Token, false}, {"country", ParamType::Country, false}},

@@ -193,6 +193,9 @@ const void* EquipmentByToken(int token);
 // Factories assigned to the country's military and naval production lines (dockyards for ships);
 // only lines producing `equipment` (a type, or any type of an archetype) unless it is null.
 bool FactoriesAssigned(int tag, const void* equipment, int64_t* out);
+// Diagnostics ([diagnostics] production_lines = 1): logs the country's lines, their factories and
+// equipment names. Main thread.
+void LogProductionLines(int tag);
 
 // Fires the on_action like the engine fires on_startup: synced-RNG seed, events, random events
 // and effect. countryTag > 0: ROOT = that country; 0: no scope. name: at most 15 characters.

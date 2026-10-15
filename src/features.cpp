@@ -224,6 +224,10 @@ void FeaturesInit(bool engineAllowed, const wchar_t* iniPath) {
             Log("Diagnostics: trigger timing needs the main-thread queue; off");
         }
     }
+    if (iniPath && GetPrivateProfileIntW(L"diagnostics", L"production_lines", 0, iniPath) == 1 && Engine::HaveProduction()) {
+        OnGameEntered([](bool) { Engine::LogProductionLines(Engine::PlayerCountryTag()); });
+        Log("Diagnostics: production line dump ON (on game entry, player country)");
+    }
     register_virtual_file(L"common/scripted_triggers/hoi4_loader_detect.txt", &DetectTrigger);
     register_virtual_file(L"common/scripted_effects/hoi4_loader_detect.txt", &DetectEffect);
     for (const Feature& f : g_features) {
