@@ -1964,3 +1964,28 @@ counts, values in range.
    - Note whether speed 5 feels slower than with `[features]` switching the four features off.
 10. **Without the loader:** the data decisions are hidden; `error.log` has "Unknown
     trigger" for the new triggers (the documented cost).
+
+### In-game results (2026-10-15, vanilla 1.19.3)
+
+- **Step 1, first run (DLL `74b750e7`):**
+  - **Three features failed to start:** military_counts, army_condition and production_data
+    ("data 0"). `HaveCountries()` required a running game.
+  - **The lexer-ready callback crashed** (access violation) after the two region effects. The
+    docs file was not rewritten and the guards said "read BEFORE native registration ran".
+  - **Fix (`b5c34c2`):** HaveCountries no longer needs a game; every command now binds under its
+    own SEH guard and a crash logs module+offset.
+  - **Root cause of the crash:** not identified. It did not recur in the next two starts.
+- **Step 1, second run (DLL `f8f05a99`):**
+  - **Passes:**
+    - every signature and anchor resolves;
+    - the four data features are active and all 12 commands register;
+    - avg_division_strength, avg_division_organisation and factories_assigned are also game
+      variables;
+    - all six guards are yes;
+    - the docs list the 9 data triggers (both forms, value semantics, the NOT caveat), and the
+      region commands show `region` as "optional: from the strategic region scope".
+  - **Found:** the `=` operator token came from `Intern("=")`, which created a new dynamic token
+    (`0x4e60`) the parser never uses, so `= x` comparisons would have been refused.
+- **Fix:** `=` is looked up by name among the static tokens, and `>` / `<` (from the template
+  code) are checked by name too. **Third run: `'>' 0x1d3, '<' 0x1d4, '=' 0x1`, 12 of 12
+  registered.** The game was launched directly by Claude for steps 1-2 (main menu only).

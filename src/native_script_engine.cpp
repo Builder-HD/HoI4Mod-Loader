@@ -322,8 +322,20 @@ bool BindNumeric(Command& c, std::string* reason) {
         return false;
     }
     if (!g_numRecord) {
+        // The parser stores the operator as a static lexer token. '>' and '<' come from the numeric
+        // template's code; '=' is looked up by name among the static tokens (never interned: that
+        // would create a new dynamic token the parser never uses). All three are checked by name.
+        for (int t = 1; t < 0x2000 && !g_tokEqual; ++t)
+            if (strcmp(Engine::TokenName(t), "=") == 0) g_tokEqual = t;
+        if (!g_tokEqual || strcmp(Engine::TokenName(Engine::tokGreater), ">") != 0 ||
+            strcmp(Engine::TokenName(Engine::tokLess), "<") != 0) {
+            Log("ERROR: numeric triggers: operator tokens not as expected ('>' 0x%x = \"%s\", '<' 0x%x = \"%s\", '=' 0x%x)",
+                Engine::tokGreater, Engine::TokenName(Engine::tokGreater), Engine::tokLess, Engine::TokenName(Engine::tokLess),
+                g_tokEqual);
+            *reason = "comparison operator tokens not found";
+            return false;
+        }
         g_numRecord = (std::max(Engine::numericCount.size, Engine::numericRatio.size) + 7) & ~(size_t)7;
-        g_tokEqual = Engine::Intern("=");
         Log("Numeric triggers: operator tokens '>' 0x%x, '<' 0x%x, '=' 0x%x; record at +0x%zx", Engine::tokGreater,
             Engine::tokLess, g_tokEqual, g_numRecord);
     }
