@@ -156,6 +156,7 @@ void ResolveData() {
         Log("ERROR: data triggers: state and region loops disagree on the layout; military_counts disabled");
         g_provinces = 0;
     }
+    ResolveArmyCondition();
     if (HaveMilitaryCounts())
         Log("Data triggers: states +0x%x/+0x%x, provinces +0x%x/+0x%x, land units +0x%x/+0x%x, naval units +0x%x/+0x%x, "
             "owner +0x%x, combats province +0x%x unit +0x%x, divisions +0x%x/+0x%x",
@@ -297,6 +298,33 @@ bool ForEachAreaDivision(AreaKind kind, int id, void (*fn)(void* division, int o
 }
 
 bool IsSameCountry(int a, int b) { return HaveCountries() && SameCountry(a, b); }
+
+// --- army_condition: CArmy strength / organisation ratios (RTTI + kCodeArmyRatio) ---------------
+namespace {
+void** g_armyVtable = nullptr;
+const size_t kArmyStrengthSlot = 34, kArmyOrgSlot = 39;
+using Ratio_t = int64_t*(__fastcall*)(void* unit, int64_t* out);
+}  // namespace
+
+void ResolveArmyCondition() {
+    size_t slots = 0;
+    void** vt = FindVtableByRtti(".?AVCArmy@@", &slots);
+    if (!vt || slots <= kArmyOrgSlot) return;
+    if (!SigMatchAt((uint8_t*)vt[kArmyStrengthSlot], kCodeArmyRatio) || !SigMatchAt((uint8_t*)vt[kArmyOrgSlot], kCodeArmyRatio)) {
+        Log("ERROR: data triggers: CArmy strength/organisation slots have an unexpected shape");
+        return;
+    }
+    g_armyVtable = vt;
+}
+
+bool HaveDivisionCondition() { return HaveMilitaryCounts() && g_armyVtable; }
+
+bool DivisionRatios(void* unit, int64_t* strength, int64_t* org) {
+    if (!g_armyVtable || !unit || *(void***)unit != g_armyVtable) return false;  // divisions only
+    *strength = *((Ratio_t)g_armyVtable[kArmyStrengthSlot])(unit, strength);
+    *org = *((Ratio_t)g_armyVtable[kArmyOrgSlot])(unit, org);
+    return true;
+}
 
 bool HaveCountries() { return g_tagToCountry && g_tagIndex && GameState(); }
 bool HaveRegionControl() {

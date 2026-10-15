@@ -203,6 +203,9 @@ CODE(kCodeValueReadValue, "48 89 5C 24 08 57 48 83 EC 40 48 8B DA 48 8B F9 E8 ??
 // CTrigger block ReadClause (base slot 5): "cmp dword [parser+0xc0], 3" (3 = block value),
 // somewhere in the first 0x80 bytes.
 CODE(kCodeBlockValueCheck, "83 BE C0 00 00 00 03")
+// CArmy strength / organisation ratio (RTTI .?AVCArmy@@ slots 34 and 39): cur (slot at +0x1f) *
+// 100000 / max (slot at +0x34), clamped to 0..1. Both slots must have this shape.
+CODE(kCodeArmyRatio, "48 89 5C 24 18 48 89 74 24 20 57 48 83 EC 20 48 8B 01 48 8B FA 48 8D 54 24 30 48 8B D9 FF 90 ?? ?? ?? ?? 4C 8B 03 48 8D 54 24 38 48 8B CB 48 8B F0 41 FF 90 ?? ?? ?? ?? 48 8B 08 48 85 C9")
 // The divisions loop right after the "army.daily" profiler zone (kAnchorArmyDaily, lea+0x14):
 // mov rbx,[rdi+list]; movsxd rax,[rdi+count]; ...; call [rax+0x98] per division.
 CODE(kCodeArmyDailyLoop, "48 8B 9F ?? ?? ?? ?? 48 63 87 ?? ?? ?? ?? 48 8D 34 C3 48 3B DE 74 ?? 0F 1F 40 00 48 8B 0B 48 8B 01 FF 90 98 00 00 00")

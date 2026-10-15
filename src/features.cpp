@@ -25,6 +25,7 @@ static Feature g_features[] = {
     {"game_loaded", Tier::Engine, &GameLoadedInit, "lifecycle", false, 0},
     {"region_control", Tier::Engine, &RegionControlInit, "lifecycle", false, 0},
     {"military_counts", Tier::Engine, &MilitaryCountsInit, "lifecycle", false, 0},
+    {"army_condition", Tier::Engine, &ArmyConditionInit, "lifecycle", false, 0},
 };
 static int g_presentToken = 0;
 

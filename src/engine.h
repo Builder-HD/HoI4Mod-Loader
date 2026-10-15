@@ -180,6 +180,10 @@ bool CountPlanesStationed(int regionId, int tag, int64_t* out);  // its planes b
 // The country's divisions, and the land units in an area (with their owner tag).
 bool ForEachDivision(int tag, void (*fn)(void* division, void* ctx), void* ctx);
 bool ForEachAreaDivision(AreaKind kind, int id, void (*fn)(void* division, int owner, void* ctx), void* ctx);
+void ResolveArmyCondition();
+bool HaveDivisionCondition();  // CArmy strength / organisation getters
+// Strength and organisation of a division as ratios (100000 = full). False if not a CArmy.
+bool DivisionRatios(void* unit, int64_t* strength, int64_t* org);
 
 // Fires the on_action like the engine fires on_startup: synced-RNG seed, events, random events
 // and effect. countryTag > 0: ROOT = that country; 0: no scope. name: at most 15 characters.

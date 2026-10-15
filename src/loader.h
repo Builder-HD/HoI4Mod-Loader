@@ -100,3 +100,4 @@ bool RegionNamesInit();       // plugin_region_names.cpp
 bool GameLoadedInit();        // plugin_game_loaded.cpp
 bool RegionControlInit();     // plugin_region_control.cpp
 bool MilitaryCountsInit();    // plugin_military_counts.cpp
+bool ArmyConditionInit();     // plugin_army_condition.cpp
