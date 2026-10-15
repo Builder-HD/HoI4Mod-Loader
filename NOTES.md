@@ -1811,3 +1811,156 @@ The release asserts are compiled out, so "asserts" here means behaviour, not the
 Each feature requires `lifecycle` (native registration) and the new numeric API. Before it
 reports "supported", each one also runs a self-check: array sizes against the region and state
 counts, values in range.
+
+## E1 decisions (2026-10-15)
+
+1. **Ratios are 0..1** like vanilla; tooltips show percent.
+2. **Operators copy vanilla:** for ratios `=` behaves like `>`; for counts `=` is equality. This
+   is documented in the README and the generated docs.
+3. **The country-wide averages ship anyway.** Their cost is measured (time per evaluation and per
+   in-game day at speed 5, with the test mod using them in `ai_will_do`), then documented from
+   the numbers. No caching across calls.
+4. **Planes take `owner = own` only** if that is all the region data supports. The `owner`
+   parameter exists now and other values are refused with a parse error, so they can be added
+   later without a syntax change.
+5. **API, thread rule and feature split:** approved.
+6. **Two documentation additions:** "missing scope value is false, true under NOT", both next to
+   the guard rules and in each docs entry. Resource deficits stay with vanilla (README).
+
+## E2: implementation (2026-10-15)
+
+### API (`native_script.*`, commit `2e845bf`)
+
+- **`register_native_numeric_trigger`:**
+  - **Kinds:** `Count` (int) and `Ratio` (fixed 1e5).
+  - **Value form:** `name > x`, allowed when every parameter can come from scope.
+  - **Block form:** `name = { ... <compareKey> > x }`.
+  - **Right side:** a number or a variable.
+  - **Tooltip:** "<subject> above 60% (currently 64%)".
+- **Engine binding:**
+  - **Clones:**
+    - `Count` clones `CNumOfFactoriesTrigger` (`CIntTrigger`; 0x138 bytes).
+    - `Ratio` clones `CHasStabilityTrigger` (`CValueTrigger`; 0x130 bytes, range-checked 0..1).
+  - **Objects:** they are built by the template's own operator new and constructor (decoded from
+    `CTriggerEntry<T>::Create`), in a block 0x148 bytes long. The record pointer sits at `+0x138`.
+    The engine allocator is plain `HeapAlloc`/`HeapFree` and ignores the size on free.
+  - **Our slots:**
+    - 5: read clause. A block value (type 3 at `parser+0xc0`) goes to the base block loop;
+      otherwise the operator comes from `parser+0x78` and the value is read by the template's
+      slot 4.
+    - 6: block item. The compare key stores the operator at `+0x58` and reads the value into the
+      template's `CScopedVariable` (`+0x60` ratio, `+0x68` count with flag `+0x70`) through its
+      vtable slot 3.
+    - 7 validate, 14 scopes, 15 targets, 21 tooltip.
+    - 22 evaluate: our value, the right side through `ScriptValueEval`, our compare with the
+      engine's semantics.
+    - 23 GetValue.
+  - **Game variable:** the template's slot 18 is called once on a prototype when every
+    parameter comes from scope and the scopes include country or state.
+- **Parameters:**
+  - `ParamSpec::fromScope` (strategic region, state, country, ROOT country);
+  - `Country` (tag or THIS/ROOT/FROM/PREV);
+  - `Choice`;
+  - `Token` (interned at parse time).
+- **Arguments are resolved per use** into a stack array (8 parameters at most), so there is no
+  allocation on the hot path.
+- **Timing:** optional QueryPerformanceCounter counters per numeric trigger
+  (`[diagnostics] trigger_timing = 1`, summary every 10 in-game days, date from `kSigGameDate`).
+- **Code shapes:** `CODE(...)` in `signatures.h` are patterns checked with `SigMatchAt` at
+  RTTI-found addresses. `tools/check_code_shapes.py` checks them offline.
+- **`region_names`:** `region` may be left out inside a strategic region scope.
+
+### Features
+
+| Feature | Commit | Engine data (all unique / ok on vanilla 1.19.3, patched 1.19.3, 1.19.2) |
+|---|---|---|
+| `region_control` | `d08675f` | air bar call site (`TagToCountry`, `CountryAir`, `AirRegionEntry`), `has_naval_control` (region `+0xe8`), naval sums loop (entries, friendly check, diplomacy `+0xf88`, war `+0x2e8`) |
+| `military_counts` | `4fb296f` | state array (`+0x2c8`/`+0x2d4`), `divisions_in_state` unit loop (provinces `+0x18`/`+0x24`, land units `+0x110`/`+0x11c`, owner `+0x1d8`), `ships_in_area` (naval units `+0xf8`/`+0x104`, ships getter), province combats (`+0x170`/`+0x17c`), unit combats (`+0x1a8`/`+0x1b4`), planes stationed (air wings `+0x58`/`+0x64`, wing region, plane count), "army.daily" divisions (`+0x290`/`+0x29c`) |
+| `army_condition` | `7315370` | `CArmy` vtable (RTTI) slots 34/39 = strength/organisation ratio (code shape); only objects with that vtable count |
+| `production_data` | `ef8e129` | equipment lookup by token (`has_equipment`'s resolver), "production.daily_serial" lines (`+0x58`/`+0x64`), factories `+0x48` (the "non productive line" check), country production `+0xf68` (`num_of_available_military_factories`), line equipment `+0x88` → type `+0x3f0` → archetype `+0x4d8` |
+
+**Semantics chosen:**
+- **`battles_count`:** combats listed in the provinces of the state or region (land and naval),
+  or the distinct combats of a country's divisions (`involving`; land battles of its divisions).
+- **`divisions_count` / `ships_count` owner `own`:** same country by the engine's tag-index test
+  (as vanilla `divisions_in_state`).
+- **Owner `enemy`:** at war (a war not ended).
+- **`planes_count`:** a country's planes **stationed** (air base) in the region, as vanilla
+  `num_planes_stationed_in_regions` counts them. `owner = own` only: the per-region air entry
+  holds power, not plane counts per country (not proven), and looping over every country's
+  wings is too expensive.
+- **The averages:** the mean of each division's ratio.
+- **`factories_assigned`:** military lines' factories plus naval lines' dockyards (naval lines
+  only if their slot 11 reads the same equipment field). An equipment type or archetype matches
+  the line's type or its archetype.
+- **Self-checks** on every game entry (main thread, SEH) read the player's data. A fault
+  deactivates the feature, and its triggers then return false.
+
+### Tests
+
+- **Core (`native_script_test`, 113 checks):**
+  - choice and country parsing;
+  - scope defaults (region from scope, ROOT country, FROM, fallback to the country scope);
+  - the missing default (false, logged once);
+  - compare semantics (ratio `=` means `>`, count `=` equality, strict `<`/`>`);
+  - formatting, tooltips (negated, unknown right side, unavailable value);
+  - value-form refusal with required parameters, a missing compare key, timing counters;
+  - docs text.
+- **Not testable out of game:** operator parsing itself (engine parser). It's covered by the
+  in-game plan.
+
+### In-game test plan (E2)
+
+**Setup:**
+- `version.dll` and `loader_config.ini` with `[diagnostics] trigger_timing = 1`; the test mod
+  enabled.
+- Places: state 16 = Ile de France, regions 19 Northern France, 18 Channel, 42 Bay of Biscay.
+
+1. **Startup log:** signatures `air_superiority_ui`, `naval_control_eval`, `naval_sums`,
+   `state_array`, `state_land_units`, `ships_in_area`, `province_add_combat`, `unit_add_combat`,
+   `planes_stationed`, `equipment_lookup`, `production_line_factories`, `game_date`; anchors
+   `army.daily`, `production.daily_serial`.
+   - "Numeric triggers: count template 312 bytes, ratio template 304 bytes ...".
+   - Three "Data triggers: ..." layout lines.
+   - The four features active; the numeric triggers "registered", three of them "also a game
+     variable"; "Diagnostics: numeric trigger timing ON".
+2. **`loader_script_docs.md`** lists the 9 new triggers with usage, the value semantics and the
+   NOT caveat.
+3. **New game as France (1936).** On game entry, four self-check lines pass: region_control,
+   military_counts, army_condition, production_data.
+4. **Values against the game UI** (hover the status decisions' requirements):
+   - **air_superiority:** put fighters on an air superiority mission over Northern France. The
+     region panel's air superiority bar and `air_superiority = { region = 19 ... }` must agree
+     (at peace: 100% with own planes active, 0% without).
+   - **naval_dominance:** a fleet patrolling the Bay of Biscay; compare with the region's naval
+     dominance "Control ratio".
+   - **divisions_count:** the division counters in Ile de France (state 16) and Northern France
+     (19) on the map.
+   - **ships_count:** ships of the fleets in the Bay of Biscay / Channel.
+   - **planes_count:** the planes based in Northern France (air base tooltips).
+   - **avg_division_strength / avg_division_organisation:** the army overview / division bars
+     (whole army, and Ile de France).
+   - **factories_assigned:** the production screen (all lines; infantry equipment lines; light
+     hull lines in dockyards). `no_such_equipment` always shows "currently unavailable".
+5. **At war** (1939 bookmark as France after the declaration on Germany, or any war):
+   - owner = enemy counts on the front;
+   - battles_count (state, region, involving ROOT) while attacking;
+   - air superiority and naval dominance below 100% where the enemy is active.
+6. **Comparisons:**
+   - "> 50%" and "< 50%" flip as air superiority changes;
+   - "= 50%" is available exactly when "> 50%" is;
+   - "Divisions = 0" means equal;
+   - the threshold decisions (LOW/HIGH) flip the variable-based decisions.
+7. **Caveats:**
+   - "NOT air superiority without a region" is available, and `loader.log` notes the missing
+     region once;
+   - "Planes with a reserved owner": `loader.log` says `'owner' expects one of own, got 'enemy'`
+     once, and the decision is never available.
+8. **Variables:** "Data triggers as variables" opens event 5 with the same numbers as the
+   status tooltips and the UI.
+9. **Cost:** run 60+ in-game days at speed 5 (the AI probe decision makes every AI country
+   evaluate the triggers).
+   - Send the "Trigger timing" lines (per trigger: evaluations, ns each, ms per day; the total).
+   - Note whether speed 5 feels slower than with `[features]` switching the four features off.
+10. **Without the loader:** the data decisions are hidden; `error.log` has "Unknown
+    trigger" for the new triggers (the documented cost).

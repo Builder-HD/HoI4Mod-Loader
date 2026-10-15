@@ -31,6 +31,10 @@ Current features:
 | `lifecycle` | engine | `hoi4_loader_plugin_lifecycle` | "lexer ready" and "game entered" (new game *and* loaded save) callbacks for other features; refreshes the plugin flags right after a save is loaded |
 | `region_names` | engine (needs `lifecycle`) | `hoi4_loader_plugin_region_names` | runtime strategic region names, see below |
 | `game_loaded` | engine (needs `lifecycle`) | `hoi4_loader_plugin_game_loaded` | the `on_game_loaded` on_action, see below |
+| `region_control` | engine (needs `lifecycle`) | `hoi4_loader_plugin_region_control` | `air_superiority`, `naval_dominance` (data triggers, see below) |
+| `military_counts` | engine (needs `lifecycle`) | `hoi4_loader_plugin_military_counts` | `battles_count`, `divisions_count`, `ships_count`, `planes_count` |
+| `army_condition` | engine (needs `lifecycle`) | `hoi4_loader_plugin_army_condition` | `avg_division_strength`, `avg_division_organisation` |
+| `production_data` | engine (needs `lifecycle`) | `hoi4_loader_plugin_production_data` | `factories_assigned` |
 
 On an unknown build the file tier stays on, the engine tier is off, and `loader.log` lists the
 disabled features and prints the exact line to add to `loader_config.ini`. A feature whose init
@@ -281,6 +285,83 @@ OR = {
 If a native trigger fails at runtime (a plugin bug), it evaluates to false and `loader.log`
 gets one line. Inside `NOT` that counts as true.
 
+**Parameters from scope.** Some parameters may be left out; the docs mark them "optional: from
+<scope>" (e.g. `region` inside a strategic region scope, the country from ROOT).
+- If the scope doesn't provide the value, an effect does nothing and a trigger is **false**.
+  Under `NOT` it is therefore **true**, the same as a dropped trigger.
+- `loader.log` notes it once per command ("... not given and not available from the scope").
+- So write the parameter explicitly wherever the scope isn't certain, or wrap the trigger together
+  with a condition that guarantees the scope.
+
+## Data triggers (numeric)
+
+Four features add numeric triggers. They read values the game already computes and compare them
+like vanilla numeric triggers. Each feature has its own guard trigger, so one broken signature
+after a game update only switches off its own group.
+
+| Feature | Trigger | Value |
+|---|---|---|
+| `region_control` | `air_superiority` | ratio: the region panel's air superiority bar, own side / (own + enemy) air power; 0 if neither side flies there |
+| `region_control` | `naval_dominance` | ratio: naval dominance of the country and its friends / (friends + countries at war with it), the sums `has_naval_control` uses; 0 in land regions |
+| `military_counts` | `battles_count` | battles located in a state / strategic region, or battles the country's divisions fight in (`involving`) |
+| `military_counts` | `divisions_count`, `ships_count` | divisions / ships in a state or strategic region; `owner = any / own / enemy` |
+| `military_counts` | `planes_count` | a country's planes stationed (by air base) in a strategic region; `owner = own` only for now |
+| `army_condition` | `avg_division_strength`, `avg_division_organisation` | ratio: average over the country's whole army (country scope) or the divisions in a state |
+| `production_data` | `factories_assigned` | factories on the country's production lines (dockyards on naval lines), optionally for one equipment type or archetype |
+
+**Syntax:**
+
+```
+air_superiority > 0.6                                        # inside a strategic region scope (country = ROOT)
+air_superiority = { region = 19 country = GER value > 0.6 }  # block form; `value` holds the comparison
+naval_dominance = { region = 42 value < global.my_threshold } # variables work on the right side
+battles_count = { involving = ROOT count > 0 }
+divisions_count = { state = 16 owner = enemy count > 5 }
+avg_division_strength < 0.7                                  # country scope: the whole army
+factories_assigned = { equipment = infantry_equipment count > 10 }
+```
+
+**Comparisons, exactly as vanilla:**
+- **Ratios** (`air_superiority`, `naval_dominance`, the averages): values 0..1, shown in
+  percent in tooltips. Use `<` (below) or `>` (above). **`=` also means above**, which is
+  vanilla's behaviour for fractional triggers such as `has_stability = 0.5`. The right side must
+  be within 0..1.
+- **Counts** (`*_count`, `factories_assigned`): `>`, `<`, and `=` meaning **equal**.
+- **The right side** may be a number or a variable (`global.x`, a country variable, ...).
+
+**Defaults:**
+- Without `region` / `state` the triggers use the current strategic region or state scope.
+- Without `country` they use ROOT, else the country scope (the averages and `factories_assigned`
+  use the country scope).
+- If a value cannot be determined (unknown region, missing scope, an unknown equipment name, no
+  divisions to average), the trigger is **false**, and true under `NOT` (see above).
+
+**Tooltips:** e.g. "Air superiority of FRA over Northern France (19) above 60% (currently
+64%)".
+
+**Game variables:** triggers whose parameters can all come from a country or state scope are also
+game variables of the same name: `avg_division_strength`, `avg_division_organisation`,
+`factories_assigned`. Example: `set_variable = { my_strength = avg_division_strength }`.
+Strategic region values can't be variables, because HOI4 has no region-scope variables.
+
+**Resource deficits are not here: vanilla already has them.**
+- `has_resources_in_country = { resource = steel amount < 0 }` compares the balance.
+- The variable `resource@steel` is the surplus (negative = deficit).
+- `resource_produced@`, `resource_imported@`, `resource_exported@` and `resource_consumed@` give
+  the parts: needed = consumed + exported, available = produced + imported.
+
+**Cost:**
+- Counts and ratios over an area read the area's provinces and units.
+- `battles_count = { involving = ... }` and the country-wide averages loop over every division of
+  the country.
+- Measured costs are in NOTES.md (Part E, in-game results). With `[diagnostics] trigger_timing = 1`
+  in `loader_config.ini`, `loader.log` reports evaluations, time per evaluation and time per
+  in-game day, every 10 days.
+- Keep the country-wide averages out of blocks the AI evaluates for every country every day.
+
+**Multiplayer:** all values are game state that every machine computes the same way (integer
+fixed point, no floats), so the triggers are as deterministic as vanilla's.
+
 ## Writing a native effect or trigger (for plugin authors)
 
 Declare commands in your feature's init (see `src/plugin_region_names.cpp`); the API in
@@ -305,9 +386,25 @@ bool MyFeatureInit() {
 - **Forms:**
   - `Form::Value` (`name = <value>`) takes exactly one required parameter.
   - `Form::Block` (`name = { key = value ... }`) takes named parameters.
-  - Types: `Int`, `Bool` (`yes`/`no`) and `Key` (one word, up to 255 characters).
+  - Types: `Int`, `Bool` (`yes`/`no`), `Key` (one word, up to 255 characters), `Country` (a tag
+    or THIS/ROOT/FROM/PREV, resolved per use), `Choice` (one of `ParamSpec::choices`, e.g.
+    `"any|own|enemy"`; `Args::i` is the index) and `Token` (a key interned at parse time;
+    `Args::i` is the engine token, for lookups without allocation).
+  - `ParamSpec::fromScope` (`StrategicRegion`, `State`, `Country`, `RootCountry`): the parameter
+    may be left out and then comes from the scope. Such a parameter is not `required`. Missing
+    in the scope: effects do nothing, triggers are false (see "Parameters from scope").
   - Unknown keys, type errors and missing required parameters are reported by the engine (with
     file and line) and logged once per command; that use then does nothing.
+- **Numeric triggers:** `register_native_numeric_trigger` with
+  `bool value(const Args&, const Scope&, int64_t* out)`.
+  - **Kind:** `Count` (a whole number) or `Ratio` (fixed point, 100000 = 1.0).
+  - **Comparisons:** the engine's own numeric trigger classes do the operators and variables.
+    `name > x` works when every parameter can come from scope; otherwise
+    `name = { ... <compareKey> > x }`.
+  - **Game variables:** with every parameter from scope and country or state among the scopes,
+    the trigger is also a game variable.
+  - **Missing value:** return false when the value does not exist; the trigger is then false.
+  - **`subject`:** optional, the start of the tooltip line.
 - **When:** register from the feature's init only. Engine registration happens at lexer-ready,
   before any script is parsed; later calls are refused. The feature needs the engine tier and
   the `lifecycle` feature.
@@ -324,9 +421,17 @@ bool MyFeatureInit() {
   - effects without a tooltip callback show no line;
   - triggers without one show `name: param=value ...`;
   - tooltip text is plain UTF-8 (colour codes allowed, no `{`).
-- **Trigger performance:** `evaluate` runs for AI and UI, often, possibly on several threads at
-  once. **No locks, no allocation, no logging** in it; read lock-free data (atomics, immutable
-  tables).
+- **Trigger performance:** `evaluate` (and a numeric `value`) runs for AI and UI, often,
+  possibly on several threads at once.
+  - It **may read game state**: all game-state writes are serial on the main thread, and
+    vanilla's own triggers read the same data from AI worker threads (NOTES.md, "Threading
+    model").
+  - **No writes, no caching across calls, no locks, no allocation, no logging.** One
+    flag-guarded line is fine.
+  - Call only engine getters that just read: no function that needs the main thread (synced
+    RNG, tick code), allocates or logs on its normal path. NOTES.md Part E lists the safe ones.
+  - Validate ids before calling a getter, because several vanilla getters log on bad input.
+  - Keep loops bounded by the data.
 - **Determinism (multiplayer):** `execute` and `evaluate` may only read and write game state: no
   randomness, no wall-clock time, no file I/O, nothing thread-dependent. Every client runs the
   same script and must get the same result, or multiplayer desyncs. Display-only state, such as
@@ -361,8 +466,10 @@ The details are in NOTES.md, "Threading model".
   - If `MainThreadQueueAvailable()` is false (the frame hook's signature was not found), none of
     this runs. A feature that depends on it must then stay off.
 - **Callbacks that run on the main thread:** game-entered callbacks run there, outside the tick,
-  so they may read and write game state. So do native effects. Native triggers can be evaluated
-  on any thread, so they follow the rules above.
+  so they may read and write game state. So do native effects.
+- **Native triggers can be evaluated on any thread,** but unlike hooks they may *read* game state:
+  they run where vanilla triggers run, never while game state is being written. They must not
+  write, cache or allocate ("Trigger performance" above).
 - **Example:** `region_names` does exactly this. Its flag hooks only set dirty bits; the rescan
   runs from `OnMainThreadFrame`.
 
@@ -380,6 +487,9 @@ src/features.cpp              feature registry, tier gating, core detection file
 src/plugin_engine_probe.cpp   engine_probe feature
 src/plugin_region_names.cpp   region_names feature (flags, GetNameKey hook, native commands)
 src/plugin_game_loaded.cpp    game_loaded feature (fires on_game_loaded after a save is loaded)
+src/plugin_region_control.cpp, plugin_military_counts.cpp, plugin_army_condition.cpp,
+src/plugin_production_data.cpp   data trigger features (numeric triggers)
+src/engine_data.cpp           engine access for the data triggers (read-only game state)
 src/native_script.h, .cpp     native effect/trigger API: schemas, registration, parsing, docs
 src/native_script_engine.cpp  native API engine binding (vtable clones, registries, Scope)
 src/engine.cpp, engine.h      engine access: all hoi4.exe functions/data the features use
@@ -387,6 +497,7 @@ src/lifecycle.cpp, .h         lexer-ready / game-entered callbacks, main-thread 
 src/proxy.asm, version.def    version.dll export stubs
 src/sha256.h                  self-contained SHA-256
 tools/check_signatures.py     check src/signatures.h against hoi4.exe copies
+tools/check_code_shapes.py    check the CODE shapes at their RTTI-found addresses on hoi4.exe copies
 tests/                        out-of-game smoke test (stand-in hoi4.exe)
 mod/                          companion test mod
 ```
@@ -433,7 +544,15 @@ Or in Visual Studio: **File > Open > Folder...**, pick this folder, choose `x64-
 
 The label is free text and is printed in `loader.log` when it matches. Before adding a new build,
 run `python tools/check_signatures.py <copy of hoi4.exe>`: every signature must report exactly one
-match.
+match. Also run `python tools/check_code_shapes.py <copy of hoi4.exe>`: every code shape the
+numeric triggers rely on must report ok.
+
+Optional diagnostics:
+
+```
+[diagnostics]
+trigger_timing = 1   ; time every numeric trigger; loader.log summary every 10 in-game days
+```
 
 ### Hash cache
 
