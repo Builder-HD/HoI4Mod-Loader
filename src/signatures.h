@@ -192,10 +192,16 @@ static const size_t kSigGameDateDisp = 9;
 // token) (E8 at +0x37); a def counts only if its byte [disp8 +0x47] is set. (0x1413b0970)
 SIG(kSigEquipmentLookup, "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 60 49 8B E8 48 8B F2 48 8B F9 8B 1A 85 DB 74 ?? 48 83 3D ?? ?? ?? ?? 00 74 ?? E8 ?? ?? ?? ?? 8B D3 48 8B C8 E8 ?? ?? ?? ?? 48 89 47 10 48 85 C0 74 ?? 80 78 ?? 00")
 static const size_t kSigEquipDbCmp = 0x23, kSigEquipDbGetter = 0x2d, kSigEquipLookup = 0x37, kSigEquipValidDisp = 0x47;
-// production.daily_serial line loop: lines production->[disp8 +3] ... factories line->[disp8 +0x2a]
-// ("Deleting non productive line" when 0). (0x140e67130)
+// production.daily_serial line loop: lines production->[disp8 +3] ... line->[disp8 +0x2a] is the
+// amount still to build (-1 = unlimited; "Deleting non productive line" when 0), NOT factories.
+// (0x140e67130)
 SIG(kSigProductionLineFactories, "48 8B 43 ?? 48 8B 0C 07 48 8B 01 FF 50 50 48 8B 43 ?? 48 8B 0C 07 48 8B 01 FF 90 F0 00 00 00 48 8B 43 ?? 48 8B 0C 07 44 39 71 ?? 75")
-static const size_t kSigLineFactoriesListDisp = 3, kSigLineFactoriesDisp = 0x2a;
+static const size_t kSigLineFactoriesListDisp = 3;
+// Production::SetLineFactories (0x140e611b0) tail: the assigned factories are split into two line
+// fields, mov [rdi+disp8 +4],edx; mov [rdi+disp8 +7],ecx (and re-zeroed via disp8 +0xe); the rest of
+// the requested count (+0x15, disp32) is queued ("nNewQueuedFactories >= 0").
+SIG(kSigLineAssignFactories, "2B CA 89 57 ?? 89 4F ?? 85 D2 79 ?? C7 47 ?? 00 00 00 00 8B 9F ?? ?? ?? ?? 2B D9 2B DA")
+static const size_t kSigAssignFieldA = 4, kSigAssignFieldB = 7, kSigAssignFieldAAgain = 0xe;
 // "production.daily_serial" profiler zone; kCodeProductionDaily at lea+0x13: lines
 // production->[disp8 +0x1d] (count [disp8 +0x21]).
 ANCHOR(kAnchorProductionDaily, "production.daily_serial")

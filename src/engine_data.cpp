@@ -334,7 +334,8 @@ EquipDb_t g_equipDb = nullptr;
 EquipLookup_t g_equipLookup = nullptr;
 void* const* g_equipDbGlobal = nullptr;  // set once the equipment database exists
 uint32_t g_equipValid = 0;               // def byte that must be set
-uint32_t g_countryProduction = 0, g_lines = 0, g_lineCount = 0, g_lineFactories = 0;
+uint32_t g_countryProduction = 0, g_lines = 0, g_lineCount = 0;
+uint32_t g_lineFactoriesA = 0, g_lineFactoriesB = 0;  // assigned factories = A + B
 uint32_t g_lineEquipment = 0, g_equipType = 0, g_typeArchetype = 0;
 void** g_militaryLineVt = nullptr;
 void** g_navalLineVt = nullptr;
@@ -349,9 +350,12 @@ void ResolveProduction() {
         g_equipValid = Rd<uint8_t>(p, kSigEquipValidDisp);
     }
     uint32_t lines2 = 0;
-    if ((p = SigFindUnique("production_line_factories", kSigProductionLineFactories)) != nullptr) {
+    if ((p = SigFindUnique("production_line_factories", kSigProductionLineFactories)) != nullptr)
         lines2 = Rd<uint8_t>(p, kSigLineFactoriesListDisp);
-        g_lineFactories = Rd<uint8_t>(p, kSigLineFactoriesDisp);
+    if ((p = SigFindUnique("line_assign_factories", kSigLineAssignFactories)) != nullptr &&
+        Rd<uint8_t>(p, kSigAssignFieldA) == Rd<uint8_t>(p, kSigAssignFieldAAgain)) {
+        g_lineFactoriesA = Rd<uint8_t>(p, kSigAssignFieldA);
+        g_lineFactoriesB = Rd<uint8_t>(p, kSigAssignFieldB);
     }
     if (uint8_t* lea = AnchorFindLea("production.daily_serial", kAnchorProductionDaily)) {
         uint8_t* code = lea + kProductionDailyCodeFromLea;
@@ -382,14 +386,14 @@ void ResolveProduction() {
         g_lines = 0;
     }
     if (HaveProduction())
-        Log("Data triggers: production +0x%x, lines +0x%x/+0x%x, factories +0x%x, equipment +0x%x -> type +0x%x -> "
+        Log("Data triggers: production +0x%x, lines +0x%x/+0x%x, factories +0x%x + +0x%x, equipment +0x%x -> type +0x%x -> "
             "archetype +0x%x",
-            g_countryProduction, g_lines, g_lineCount, g_lineFactories, g_lineEquipment, g_equipType, g_typeArchetype);
+            g_countryProduction, g_lines, g_lineCount, g_lineFactoriesA, g_lineFactoriesB, g_lineEquipment, g_equipType, g_typeArchetype);
 }
 
 bool HaveProduction() {
     return HaveCountries() && g_equipDb && g_equipLookup && g_equipDbGlobal && g_countryProduction && g_lines && g_lineCount &&
-           g_lineFactories && g_lineEquipment && g_equipType && g_typeArchetype && g_militaryLineVt;
+           g_lineFactoriesA && g_lineFactoriesB && g_lineEquipment && g_equipType && g_typeArchetype && g_militaryLineVt;
 }
 
 const void* EquipmentByToken(int token) {
@@ -415,7 +419,7 @@ bool FactoriesAssigned(int tag, const void* equipment, int64_t* out) {
             void* archetype = type ? Rd<void*>(type, g_typeArchetype) : nullptr;
             if (type != equipment && archetype != equipment) continue;
         }
-        int f = Rd<int>(line, g_lineFactories);
+        int f = Rd<int>(line, g_lineFactoriesA) + Rd<int>(line, g_lineFactoriesB);
         if (f > 0) *out += f;
     }
     return true;
@@ -459,7 +463,7 @@ bool SafeLogLine(int i, void* line) {
         void* type = equip ? Rd<void*>(equip, g_equipType) : nullptr;
         void* archetype = type ? Rd<void*>(type, g_typeArchetype) : nullptr;
         Log("  line %d: %s%s, factories %d; equipment %p (%s) -> type %p (%s) -> archetype %p (%s)", i,
-            SafeRttiName(line), counted ? "" : " (not counted)", Rd<int>(line, g_lineFactories), equip, EquipName(equip), type,
+            SafeRttiName(line), counted ? "" : " (not counted)", Rd<int>(line, g_lineFactoriesA) + Rd<int>(line, g_lineFactoriesB), equip, EquipName(equip), type,
             EquipName(type), archetype, EquipName(archetype));
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {

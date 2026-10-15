@@ -1989,3 +1989,21 @@ counts, values in range.
 - **Fix:** `=` is looked up by name among the static tokens, and `>` / `<` (from the template
   code) are checked by name too. **Third run: `'>' 0x1d3, '<' 0x1d4, '=' 0x1`, 12 of 12
   registered.** The game was launched directly by Claude for steps 1-2 (main menu only).
+- **Steps 3-4, first pass (DLL `5fa51532`, new FRA 1936 game, user):**
+  - **Correct:** region control (0% in peacetime is vanilla; > 50% unlocks the decision once
+    fighters win the region), divisions (4 in state 16; `= 0` and `< 3` false), ships, planes
+    (348 in Northern France), organisation 100%, the `owner = enemy` parse error.
+  - **Strength was wrong:** 100% where the UI shows 50%. CArmy slot 34 is the manpower ratio
+    only; the UI ("Strength", CURRENT_STRENGTH / UNIT_AVERAGE_STR) calls slot 35 = slot 34 x
+    equipment ratio (+0x468). Now reads slot 35 (kCodeArmyFightingStrength). **Second pass: 50%
+    in state 16, 59.9% army-wide.**
+  - **Production was wrong:** 21 against the UI's 6 military + 11 dockyards in use. The
+    production line dump showed equipment matching is fine (variant -> type -> archetype resolve
+    to the right names), but line+0x48 is the amount still to build (-1 = unlimited, so military
+    lines were skipped; the submarine lines' 3/2/2 orders made up the extra). The assigned
+    factories are line+0x18 + line+0x1c, written by Production::SetLineFactories
+    (0x140e611b0, kSigLineAssignFactories); the rest of the requested count (+0xe8) is queued.
+    Sums per kind: production+0x2d8 (military) and +0x338 (dockyards).
+  - **Test mod:** the HOI4 loc parser drops "{" plus the next two characters; descriptions now use
+    parentheses. fighter_equipment no longer exists in 1.19 (it correctly showed "unavailable");
+    the test now uses small_plane_airframe.
