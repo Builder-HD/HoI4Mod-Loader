@@ -16,8 +16,20 @@
 // ===========================================================================================
 // Public API for plugins
 // ===========================================================================================
-enum class ParamType { Int, Bool, Key };  // Key: one identifier-like word (loc keys, names)
+// Key: one identifier-like word (loc keys, names). Country: a tag (GER) or THIS/ROOT/FROM/PREV,
+// resolved per evaluation. Choice: one of ParamSpec::choices ("any|own|enemy"), Args::i = index.
+enum class ParamType { Int, Bool, Key, Country, Choice };
 enum class Form { Value, Block };          // name = <value>   |   name = { key = value ... }
+
+// Where an omitted parameter comes from (evaluated per use). If the scope does not provide it,
+// effects do nothing and triggers are false (so NOT = { ... } around them is true); logged once.
+enum class ScopeDefault : uint8_t {
+    None,
+    StrategicRegion,  // the strategic region scope's id
+    State,            // the state scope's id
+    Country,          // the country scope's tag
+    RootCountry,      // ROOT if it is a country, else the current country scope
+};
 
 // Engine scope bits (see NOTES.md C1, scope table). 0 = any scope.
 namespace ScopeMask {
@@ -42,8 +54,13 @@ enum : uint32_t {
 struct ParamSpec {
     const char* name;  // [a-z0-9_]+
     ParamType type;
-    bool required;
+    bool required;     // must be written in script (false when fromScope is set)
+    ScopeDefault fromScope = ScopeDefault::None;
+    const char* choices = nullptr;  // Choice only: "a|b|c"
 };
+
+// Country parameter values below 1 are scope keywords, resolved per evaluation.
+enum : int { kCountryThis = -1, kCountryRoot = -2, kCountryFrom = -3, kCountryPrev = -4 };
 
 struct ArgValue {
     bool present = false;
@@ -120,10 +137,33 @@ struct NativeTrigger {
     void (*tooltip)(const Args&, const Scope&, bool negated, TooltipText&);
 };
 
+// Numeric data trigger, compared like vanilla numeric triggers (NOTES.md E1):
+//   Count: whole numbers; `>`, `<`, and `=` meaning equal.
+//   Ratio: fixed point 0..1 (100000 = 1.0); `<` means below, `>` and `=` both mean above (vanilla).
+// Forms: `name > 0.6` when every parameter can come from scope (or there are none), and
+// `name = { <params> <compareKey> > 0.6 }`. The right side may be a number or a variable.
+// Commands whose parameters all come from scope and whose scopes include Country or State are
+// also registered as game variables of the same name (set_variable = { x = name }).
+enum class NumericKind { Count, Ratio };
+struct NativeNumericTrigger {
+    const char* name;
+    const char* help;
+    NumericKind kind;
+    std::vector<ParamSpec> params;  // may be empty (value form only)
+    uint32_t scopes;
+    const char* compareKey;  // block form key holding the comparison: "count" / "value"
+    // Hot path, same rules as NativeTrigger::evaluate. Count: the count; Ratio: 0..100000.
+    // Return false if the value does not exist (unknown region etc.): the trigger is false.
+    bool (*value)(const Args&, const Scope&, int64_t* out);
+    // Optional; the subject of the tooltip line, e.g. "Air superiority over Bay of Biscay (42)".
+    void (*subject)(const Args&, const Scope&, TooltipText&);
+};
+
 // Returns false (and logs why) if the definition is invalid, the window is closed, or the name
 // is already registered by the loader. Game-name conflicts are detected at engine registration.
 bool register_native_effect(const NativeEffect& def, const char* feature);
 bool register_native_trigger(const NativeTrigger& def, const char* feature);
+bool register_native_numeric_trigger(const NativeNumericTrigger& def, const char* feature);
 
 // True once engine registration ran and every native command of `feature` was registered
 // (true for features without native commands). Drives hoi4_loader_feature_<name>.
@@ -155,13 +195,28 @@ struct Command {
     void (*effectTooltip)(const Args&, const Scope&, TooltipText&) = nullptr;
     bool (*evaluate)(const Args&, const Scope&) = nullptr;
     void (*triggerTooltip)(const Args&, const Scope&, bool, TooltipText&) = nullptr;
+    // Numeric triggers (kind == Trigger).
+    bool numeric = false;
+    NumericKind numericKind = NumericKind::Count;
+    std::string compareKey;
+    bool (*value)(const Args&, const Scope&, int64_t*) = nullptr;
+    void (*subject)(const Args&, const Scope&, TooltipText&) = nullptr;
+    std::vector<std::string> choiceStorage;  // owns ParamSpec::choices
 
     CommandStatus status = CommandStatus::Pending;
     std::string reason;               // why refused
     int token = 0;                    // engine token of `name`
     std::vector<int> paramTokens;     // engine tokens of the parameter names
+    int compareToken = 0;             // engine token of compareKey
+    bool variable = false;            // also registered as a game variable
     volatile long failureLogged = 0;  // one log line per command for runtime failures
     volatile long invalidLogged = 0;
+    volatile long scopeLogged = 0;    // a scope default was unavailable (logged once)
+    // Timing diagnostics (NativeSetTiming): evaluations and QueryPerformanceCounter ticks.
+    volatile long long evalCount = 0;
+    volatile long long evalTicks = 0;
+
+    bool ValueFormAllowed() const;    // every parameter optional or from scope
 };
 
 // Arguments parsed for one script occurrence of a command. Allocated at parse time, never freed
@@ -171,6 +226,9 @@ struct ParsedCommand {
     std::vector<ArgValue> args;
     std::vector<std::string> storage;  // Key text
     bool parseError = false;
+    // Numeric triggers: which form was written; block form needs its compare key.
+    bool valueForm = false;
+    bool comparePresent = false;
 };
 
 // What the core needs from the engine; the smoke test provides a fake.
@@ -180,6 +238,7 @@ public:
     virtual int Intern(const char* s) = 0;                       // 0 on failure
     virtual bool EngineHas(CommandKind kind, int token) = 0;     // vanilla (or any) registration
     virtual bool Bind(Command& cmd, std::string* reason) = 0;    // add to the engine
+    virtual int CountryTag(const char* text) { (void)text; return 0; }  // "GER" -> tag, 0 if unknown
 };
 
 // Engine registration for all pending commands; closes the window; writes the docs file
@@ -202,6 +261,23 @@ bool NativeEvaluate(const ParsedCommand* pc, const void* engineScope);
 // Tooltip text (UTF-8, no trailing newline). Triggers without a tooltip callback get the
 // generic line; effects without one get "".
 std::string NativeTooltip(const ParsedCommand* pc, const void* engineScope, bool negated);
+
+// Numeric triggers. Value: false if a scope default is missing, the callback says the value does
+// not exist, or it crashed (all logged once).
+bool NativeNumericValue(const ParsedCommand* pc, const void* engineScope, int64_t* out);
+enum class CompareOp { Greater, Less, Equal };
+// The engine's comparison semantics (see NativeNumericTrigger).
+bool NativeCompare(NumericKind kind, CompareOp op, int64_t value, int64_t rhs);
+// "Air superiority over Bay of Biscay (42) above 60% (currently 64%)". rhsKnown = false when the
+// right side could not be evaluated (shown as "?").
+std::string NativeNumericTooltip(const ParsedCommand* pc, const void* engineScope, bool negated, CompareOp op, int64_t rhs,
+                                 bool rhsKnown);
+// Fixed point (100000 = 1) as text: Ratio -> "64%", Count -> "3".
+std::string NativeFormatNumber(NumericKind kind, int64_t v);
+
+// Timing diagnostics for numeric triggers (loader_config.ini [diagnostics] trigger_timing = 1).
+void NativeSetTiming(bool on);
+bool NativeTimingEnabled();
 
 // Test hook: forget everything (smoke test only).
 void NativeScriptResetForTests();

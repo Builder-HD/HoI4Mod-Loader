@@ -5,6 +5,8 @@
 // Slot numbers: NOTES.md C1.
 #include <string.h>
 
+#include <algorithm>
+
 #include "engine.h"
 #include "loader.h"
 #include "native_script.h"
@@ -42,8 +44,7 @@ const char* ValueText(const void* value) {
     return n ? *(const char* const*)((const uint8_t*)value + 8) : "";
 }
 
-void ReadItem(void* self, void* parser, int token) {
-    ParsedCommand* pc = Rec(self);
+void ReadItemFor(ParsedCommand* pc, void* parser, int token) {
     int idx = pc ? NativeParamIndex(*pc->cmd, token) : -1;
     if (idx < 0) {
         Engine::ParserUnexpected(parser);  // engine error with file/line, skips the value
@@ -59,6 +60,8 @@ void ReadItem(void* self, void* parser, int token) {
         Log("Native command '%s': %s", pc->cmd->name.c_str(), error.c_str());
     }
 }
+
+void ReadItem(void* self, void* parser, int token) { ReadItemFor(Rec(self), parser, token); }
 
 bool ReadValue(void* self, const void* value) {
     ParsedCommand* pc = Rec(self);
@@ -167,6 +170,191 @@ bool BindTrigger(Command& c) {
     return Engine::RegisterTrigger(c.token, e);
 }
 
+// --- Numeric triggers (NOTES.md E2) ------------------------------------------------------------
+// Objects are the numeric template (CIntTrigger / CValueTrigger) built by its own constructor in
+// a block g_numRecord + 16 bytes long; the ParsedCommand* sits right after the larger template.
+// Template fields used: operator token +0x58; right side: Count int +0x60, or CScopedVariable
+// +0x68 when the byte at +0x70 is set; Ratio CScopedVariable +0x60.
+const size_t kOp = 0x58, kCountInt = 0x60, kCountVar = 0x68, kCountVarFlag = 0x70, kRatioVar = 0x60;
+const size_t kParserOp = 0x78, kParserValue = 0xc0;
+const int kBlockValue = 3;  // parser value type of `{ ... }` (checked: kCodeBlockValueCheck)
+size_t g_numRecord = 0;
+int g_tokEqual = 0;
+
+ParsedCommand* NumRec(void* self) { return self ? *(ParsedCommand**)((uint8_t*)self + g_numRecord) : nullptr; }
+const Engine::NumericTemplate& Tmpl(const Command& c) {
+    return c.numericKind == NumericKind::Ratio ? Engine::numericRatio : Engine::numericCount;
+}
+int& OpAt(void* self) { return *(int*)((uint8_t*)self + kOp); }
+bool IsOp(int t) { return t == Engine::tokGreater || t == Engine::tokLess || (g_tokEqual && t == g_tokEqual); }
+CompareOp OpOf(int t) {
+    return t == Engine::tokGreater ? CompareOp::Greater : t == Engine::tokLess ? CompareOp::Less : CompareOp::Equal;
+}
+
+using Clause_t = void(__fastcall*)(void* self, void* parser, void* ctx);
+using ReadValue_t = bool(__fastcall*)(void* self, void* value);
+using HolderRead_t = void(__fastcall*)(void* holder, void* parser);
+using VarRegister_t = void(__fastcall*)(void* self, int token, const char* desc);
+
+// No C++ objects: SEH around the engine's script value evaluation.
+bool SafeScriptValue(void* holder, const void* scope, int64_t* out) {
+    __try {
+        int64_t* r = Engine::scriptValueEval(holder, out, scope, 0, false);
+        if (r) *out = *r;
+        return r != nullptr;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// The right side in the command's own unit: Count -> whole number (vanilla truncates variables),
+// Ratio -> fixed point.
+bool RightSide(void* self, const Command& c, const void* scope, int64_t* rhs) {
+    uint8_t* o = (uint8_t*)self;
+    if (c.numericKind == NumericKind::Ratio) return SafeScriptValue(o + kRatioVar, scope, rhs);
+    if (!*(o + kCountVarFlag)) {
+        *rhs = *(int*)(o + kCountInt);
+        return true;
+    }
+    int64_t v = 0;
+    if (!SafeScriptValue(o + kCountVar, scope, &v)) return false;
+    *rhs = v / 100000;
+    return true;
+}
+
+void BadOperator(ParsedCommand* pc) {
+    pc->parseError = true;
+    if (InterlockedExchange(&const_cast<Command*>(pc->cmd)->invalidLogged, 1) == 0)
+        Log("Native command '%s': the comparison needs >, < or =; this use is ignored (first occurrence logged)",
+            pc->cmd->name.c_str());
+}
+
+void __fastcall N_ReadClause(void* self, void* parser, void* ctx) {
+    ParsedCommand* pc = NumRec(self);
+    if (!pc) return;
+    if (*(int*)((uint8_t*)parser + kParserValue) == kBlockValue) {  // name = { ... }
+        pc->valueForm = false;
+        ((Clause_t)Engine::triggerBase.vt[5])(self, parser, ctx);
+        return;
+    }
+    pc->valueForm = true;  // name > value
+    int op = *(int*)((uint8_t*)parser + kParserOp);
+    if (!IsOp(op)) BadOperator(pc);
+    OpAt(self) = op;
+    ((ReadValue_t)Tmpl(*pc->cmd).vt.vt[4])(self, (uint8_t*)parser + kParserValue);  // number or variable
+}
+
+void __fastcall N_Item(void* self, void* parser, int token, void*) {
+    ParsedCommand* pc = NumRec(self);
+    if (pc && token == pc->cmd->compareToken) {
+        int op = *(int*)((uint8_t*)parser + kParserOp);
+        if (!IsOp(op)) BadOperator(pc);
+        OpAt(self) = op;
+        bool ratio = pc->cmd->numericKind == NumericKind::Ratio;
+        void* holder = (uint8_t*)self + (ratio ? kRatioVar : kCountVar);
+        ((HolderRead_t)(*(void***)holder)[3])(holder, parser);  // CScopedVariable::Read: number or variable
+        if (!ratio) *((uint8_t*)self + kCountVarFlag) = 1;
+        pc->comparePresent = true;
+        return;
+    }
+    ReadItemFor(pc, parser, token);
+}
+
+bool __fastcall N_Validate(void* self) { return NumRec(self) && NativeValidate(*NumRec(self)); }
+uint64_t __fastcall N_Scopes(void* self) { return NumRec(self) ? NumRec(self)->cmd->scopes : 0; }
+
+bool __fastcall N_Evaluate(void* self, void* scope) {
+    ParsedCommand* pc = NumRec(self);
+    int64_t v = 0, rhs = 0;
+    if (!pc || !NativeNumericValue(pc, scope, &v) || !RightSide(self, *pc->cmd, scope, &rhs)) return false;
+    return NativeCompare(pc->cmd->numericKind, OpOf(OpAt(self)), v, rhs);
+}
+
+// Slot 23 (also what a game variable reads). CIntTrigger: int (this, scope).
+int __fastcall N_GetCount(void* self, void* scope) {
+    int64_t v = 0;
+    NativeNumericValue(NumRec(self), scope, &v);
+    return (int)v;
+}
+// CValueTrigger: CFixedPoint* (this, out, scope).
+int64_t* __fastcall N_GetRatio(void* self, int64_t* out, void* scope) {
+    NativeNumericValue(NumRec(self), scope, out);
+    return out;
+}
+
+EngineString* __fastcall N_Tooltip(void* self, EngineString* out, void* scope, char negated) {
+    ParsedCommand* pc = NumRec(self);
+    std::string text;
+    if (pc) {
+        int64_t rhs = 0;
+        bool known = RightSide(self, *pc->cmd, scope, &rhs);
+        text = NativeNumericTooltip(pc, scope, negated != 0, OpOf(OpAt(self)), rhs, known);
+    }
+    text += '\n';
+    return MakeTooltip(out, text);
+}
+
+void* __fastcall NumericEntryCreate(TriggerEntryObj* e) {
+    const Engine::NumericTemplate& t = Tmpl(*e->cmd);
+    size_t bytes = g_numRecord + 0x10;
+    void* obj = t.alloc(bytes);
+    if (!obj) return nullptr;
+    memset(obj, 0, bytes);
+    t.ctor(obj);
+    *(void***)obj = e->objectVtable;
+    *(ParsedCommand**)((uint8_t*)obj + g_numRecord) = NativeNewParsed(*e->cmd);
+    return obj;
+}
+
+bool SafeRegisterVariable(void* proto, VarRegister_t fn, int token, const char* desc) {
+    __try {
+        fn(proto, token, desc);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool BindNumeric(Command& c, std::string* reason) {
+    if (!Engine::HaveNumeric()) {
+        *reason = "numeric trigger engine functions not found on this build";
+        return false;
+    }
+    if (!g_numRecord) {
+        g_numRecord = (std::max(Engine::numericCount.size, Engine::numericRatio.size) + 7) & ~(size_t)7;
+        g_tokEqual = Engine::Intern("=");
+        Log("Numeric triggers: operator tokens '>' 0x%x, '<' 0x%x, '=' 0x%x; record at +0x%zx", Engine::tokGreater,
+            Engine::tokLess, g_tokEqual, g_numRecord);
+    }
+    const Engine::NumericTemplate& t = Tmpl(c);
+    void** vt = Clone(t.vt);
+    vt[kT_ReadClause] = (void*)&N_ReadClause;
+    vt[kT_Item] = (void*)&N_Item;
+    vt[kT_Validate] = (void*)&N_Validate;
+    vt[kT_Scopes] = (void*)&N_Scopes;
+    vt[kT_Targets] = (void*)&T_Targets;
+    vt[kT_Tooltip] = (void*)&N_Tooltip;
+    vt[kT_Evaluate] = (void*)&N_Evaluate;
+    vt[23] = c.numericKind == NumericKind::Ratio ? (void*)&N_GetRatio : (void*)&N_GetCount;
+    auto* e = new TriggerEntryObj{EntryVtable(Engine::triggerTemplateEntryVtable, (void*)&NumericEntryCreate),
+                                  c.help.c_str(), 1, {}, &c, vt};
+    if (!Engine::RegisterTrigger(c.token, e)) {
+        *reason = "engine registry unavailable";
+        return false;
+    }
+    // Game variable of the same name (vanilla's "auto generated using the trigger"): the template's
+    // slot 18 adds it to the variable maps of the scopes in slot 14.
+    if (c.ValueFormAllowed() && (c.scopes & (ScopeMask::Country | ScopeMask::State))) {
+        void* proto = NumericEntryCreate(e);
+        if (proto) {
+            NumRec(proto)->valueForm = true;
+            c.variable = SafeRegisterVariable(proto, (VarRegister_t)vt[18], c.token, c.help.c_str());
+            if (!c.variable) Log("Native trigger '%s': registering the game variable crashed; trigger only", c.name.c_str());
+        }
+    }
+    return true;
+}
+
 class EngineBackend : public NativeBackend {
 public:
     int Intern(const char* s) override { return Engine::Intern(s); }
@@ -178,6 +366,7 @@ public:
             *reason = "native script engine functions not found on this build";
             return false;
         }
+        if (c.numeric) return BindNumeric(c, reason);
         bool ok = c.kind == CommandKind::Effect ? BindEffect(c) : BindTrigger(c);
         if (!ok) *reason = "engine registry unavailable";
         return ok;
@@ -232,7 +421,7 @@ Scope Scope::prev() const { return link(0x28); }
 
 // Runs at lexer-ready (lifecycle): registers every queued command and writes the docs file.
 void NativeScriptRegisterWithEngine() {
-    EngineBackend backend;
+    static EngineBackend backend;  // kept: resolves country tags while scripts are parsed
     std::wstring docs = LoaderOutputPath(L"loader_script_docs.md");
     int n = NativeScriptFinalize(backend, docs);
     Log("Native script: %d of %zu command(s) registered", n, NativeCommands().size());

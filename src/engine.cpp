@@ -20,6 +20,9 @@ void** pRenameProvinceEntryVtable = nullptr;
 void** pRenameProvinceEffectVtable = nullptr;
 size_t renameProvinceEffectVtableSlots = 0;
 Vtable effectBase, triggerBase, effectTemplate, effectValueReader, triggerTemplate;
+NumericTemplate numericCount, numericRatio;
+ScriptValueEval_t scriptValueEval = nullptr;
+int tokGreater = 0, tokLess = 0;
 void** effectTemplateEntryVtable = nullptr;
 void** triggerTemplateEntryVtable = nullptr;
 
@@ -137,6 +140,65 @@ Vtable RttiVtable(const char* name) {
     return v;
 }
 
+// Numeric templates (NOTES.md E2): the class vtable by RTTI, its object size, operator new and
+// constructor decoded from CTriggerEntry<T>::Create, which must have the expected shape.
+bool ResolveNumericTemplate(const char* cls, const char* entryCls, NumericTemplate* t) {
+    t->vt = RttiVtable(cls);
+    size_t n = 0;
+    void** entry = FindVtableByRtti(entryCls, &n);
+    if (!t->vt.vt || !entry || n < 2) return false;
+    uint8_t* f = (uint8_t*)entry[1];
+    if (!SigMatchAt(f, kCodeTriggerFactory)) {
+        Log("ERROR: numeric template %s: factory %s has an unexpected shape", cls, SigDescribe(f).c_str());
+        return false;
+    }
+    if ((void**)SigRipTarget(f + kCodeFactoryVtableLea, 3, 7) != t->vt.vt) {
+        Log("ERROR: numeric template %s: factory builds a different class", cls);
+        return false;
+    }
+    t->size = Read<uint32_t>(f, kCodeFactorySizeImm);
+    t->alloc = (void* (*)(size_t))SigFollowRel32(f + kCodeFactoryNewCall);
+    t->ctor = (void (*)(void*))SigFollowRel32(f + kCodeFactoryCtorCall);
+    return t->size >= 0x60 && t->size <= 0x400;
+}
+
+void ResolveNumeric() {
+    bool ok = ResolveNumericTemplate(".?AVCNumOfFactoriesTrigger@@", ".?AV?$CTriggerEntry@VCNumOfFactoriesTrigger@@@@",
+                                     &numericCount) &&
+              ResolveNumericTemplate(".?AVCHasStabilityTrigger@@", ".?AV?$CTriggerEntry@VCHasStabilityTrigger@@@@",
+                                     &numericRatio);
+    if (ok && (numericCount.vt.slots < 24 || numericRatio.vt.slots < 26)) {
+        Log("ERROR: numeric templates have too few vtable slots (%zu, %zu)", numericCount.vt.slots, numericRatio.vt.slots);
+        ok = false;
+    }
+    if (ok) {
+        uint8_t* cmp = (uint8_t*)numericCount.vt.vt[22];
+        uint8_t* clause = (uint8_t*)numericCount.vt.vt[5];
+        uint8_t* blockClause = triggerBase.vt ? (uint8_t*)triggerBase.vt[5] : nullptr;
+        bool block = false;
+        for (size_t i = 0; blockClause && i < 0x80 && !block; ++i) block = SigMatchAt(blockClause + i, kCodeBlockValueCheck);
+        if (!SigMatchAt(cmp, kCodeIntCompare) || !SigMatchAt(clause, kCodeNumericReadClause) ||
+            numericRatio.vt.vt[5] != (void*)clause || !SigMatchAt((uint8_t*)numericRatio.vt.vt[4], kCodeValueReadValue) ||
+            !block) {
+            Log("ERROR: numeric trigger code does not have the expected shape (compare %d, clause %d, shared %d, read %d, "
+                "block %d)",
+                SigMatchAt(cmp, kCodeIntCompare), SigMatchAt(clause, kCodeNumericReadClause),
+                numericRatio.vt.vt[5] == (void*)clause, SigMatchAt((uint8_t*)numericRatio.vt.vt[4], kCodeValueReadValue),
+                block);
+            ok = false;
+        } else {
+            scriptValueEval = (ScriptValueEval_t)SigFollowRel32(cmp + kCodeIntCompareEvalCall);
+            tokGreater = -Read<int32_t>(clause, kCodeNumericOpImm);
+            tokLess = tokGreater + 1;
+        }
+    }
+    if (ok)
+        Log("Numeric triggers: count template %zu bytes, ratio template %zu bytes, script value %s, '>' token 0x%x",
+            numericCount.size, numericRatio.size, SigDescribe((void*)scriptValueEval).c_str(), tokGreater);
+    else
+        numericCount = numericRatio = NumericTemplate{};
+}
+
 void ResolveNativeScript() {
     g_readString = (ReadString_t)SigFindUnique("parser_read_string", kSigParserReadString);
     g_unexpected = (Unexpected_t)SigFindUnique("parser_unexpected", kSigParserUnexpected);
@@ -150,6 +212,7 @@ void ResolveNativeScript() {
     size_t n = 0;
     triggerTemplateEntryVtable = FindVtableByRtti(".?AV?$CTriggerEntry@VCAlwaysTrigger@@@@", &n);
     effectTemplateEntryVtable = pRenameProvinceEntryVtable;
+    ResolveNumeric();
 }
 
 // MSVC std::map<int, T*> lookup, read-only: map object { head*, size }; node { left, parent,
@@ -493,6 +556,10 @@ bool RegisterEffect(int token, EffectEntry* entry) {
     if (!registry || !g_register || !token) return false;
     g_register(registry, token, entry);
     return true;
+}
+
+bool HaveNumeric() {
+    return HaveNativeScript() && numericCount.ctor && numericRatio.ctor && scriptValueEval && tokGreater > 0;
 }
 
 bool HaveNativeScript() {

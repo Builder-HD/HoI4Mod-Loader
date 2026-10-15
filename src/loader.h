@@ -58,6 +58,9 @@ bool HookQueue(void* target, void* detour, void** original, const char* name);
 // Finds `pattern` ("48 8B ?? ..." hex bytes, ?? = wildcard) in hoi4.exe's .text section.
 // Returns the address only if there is exactly one match; logs and returns nullptr otherwise.
 uint8_t* SigFindUnique(const char* name, const char* pattern);
+// True if `pattern` matches at `p` (inside .text). For code reached through RTTI vtables: a
+// known address whose bytes must still look as analysed.
+bool SigMatchAt(const uint8_t* p, const char* pattern);
 // Follows a rel32 call/jmp: `insn` points at the E8/E9 opcode.
 uint8_t* SigFollowRel32(uint8_t* insn);
 // Target of a RIP-relative operand: rel32 at insn+relOffset, instruction length insnLen.

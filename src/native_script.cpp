@@ -1,7 +1,7 @@
 // Native script API, engine-free core: schema validation, the registration window, conflict
-// checks, typed argument parsing, SEH-guarded callbacks, tooltips and the generated docs.
-// The engine side lives in native_script_engine.cpp; the smoke test links this file with a fake
-// NativeBackend.
+// checks, typed argument parsing, scope defaults, SEH-guarded callbacks, numeric comparisons,
+// tooltips and the generated docs. The engine side lives in native_script_engine.cpp; the core
+// test links this file with a fake NativeBackend and a fake Scope.
 #include "native_script.h"
 
 #include <windows.h>
@@ -17,6 +17,10 @@ namespace {
 
 std::vector<Command*> g_commands;
 bool g_finalized = false;
+NativeBackend* g_backend = nullptr;  // set by NativeScriptFinalize; resolves country tags at parse time
+bool g_timing = false;
+
+const size_t kMaxParams = 8;  // runtime argument resolution uses a fixed stack array
 
 const char* KindName(CommandKind k) { return k == CommandKind::Effect ? "effect" : "trigger"; }
 const char* AKind(CommandKind k) { return k == CommandKind::Effect ? "an effect" : "a trigger"; }
@@ -32,8 +36,57 @@ const char* TypeName(ParamType t) {
     switch (t) {
         case ParamType::Int: return "int";
         case ParamType::Bool: return "bool";
+        case ParamType::Country: return "country";
+        case ParamType::Choice: return "choice";
         default: return "key";
     }
+}
+
+const char* DefaultName(ScopeDefault d) {
+    switch (d) {
+        case ScopeDefault::StrategicRegion: return "the strategic region scope";
+        case ScopeDefault::State: return "the state scope";
+        case ScopeDefault::Country: return "the country scope";
+        case ScopeDefault::RootCountry: return "ROOT (or the country scope)";
+        default: return "";
+    }
+}
+
+// Index of `text` in "a|b|c", or -1.
+int ChoiceIndex(const char* choices, const char* text) {
+    int i = 0;
+    for (const char* p = choices; p && *p; ++i) {
+        const char* bar = strchr(p, '|');
+        size_t n = bar ? (size_t)(bar - p) : strlen(p);
+        if (strlen(text) == n && strncmp(p, text, n) == 0) return i;
+        if (!bar) break;
+        p = bar + 1;
+    }
+    return -1;
+}
+
+std::string CheckParams(const std::vector<ParamSpec>& params) {
+    if (params.size() > kMaxParams) return "at most 8 parameters";
+    for (size_t i = 0; i < params.size(); ++i) {
+        const ParamSpec& p = params[i];
+        if (!ValidIdentifier(p.name)) return "parameter names must be 1-64 characters of a-z 0-9 _";
+        for (size_t j = 0; j < i; ++j)
+            if (strcmp(p.name, params[j].name) == 0) return std::string("duplicate parameter '") + p.name + "'";
+        if (p.type == ParamType::Choice) {
+            if (!p.choices || !*p.choices) return std::string("choice parameter '") + p.name + "' needs choices";
+            for (const char* c = p.choices; *c; ++c)
+                if (!((*c >= 'a' && *c <= 'z') || (*c >= '0' && *c <= '9') || *c == '_' || *c == '|'))
+                    return std::string("choices of '") + p.name + "' must be a-z 0-9 _ separated by |";
+        }
+        if (p.fromScope != ScopeDefault::None) {
+            if (p.required) return std::string("parameter '") + p.name + "' comes from scope, so it cannot be required";
+            bool fits = (p.fromScope == ScopeDefault::Country || p.fromScope == ScopeDefault::RootCountry)
+                            ? p.type == ParamType::Country
+                            : p.type == ParamType::Int;
+            if (!fits) return std::string("scope default of '") + p.name + "' does not match its type";
+        }
+    }
+    return "";
 }
 
 // Shared checks for both kinds. Returns "" if fine, else the reason.
@@ -46,11 +99,8 @@ std::string CheckSchema(CommandKind kind, const char* name, const char* help, Fo
     if (form == Form::Value && (params.size() != 1 || !params[0].required))
         return "value form needs exactly one required parameter";
     if (form == Form::Block && params.empty()) return "block form needs at least one parameter";
-    for (size_t i = 0; i < params.size(); ++i) {
-        if (!ValidIdentifier(params[i].name)) return "parameter names must be 1-64 characters of a-z 0-9 _";
-        for (size_t j = 0; j < i; ++j)
-            if (strcmp(params[i].name, params[j].name) == 0) return std::string("duplicate parameter '") + params[i].name + "'";
-    }
+    std::string why = CheckParams(params);
+    if (!why.empty()) return why;
     for (const Command* c : g_commands)
         if (c->kind == kind && c->name == name) return std::string(AKind(kind)) + " with this name is already registered by the loader";
     return "";
@@ -66,8 +116,14 @@ Command* NewCommand(CommandKind kind, const char* feature, const char* name, con
     c->form = form;
     c->scopes = scopes;
     c->paramNames.reserve(params.size());
-    for (const ParamSpec& p : params) c->paramNames.push_back(p.name);
-    for (size_t i = 0; i < params.size(); ++i) c->params.push_back({c->paramNames[i].c_str(), params[i].type, params[i].required});
+    c->choiceStorage.reserve(params.size());
+    for (const ParamSpec& p : params) {
+        c->paramNames.push_back(p.name);
+        c->choiceStorage.push_back(p.choices ? p.choices : "");
+    }
+    for (size_t i = 0; i < params.size(); ++i)
+        c->params.push_back({c->paramNames[i].c_str(), params[i].type, params[i].required, params[i].fromScope,
+                             params[i].type == ParamType::Choice ? c->choiceStorage[i].c_str() : nullptr});
     return c;
 }
 
@@ -96,11 +152,33 @@ std::string ScopeNames(uint32_t mask) {
     return s;
 }
 
+std::string ParamUsage(const ParamSpec& p) {
+    if (p.type == ParamType::Choice) {
+        std::string c = p.choices;
+        for (char& ch : c)
+            if (ch == '|') ch = '/';
+        return c;
+    }
+    return std::string("<") + TypeName(p.type) + ">";
+}
+
 std::string Usage(const Command& c) {
+    if (c.numeric) {
+        const char* rhs = c.numericKind == NumericKind::Ratio ? "<0..1>" : "<int>";
+        std::string s;
+        if (c.ValueFormAllowed()) s += "`" + c.name + " > " + rhs + "`";
+        if (!c.params.empty()) {
+            if (!s.empty()) s += " or ";
+            s += "`" + c.name + " = {";
+            for (const ParamSpec& p : c.params) s += std::string(" ") + p.name + " = " + ParamUsage(p);
+            s += " " + c.compareKey + " > " + rhs + " }`";
+        }
+        return s;
+    }
     std::string s = "`" + c.name + " = ";
-    if (c.form == Form::Value) return s + "<" + TypeName(c.params[0].type) + ">`";
+    if (c.form == Form::Value) return s + ParamUsage(c.params[0]) + "`";
     s += "{";
-    for (const ParamSpec& p : c.params) s += std::string(" ") + p.name + " = <" + TypeName(p.type) + ">";
+    for (const ParamSpec& p : c.params) s += std::string(" ") + p.name + " = " + ParamUsage(p);
     return s + " }`";
 }
 
@@ -122,6 +200,17 @@ bool SafeExecute(void (*fn)(const Args&, const Scope&), const Args* a, const Sco
 bool SafeEvaluate(bool (*fn)(const Args&, const Scope&), const Args* a, const Scope* s, bool* result, DWORD* code) {
     __try {
         *result = fn(*a, *s);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *code = GetExceptionCode();
+        return false;
+    }
+}
+
+bool SafeValue(bool (*fn)(const Args&, const Scope&, int64_t*), const Args* a, const Scope* s, int64_t* out, bool* result,
+               DWORD* code) {
+    __try {
+        *result = fn(*a, *s, out);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         *code = GetExceptionCode();
@@ -157,7 +246,92 @@ void LogException(const Command& c, const char* what, DWORD code) {
             code, c.kind == CommandKind::Effect ? "it did nothing" : "it returned false");
 }
 
+// --- Runtime argument resolution (hot path: no allocation) ---------------------------------------
+Scope RootOrSelf(const Scope& s) {
+    Scope r = s.root();
+    return r.valid() ? r : s;
+}
+
+int CountryFromKeyword(int code, const Scope& s) {
+    switch (code) {
+        case kCountryThis: return s.countryTag();
+        case kCountryRoot: return RootOrSelf(s).countryTag();
+        case kCountryFrom: return s.from().countryTag();
+        case kCountryPrev: return s.prev().countryTag();
+        default: return code > 0 ? code : 0;
+    }
+}
+
+// Copies the parsed arguments to `out` with scope defaults and country keywords resolved.
+// Returns false (and logs once) if a value the command needs is not available in this scope.
+bool ResolveArgs(const ParsedCommand& pc, const Scope& s, ArgValue* out) {
+    const Command& c = *pc.cmd;
+    for (size_t i = 0; i < pc.args.size(); ++i) {
+        out[i] = pc.args[i];
+        const ParamSpec& p = c.params[i];
+        if (!out[i].present && p.fromScope != ScopeDefault::None) {
+            int v = 0;
+            switch (p.fromScope) {
+                case ScopeDefault::StrategicRegion: v = s.strategicRegionId(); break;
+                case ScopeDefault::State: v = s.stateId(); break;
+                case ScopeDefault::Country: v = s.countryTag(); break;
+                case ScopeDefault::RootCountry: {
+                    v = RootOrSelf(s).countryTag();
+                    if (v <= 0) v = s.countryTag();
+                    break;
+                }
+                default: break;
+            }
+            if (v <= 0) {
+                LogOnce(&const_cast<Command&>(c).scopeLogged,
+                        "Native command '%s': '%s' not given and not available from the scope; it does nothing / is "
+                        "false (logged once)",
+                        c.name.c_str(), p.name);
+                return false;
+            }
+            out[i].i = v;
+            out[i].present = true;
+            continue;
+        }
+        if (out[i].present && p.type == ParamType::Country) {
+            out[i].i = CountryFromKeyword(out[i].i, s);
+            if (out[i].i <= 0) {
+                LogOnce(&const_cast<Command&>(c).scopeLogged,
+                        "Native command '%s': '%s' names a scope that is not a country here; it does nothing / is "
+                        "false (logged once)",
+                        c.name.c_str(), p.name);
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+std::string FormatFixed(int64_t v, int decimals) {
+    bool neg = v < 0;
+    uint64_t a = neg ? (uint64_t)(-(v + 1)) + 1 : (uint64_t)v;
+    uint64_t scale = 1;
+    for (int i = 0; i < 5 - decimals; ++i) scale *= 10;
+    a = (a + scale / 2) / scale;  // round half up
+    uint64_t div = 1;
+    for (int i = 0; i < decimals; ++i) div *= 10;
+    std::string s = std::to_string(a / div);
+    if (decimals > 0) {
+        std::string frac = std::to_string(a % div);
+        while ((int)frac.size() < decimals) frac = "0" + frac;
+        while (!frac.empty() && frac.back() == '0') frac.pop_back();
+        if (!frac.empty()) s += "." + frac;
+    }
+    return neg && s != "0" ? "-" + s : s;
+}
+
 }  // namespace
+
+bool Command::ValueFormAllowed() const {
+    for (const ParamSpec& p : params)
+        if (p.required) return false;
+    return true;
+}
 
 // ============================================================================================
 // Registration
@@ -181,6 +355,32 @@ bool register_native_trigger(const NativeTrigger& d, const char* feature) {
     c->triggerTooltip = d.tooltip;
     g_commands.push_back(c);
     Log("Native trigger '%s' (feature %s) queued for engine registration", d.name, feature ? feature : "?");
+    return true;
+}
+
+bool register_native_numeric_trigger(const NativeNumericTrigger& d, const char* feature) {
+    std::string why;
+    if (g_finalized) why = "registration window is closed (engine registration already ran)";
+    else if (!ValidIdentifier(d.name)) why = "name must be 1-64 characters of a-z 0-9 _";
+    else if (!d.help || !*d.help) why = "help text is required";
+    else if (!d.value) why = "value callback is required";
+    else if (!d.params.empty() && !ValidIdentifier(d.compareKey)) why = "compare key must be 1-64 characters of a-z 0-9 _";
+    else why = CheckParams(d.params);
+    for (size_t i = 0; why.empty() && i < d.params.size(); ++i)
+        if (d.compareKey && strcmp(d.params[i].name, d.compareKey) == 0) why = "compare key clashes with a parameter";
+    for (const Command* c : g_commands)
+        if (why.empty() && c->kind == CommandKind::Trigger && c->name == d.name)
+            why = "a trigger with this name is already registered by the loader";
+    if (!why.empty()) return Refuse(CommandKind::Trigger, d.name, feature, why);
+    Command* c = NewCommand(CommandKind::Trigger, feature, d.name, d.help, d.params.empty() ? Form::Value : Form::Block, d.params,
+                            d.scopes);
+    c->numeric = true;
+    c->numericKind = d.kind;
+    c->compareKey = d.compareKey ? d.compareKey : "";
+    c->value = d.value;
+    c->subject = d.subject;
+    g_commands.push_back(c);
+    Log("Native numeric trigger '%s' (feature %s) queued for engine registration", d.name, feature ? feature : "?");
     return true;
 }
 
@@ -210,6 +410,7 @@ bool NativeFeatureComplete(const char* feature) {
 const std::vector<Command*>& NativeCommands() { return g_commands; }
 
 int NativeScriptFinalize(NativeBackend& backend, const std::wstring& docsPath) {
+    g_backend = &backend;
     int registered = 0;
     for (Command* c : g_commands) {
         if (c->status != CommandStatus::Pending) continue;
@@ -224,13 +425,15 @@ int NativeScriptFinalize(NativeBackend& backend, const std::wstring& docsPath) {
             for (const ParamSpec& p : c->params) c->paramTokens.push_back(backend.Intern(p.name));
             for (size_t i = 0; i < c->paramTokens.size() && reason.empty(); ++i)
                 if (!c->paramTokens[i]) reason = std::string("cannot create a token for parameter '") + c->params[i].name + "'";
+            if (reason.empty() && c->numeric && !c->compareKey.empty() && !(c->compareToken = backend.Intern(c->compareKey.c_str())))
+                reason = "cannot create a token for the compare key";
             if (reason.empty() && !backend.Bind(*c, &reason) && reason.empty()) reason = "engine binding failed";
         }
         if (reason.empty()) {
             c->status = CommandStatus::Registered;
             ++registered;
-            Log("Native %s '%s' (feature %s): registered (token 0x%x)", KindName(c->kind), c->name.c_str(), c->feature.c_str(),
-                c->token);
+            Log("Native %s '%s' (feature %s): registered (token 0x%x)%s", KindName(c->kind), c->name.c_str(),
+                c->feature.c_str(), c->token, c->variable ? ", also a game variable" : "");
         } else {
             c->status = CommandStatus::Refused;
             c->reason = reason;
@@ -254,7 +457,10 @@ std::string NativeScriptDocs() {
         "# hoi4_loader native script commands\n\n"
         "Generated by hoi4_loader at engine registration. Commands exist only while their feature is "
         "active and registered; without the loader the game reports them as unknown. Guard native "
-        "triggers with `hoi4_loader_feature_<feature> = yes` in the same AND block (see README).\n";
+        "triggers with `hoi4_loader_feature_<feature> = yes` in the same AND block (see README).\n\n"
+        "Parameters marked \"from scope\" may be left out; the value then comes from the current scope. "
+        "If the scope does not provide it, an effect does nothing and a trigger is false, so a trigger "
+        "inside `NOT = { ... }` is then TRUE (logged once in loader.log).\n";
     for (CommandKind kind : {CommandKind::Effect, CommandKind::Trigger}) {
         s += kind == CommandKind::Effect ? "\n## Effects\n" : "\n## Triggers\n";
         bool any = false;
@@ -270,9 +476,27 @@ std::string NativeScriptDocs() {
             }
             s += "- Scopes: " + ScopeNames(c->scopes) + "\n";
             s += "- Usage: " + Usage(*c) + "\n";
-            s += "- Parameters:\n";
-            for (const ParamSpec& p : c->params)
-                s += std::string("  - `") + p.name + "`: " + TypeName(p.type) + (p.required ? ", required" : ", optional") + "\n";
+            if (!c->params.empty()) {
+                s += "- Parameters:\n";
+                for (const ParamSpec& p : c->params) {
+                    s += std::string("  - `") + p.name + "`: " + TypeName(p.type);
+                    if (p.type == ParamType::Choice) s += " (" + ParamUsage(p) + ")";
+                    if (p.type == ParamType::Country) s += " (tag, THIS, ROOT, FROM or PREV)";
+                    if (p.fromScope != ScopeDefault::None) s += std::string(", optional: from ") + DefaultName(p.fromScope);
+                    else s += p.required ? ", required" : ", optional";
+                    s += "\n";
+                }
+            }
+            if (c->numeric) {
+                if (c->numericKind == NumericKind::Ratio)
+                    s += "- Value: a ratio from 0 to 1 (tooltips show percent). Compare with `<` (below) or `>` "
+                         "(above); as in vanilla, `=` also means above. A number or a variable.\n";
+                else
+                    s += "- Value: a whole number. Compare with `>`, `<` or `=` (equal). A number or a variable.\n";
+                s += "- If the value cannot be determined (unknown region, missing scope), the trigger is false "
+                     "(TRUE under NOT).\n";
+                if (c->variable) s += "- Also a game variable: `" + c->name + "` (e.g. `set_variable = { x = " + c->name + " }`).\n";
+            }
             s += "\n" + c->help + "\n";
         }
         if (!any) s += "\n(none)\n";
@@ -347,6 +571,35 @@ bool NativeSetArg(ParsedCommand& pc, size_t index, const char* text, std::string
             v.s = pc.storage[index].c_str();
             break;
         }
+        case ParamType::Country: {
+            static const struct {
+                const char* word;
+                int code;
+            } kWords[] = {{"THIS", kCountryThis}, {"ROOT", kCountryRoot}, {"FROM", kCountryFrom}, {"PREV", kCountryPrev}};
+            int code = 0;
+            for (const auto& w : kWords)
+                if (_stricmp(text, w.word) == 0) code = w.code;
+            if (!code && g_backend) code = g_backend->CountryTag(text);
+            if (!code) {
+                *error = std::string("'") + spec.name + "' expects a country tag or THIS/ROOT/FROM/PREV, got '" + text + "'";
+                return false;
+            }
+            v.i = code;
+            pc.storage[index] = text;
+            v.s = pc.storage[index].c_str();
+            break;
+        }
+        case ParamType::Choice: {
+            int idx = ChoiceIndex(spec.choices, text);
+            if (idx < 0) {
+                *error = std::string("'") + spec.name + "' expects one of " + ParamUsage(spec) + ", got '" + text + "'";
+                return false;
+            }
+            v.i = idx;
+            pc.storage[index] = text;
+            v.s = pc.storage[index].c_str();
+            break;
+        }
     }
     v.present = true;
     return true;
@@ -364,6 +617,23 @@ bool NativeValidate(ParsedCommand& pc) {
             return false;
         }
     }
+    if (c.numeric) {
+        if (pc.valueForm && !c.ValueFormAllowed()) {
+            pc.parseError = true;
+            LogOnce(&const_cast<Command&>(c).invalidLogged,
+                    "Native command '%s': needs the block form %s; this use is ignored (first occurrence logged)",
+                    c.name.c_str(), "name = { ... }");
+            return false;
+        }
+        if (!pc.valueForm && !pc.comparePresent) {
+            pc.parseError = true;
+            LogOnce(&const_cast<Command&>(c).invalidLogged,
+                    "Native command '%s': missing the comparison '%s > ...' in the block; this use is ignored (first "
+                    "occurrence logged)",
+                    c.name.c_str(), c.compareKey.c_str());
+            return false;
+        }
+    }
     return true;
 }
 
@@ -372,16 +642,20 @@ bool NativeValidate(ParsedCommand& pc) {
 // ============================================================================================
 void NativeExecute(const ParsedCommand* pc, const void* engineScope) {
     if (!pc || pc->parseError || !pc->cmd->execute) return;
-    Args args(pc->args.data(), pc->args.size());
     Scope scope(engineScope);
+    ArgValue resolved[kMaxParams];
+    if (!ResolveArgs(*pc, scope, resolved)) return;
+    Args args(resolved, pc->args.size());
     DWORD code = 0;
     if (!SafeExecute(pc->cmd->execute, &args, &scope, &code)) LogException(*pc->cmd, "execute", code);
 }
 
 bool NativeEvaluate(const ParsedCommand* pc, const void* engineScope) {
     if (!pc || pc->parseError || !pc->cmd->evaluate) return false;
-    Args args(pc->args.data(), pc->args.size());
     Scope scope(engineScope);
+    ArgValue resolved[kMaxParams];
+    if (!ResolveArgs(*pc, scope, resolved)) return false;
+    Args args(resolved, pc->args.size());
     bool result = false;
     DWORD code = 0;
     if (!SafeEvaluate(pc->cmd->evaluate, &args, &scope, &result, &code)) {
@@ -391,22 +665,95 @@ bool NativeEvaluate(const ParsedCommand* pc, const void* engineScope) {
     return result;
 }
 
+bool NativeNumericValue(const ParsedCommand* pc, const void* engineScope, int64_t* out) {
+    *out = 0;
+    if (!pc || pc->parseError || !pc->cmd->value) return false;
+    const Command& c = *pc->cmd;
+    LARGE_INTEGER t0{};
+    if (g_timing) QueryPerformanceCounter(&t0);
+    Scope scope(engineScope);
+    ArgValue resolved[kMaxParams];
+    bool ok = false;
+    if (ResolveArgs(*pc, scope, resolved)) {
+        Args args(resolved, pc->args.size());
+        DWORD code = 0;
+        if (!SafeValue(c.value, &args, &scope, out, &ok, &code)) {
+            LogException(c, "value", code);
+            ok = false;
+        }
+    }
+    if (!ok) *out = 0;
+    if (g_timing) {
+        LARGE_INTEGER t1;
+        QueryPerformanceCounter(&t1);
+        InterlockedIncrement64(&const_cast<Command&>(c).evalCount);
+        InterlockedAdd64(&const_cast<Command&>(c).evalTicks, t1.QuadPart - t0.QuadPart);
+    }
+    return ok;
+}
+
+bool NativeCompare(NumericKind kind, CompareOp op, int64_t value, int64_t rhs) {
+    if (op == CompareOp::Less) return value < rhs;
+    if (op == CompareOp::Equal && kind == NumericKind::Count) return value == rhs;
+    return value > rhs;  // Greater; Ratio '=' behaves like '>' (vanilla)
+}
+
+std::string NativeFormatNumber(NumericKind kind, int64_t v) {
+    if (kind == NumericKind::Ratio) return FormatFixed(v * 100, 1) + "%";
+    return FormatFixed(v, 2);
+}
+
+std::string NativeNumericTooltip(const ParsedCommand* pc, const void* engineScope, bool negated, CompareOp op, int64_t rhs,
+                                 bool rhsKnown) {
+    if (!pc) return "";
+    const Command& c = *pc->cmd;
+    Scope scope(engineScope);
+    TooltipText subject;
+    ArgValue resolved[kMaxParams];
+    bool argsOk = !pc->parseError && ResolveArgs(*pc, scope, resolved);
+    if (argsOk && c.subject) {
+        Args args(resolved, pc->args.size());
+        DWORD code = 0;
+        if (!SafeEffectTooltip(c.subject, &args, &scope, &subject, &code)) {
+            LogException(c, "tooltip", code);
+            subject = TooltipText();
+        }
+    }
+    std::string s = negated ? "NOT: " : "";
+    s += subject.text().empty() ? c.name : subject.text();
+    bool ratio = c.numericKind == NumericKind::Ratio;
+    switch (op) {
+        case CompareOp::Less: s += ratio ? " below " : " fewer than "; break;
+        case CompareOp::Equal: s += ratio ? " above " : " exactly "; break;
+        default: s += ratio ? " above " : " more than "; break;
+    }
+    s += rhsKnown ? NativeFormatNumber(c.numericKind, ratio ? rhs : rhs * 100000) : std::string("?");
+    int64_t current = 0;
+    if (argsOk && NativeNumericValue(pc, engineScope, &current))
+        s += " (currently " + NativeFormatNumber(c.numericKind, ratio ? current : current * 100000) + ")";
+    else
+        s += " (currently unavailable)";
+    return s;
+}
+
 std::string NativeTooltip(const ParsedCommand* pc, const void* engineScope, bool negated) {
     if (!pc) return "";
     const Command& c = *pc->cmd;
-    Args args(pc->args.data(), pc->args.size());
     Scope scope(engineScope);
     TooltipText out;
     DWORD code = 0;
+    ArgValue resolved[kMaxParams];
+    bool argsOk = !pc->parseError && ResolveArgs(*pc, scope, resolved);
+    Args args(argsOk ? resolved : pc->args.data(), pc->args.size());
     if (c.kind == CommandKind::Effect) {
-        if (!c.effectTooltip) return "";
+        if (!c.effectTooltip || !argsOk) return "";
         if (!SafeEffectTooltip(c.effectTooltip, &args, &scope, &out, &code)) {
             LogException(c, "tooltip", code);
             return "";
         }
         return out.text();
     }
-    if (c.triggerTooltip && !pc->parseError) {
+    if (c.triggerTooltip && argsOk) {
         if (SafeTriggerTooltip(c.triggerTooltip, &args, &scope, negated, &out, &code)) return out.text();
         LogException(c, "tooltip", code);
     }
@@ -425,9 +772,14 @@ std::string NativeTooltip(const ParsedCommand* pc, const void* engineScope, bool
     return s;
 }
 
+void NativeSetTiming(bool on) { g_timing = on; }
+bool NativeTimingEnabled() { return g_timing; }
+
 void NativeScriptResetForTests() {
     for (Command* c : g_commands) delete c;
     g_commands.clear();
     g_onActionDocs.clear();
     g_finalized = false;
+    g_backend = nullptr;
+    g_timing = false;
 }

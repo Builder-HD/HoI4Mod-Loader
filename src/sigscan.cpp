@@ -96,6 +96,18 @@ uint8_t* SigFindUnique(const char* name, const char* pattern) {
     return found;
 }
 
+bool SigMatchAt(const uint8_t* p, const char* pattern) {
+    std::vector<uint8_t> bytes;
+    std::vector<bool> mask;
+    uint8_t* text;
+    size_t size;
+    if (!p || !ParsePattern(pattern, &bytes, &mask) || !GetTextSection(&text, &size)) return false;
+    if (p < text || p + bytes.size() > text + size) return false;
+    for (size_t i = 0; i < bytes.size(); ++i)
+        if (mask[i] && p[i] != bytes[i]) return false;
+    return true;
+}
+
 uint8_t* SigFollowRel32(uint8_t* insn) { return SigRipTarget(insn, 1, 5); }
 
 uint8_t* SigRipTarget(uint8_t* insn, size_t relOffset, size_t insnLen) {

@@ -104,6 +104,22 @@ extern Vtable triggerTemplate;     // .?AVCAlwaysTrigger@@ (object 0x60; slot 5 
 extern void** effectTemplateEntryVtable;   // CEffectEntry<CRenameProvinceEffect> (slot 1 = factory)
 extern void** triggerTemplateEntryVtable;  // CTriggerEntry<CAlwaysTrigger>
 
+// Numeric trigger templates (NOTES.md E1/E2): CNumOfFactoriesTrigger (CIntTrigger: op +0x58,
+// int +0x60, variable +0x68 with flag +0x70) and CHasStabilityTrigger (CValueTrigger: op +0x58,
+// CScopedVariable +0x60, range-checked 0..1). Objects come from operator new + constructor.
+struct NumericTemplate {
+    Vtable vt;
+    size_t size = 0;
+    void* (*alloc)(size_t) = nullptr;
+    void (*ctor)(void*) = nullptr;
+};
+extern NumericTemplate numericCount, numericRatio;
+// Evaluates a CScopedVariable (number or variable) in a scope: fixed point, 100000 = 1.
+using ScriptValueEval_t = int64_t*(__fastcall*)(void* holder, int64_t* out, const void* scope, int, bool);
+extern ScriptValueEval_t scriptValueEval;
+extern int tokGreater, tokLess;  // parser operator tokens for '>' and '<'
+bool HaveNumeric();
+
 // Read-only lookup in the engine's effect / trigger registry (std::map<int, entry*>).
 bool EffectRegistered(int token);
 bool TriggerRegistered(int token);

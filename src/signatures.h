@@ -130,5 +130,29 @@ static const size_t kSigSessionServerDisp8 = 0xf;
 // and many UI texts use it). Function start. (0x140bb4e70)
 SIG(kSigCountryTagName, "40 53 48 83 EC 30 48 83 3D ?? ?? ?? ?? 00 48 8B D9 0F 84 ?? ?? ?? ?? 83 39 00 0F 84 ?? ?? ?? ?? 80 3D ?? ?? ?? ?? 00 0F 84 ?? ?? ?? ?? 80 3D ?? ?? ?? ?? 00 75")
 
+// --- Code shapes at RTTI-found addresses (numeric triggers, NOTES.md E2) -------------------
+// CODE(name, "..."): checked with SigMatchAt at an address reached through an RTTI vtable, not
+// scanned (so not required to be unique). tools/check_code_shapes.py checks them on exe copies.
+#define CODE(name, pattern) static const char name[] = pattern;
+// CTriggerEntry<T>::Create (entry vtable slot 1): new(size) T. Size imm32 at +7, operator new
+// E8 at +0xb, constructor E8 at +0x20, lea of T's vtable at +0x25 (rel32 at +0x28, length 7).
+CODE(kCodeTriggerFactory, "40 53 48 83 EC 20 B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B D8 48 89 44 24 38 48 85 C0 74 ?? 48 8B C8 E8 ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? 48 89 03")
+static const size_t kCodeFactorySizeImm = 7, kCodeFactoryNewCall = 0xb, kCodeFactoryCtorCall = 0x20,
+                    kCodeFactoryVtableLea = 0x25;
+// CIntTrigger::Evaluate (slot 22): right side = flag +0x70 ? ScriptValue(+0x68)/100000 : int +0x60;
+// E8 at +0x30 = ScriptValueEval(holder, int64* out, scope, 0, false).
+CODE(kCodeIntCompare, "40 57 48 83 EC 30 80 79 70 00 48 89 5C 24 48 48 8B D9 48 89 74 24 50 48 8B F2 74 ?? 4C 8B C2 C6 44 24 20 00 48 8D 54 24 40 48 83 C1 68 45 33 C9 E8")
+static const size_t kCodeIntCompareEvalCall = 0x30;
+// Numeric ReadClause (slot 5, shared by CIntTrigger and CValueTrigger): op = parser+0x78 stored
+// at this+0x58; imm32 at +0x20 = -token('>'); '<' is the next token. Then slot 4(parser+0xc0).
+CODE(kCodeNumericReadClause, "4C 8B DC 49 89 5B 10 49 89 73 18 57 48 81 EC ?? ?? ?? ?? 48 8B FA 48 8B F1 8B 42 78 89 41 58 05 ?? ?? ?? ?? 83 F8 01")
+static const size_t kCodeNumericOpImm = 0x20;
+// CValueTrigger::ReadValue (slot 4): right side read into the CScopedVariable at this+0x60.
+CODE(kCodeValueReadValue, "48 89 5C 24 08 57 48 83 EC 40 48 8B DA 48 8B F9 E8 ?? ?? ?? ?? 84 C0 75 ?? 48 8D 4F 60")
+// CTrigger block ReadClause (base slot 5): "cmp dword [parser+0xc0], 3" (3 = block value),
+// somewhere in the first 0x80 bytes.
+CODE(kCodeBlockValueCheck, "83 BE C0 00 00 00 03")
+
+#undef CODE
 #undef SIG
 #undef ANCHOR

@@ -426,22 +426,26 @@ bool RegionNamesInit() {
     register_native_effect({"set_strategic_region_name",
                             "Rename a strategic region to a localisation key (hoi4_loader). Stored as global flag "
                             "hoi4_srn_<region>_<key>: survives save and load; without the loader every region shows "
-                            "its original name. Invalid regions or missing keys change nothing and are logged.",
+                            "its original name. Invalid regions or missing keys change nothing and are logged. "
+                            "Inside a strategic region scope `region` may be left out.",
                             Form::Block,
-                            {{"region", ParamType::Int, true}, {"name", ParamType::Key, true}},
+                            {{"region", ParamType::Int, false, ScopeDefault::StrategicRegion}, {"name", ParamType::Key, true}},
                             ScopeMask::Any, &ExecSet, nullptr},
                            kFeature);
     register_native_effect({"reset_strategic_region_name",
-                            "Restore a strategic region's original name (hoi4_loader): clears its hoi4_srn flags.",
-                            Form::Block, {{"region", ParamType::Int, true}}, ScopeMask::Any, &ExecReset, nullptr},
+                            "Restore a strategic region's original name (hoi4_loader): clears its hoi4_srn flags. "
+                            "Inside a strategic region scope `region` may be left out.",
+                            Form::Block, {{"region", ParamType::Int, false, ScopeDefault::StrategicRegion}}, ScopeMask::Any,
+                            &ExecReset, nullptr},
                            kFeature);
     register_native_trigger({"strategic_region_has_custom_name",
                              "True if the strategic region currently shows a name provided by hoi4_loader. A rename "
                              "shows from the next frame, so in the same effect block that renamed it this is still "
-                             "the old state. Guard it with hoi4_loader_feature_region_names = yes in the same AND "
-                             "block.",
-                             Form::Block, {{"region", ParamType::Int, true}}, ScopeMask::Any, &EvalHasCustomName,
-                             &TooltipHasCustomName},
+                             "the old state. Inside a strategic region scope `region` may be left out; without "
+                             "`region` and outside such a scope it is false (TRUE under NOT). Guard it with "
+                             "hoi4_loader_feature_region_names = yes in the same AND block.",
+                             Form::Block, {{"region", ParamType::Int, false, ScopeDefault::StrategicRegion}}, ScopeMask::Any,
+                             &EvalHasCustomName, &TooltipHasCustomName},
                             kFeature);
     return true;
 }
