@@ -442,6 +442,7 @@ bool Resolve() {
     ResolveRegistry();
     ResolveNativeScript();
     ResolveOnActions();
+    ResolveData();
 
     Log("Engine: gamestate %s, flags +0x%x, regions +0x%x/+0x%x", g_ppGameState ? SigDescribe(g_ppGameState).c_str() : "-",
         g_flagsOffset, g_regionArrayOffset, g_regionCountOffset);

@@ -23,6 +23,7 @@ static Feature g_features[] = {
     {"lifecycle", Tier::Engine, &LifecycleFeatureInit, nullptr, false, 0},
     {"region_names", Tier::Engine, &RegionNamesInit, "lifecycle", false, 0},
     {"game_loaded", Tier::Engine, &GameLoadedInit, "lifecycle", false, 0},
+    {"region_control", Tier::Engine, &RegionControlInit, "lifecycle", false, 0},
 };
 static int g_presentToken = 0;
 

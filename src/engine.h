@@ -151,6 +151,20 @@ int PlayerCountryTag();
 std::string CountryTagName(int tag);
 // True if some script defined an on_action of this name (on_action keys are dynamic).
 bool OnActionDefined(const char* name);
+// --- Data triggers (engine_data.cpp, NOTES.md Part E) -----------------------------------------
+// Read-only, callable from any thread (native trigger evaluate). Fixed point: 100000 = 1.
+void ResolveData();
+bool HaveCountries();      // tag -> country, tag -> index
+bool HaveRegionControl();  // air power, naval dominance, war relations
+void* CountryByTag(int tag);
+bool AtWar(int tagA, int tagB);  // a war between them that has not ended
+// Air power in a strategic region from a country's side: its side and the enemy side.
+bool AirPower(int tag, int regionId, int64_t* our, int64_t* enemy);
+// Naval dominance in a strategic region: friendly (own + allied) and enemy (at war) sums, as
+// has_naval_control adds them. Land regions: true with both 0.
+bool NavalDominance(int tag, int regionId, int64_t* friendly, int64_t* enemy);
+std::string RegionName(int regionId);  // display name (custom name included); tooltips only
+
 // Fires the on_action like the engine fires on_startup: synced-RNG seed, events, random events
 // and effect. countryTag > 0: ROOT = that country; 0: no scope. name: at most 15 characters.
 // Returns false (and logs) on failure; an exception inside is contained.

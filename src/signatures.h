@@ -130,6 +130,23 @@ static const size_t kSigSessionServerDisp8 = 0xf;
 // and many UI texts use it). Function start. (0x140bb4e70)
 SIG(kSigCountryTagName, "40 53 48 83 EC 30 48 83 3D ?? ?? ?? ?? 00 48 8B D9 0F 84 ?? ?? ?? ?? 83 39 00 0F 84 ?? ?? ?? ?? 80 3D ?? ?? ?? ?? 00 0F 84 ?? ?? ?? ?? 80 3D ?? ?? ?? ?? 00 75")
 
+// --- Data triggers: region_control (NOTES.md E1/E2) -----------------------------------------
+// Region panel air superiority bar: country = TagToCountry(&tag) (E8 at +4); air = CountryAir(country)
+// (E8 at +0xc); entry = AirRegionEntry(air, region) (E8 at +0x1b) = { int64 our, int64 enemy }.
+// (0x1418811e8)
+SIG(kSigAirSuperiorityUi, "48 8D 0C 38 E8 ?? ?? ?? ?? 48 8B C8 E8 ?? ?? ?? ?? 49 8B 96 ?? ?? ?? ?? 48 8B C8 E8 ?? ?? ?? ?? 48 89 85 ?? ?? ?? ?? 48 8B 70 08 48 8B 38 4C 8D 04 37 4D 85 C0 7E ?? 48 B9 FE FF FF FF FF FF FF 7F")
+static const size_t kSigAirUiTagToCountry = 4, kSigAirUiCountryAir = 0xc, kSigAirUiRegionEntry = 0x1b;
+// has_naval_control evaluate: naval = region->[disp32 at +0x16]. (0x140528a50)
+SIG(kSigNavalControlEval, "40 53 48 83 EC 30 48 8B DA E8 ?? ?? ?? ?? 48 85 C0 74 ?? 48 8B 88 ?? ?? ?? ?? 48 85 C9 74 ?? 48 8D 53 08 E8 ?? ?? ?? ?? 83 F8 01 0F 94 C0")
+static const size_t kSigNavalRegionDisp = 0x16;
+// Naval control sums (FUN_141003f50): entries naval+0x40 (count +0x4c, 0x50 bytes, tag at +0,
+// dominance int64 at +0x20); country = TagToCountry(entry) (E8 at +0x3f); relation =
+// country->[disp32 +0x47]->relations(+8)[TagIndex(&tag) (E8 at +0x59)]; IsFriendly(relation)
+// (E8 at +0x6c) -> friendly, else at war if relation->[disp32 +0x7e] war && !war[+0x49]. (0x141003f5a)
+SIG(kSigNavalSums, "48 8B 71 40 45 33 FF 48 63 41 4C 41 8B FF 48 89 6C 24 58 41 8B DF 48 8B 69 78 4C 89 64 24 60 4C 8D 24 80 4C 89 6C 24 68 49 C1 E4 04 4C 8B EA 4C 03 E6 49 3B F4 74 ?? 4C 89 74 24 20 48 8B CE E8 ?? ?? ?? ?? 4C 8B B0 ?? ?? ?? ?? 45 39 7D 00 75 05 41 8B C7 EB 08 49 8B CD E8 ?? ?? ?? ?? 48 63 C8 49 8B 46 08 4C 8B 34 C8 49 8B CE E8 ?? ?? ?? ?? 84 C0 74 06 48 03 5E 20 EB 16 49 8B 86 ?? ?? ?? ?? 48 85 C0 74 0A 44 38 78 49 75 04 48 03 7E 20 48 83 C6 50")
+static const size_t kSigNavalSumsTagToCountry = 0x3f, kSigNavalSumsDiplomacyDisp = 0x47, kSigNavalSumsTagIndex = 0x59,
+                    kSigNavalSumsIsFriendly = 0x6c, kSigNavalSumsWarDisp = 0x7e;
+
 // --- Code shapes at RTTI-found addresses (numeric triggers, NOTES.md E2) -------------------
 // CODE(name, "..."): checked with SigMatchAt at an address reached through an RTTI vtable, not
 // scanned (so not required to be unique). tools/check_code_shapes.py checks them on exe copies.
