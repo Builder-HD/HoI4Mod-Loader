@@ -424,7 +424,7 @@ bool DivisionRatios(void* unit, int64_t* strength, int64_t* org) {
     return true;
 }
 
-bool HaveCountries() { return g_tagToCountry && g_tagIndex && GameState(); }
+bool HaveCountries() { return g_tagToCountry && g_tagIndex; }  // resolved; a game need not exist yet
 bool HaveRegionControl() {
     return g_tagToCountry && g_tagIndex && g_countryAir && g_airRegionEntry && g_isFriendly && g_regionNavalOffset &&
            g_diplomacyOffset && g_relationWarOffset && HaveRegions();

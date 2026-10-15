@@ -47,14 +47,27 @@ std::vector<Task> g_queue;
 std::atomic<bool> g_queued{false};  // g_queue may be non-empty
 
 // No C++ objects in these, so SEH can contain a crashing callback.
-bool CallSafe(void (*fn)()) {
+int CrashFilter(EXCEPTION_POINTERS* ep, DWORD* code, void** where) {
+    *code = ep->ExceptionRecord->ExceptionCode;
+    *where = ep->ExceptionRecord->ExceptionAddress;
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+bool CallSafeInner(void (*fn)(), DWORD* code, void** where) {
     __try {
         fn();
         return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        Log("ERROR: lexer-ready callback crashed (exception 0x%08lX); it is disabled", GetExceptionCode());
+    } __except (CrashFilter(GetExceptionInformation(), code, where)) {
         return false;
     }
+}
+
+bool CallSafe(void (*fn)()) {
+    DWORD code = 0;
+    void* where = nullptr;
+    if (CallSafeInner(fn, &code, &where)) return true;
+    Log("ERROR: lexer-ready callback crashed (exception 0x%08lX at %s); it is disabled", code, DescribeAddress(where).c_str());
+    return false;
 }
 
 bool CallSafe(void (*fn)(bool), bool arg) {

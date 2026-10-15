@@ -156,7 +156,15 @@ static void TimingFrame() {
     }
     int day = hours / 24;
     if (day == g_timingDay) return;
-    if (g_timingDay >= 0 && day > g_timingDay) g_timingDays += day - g_timingDay;
+    if (g_timingDay >= 0 && day > g_timingDay && day - g_timingDay <= 7) {
+        g_timingDays += day - g_timingDay;
+    } else {  // first frame, new game or loaded save: restart the window
+        for (Command* c : NativeCommands()) {
+            InterlockedExchange64(&c->evalCount, 0);
+            InterlockedExchange64(&c->evalTicks, 0);
+        }
+        g_timingDays = 0;
+    }
     g_timingDay = day;
     if (g_timingDays < 10) return;
     double totalMs = 0;

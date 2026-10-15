@@ -72,6 +72,8 @@ uint8_t* AnchorFindLea(const char* name, const char* text);
 bool ImageSection(const char* name, uint8_t** begin, size_t* size);
 // "hoi4.exe+0x1234" style description of an address, for logs.
 std::string SigDescribe(const void* p);
+// "<module>+0x1234" for any address (crash reports).
+std::string DescribeAddress(const void* p);
 
 // ---------------------------------------------------------------------------
 // features.cpp

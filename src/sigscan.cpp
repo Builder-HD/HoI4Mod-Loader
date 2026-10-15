@@ -164,3 +164,20 @@ std::string SigDescribe(const void* p) {
     sprintf_s(buf, "hoi4.exe+0x%llx", (unsigned long long)((const uint8_t*)p - (const uint8_t*)GetModuleHandleW(nullptr)));
     return buf;
 }
+
+std::string DescribeAddress(const void* p) {
+    HMODULE m = nullptr;
+    wchar_t path[MAX_PATH] = L"?";
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            (LPCWSTR)p, &m) ||
+        !m) {
+        char buf[32];
+        sprintf_s(buf, "0x%p", p);
+        return buf;
+    }
+    GetModuleFileNameW(m, path, MAX_PATH);
+    const wchar_t* name = wcsrchr(path, L'\\');
+    char buf[160];
+    sprintf_s(buf, "%ls+0x%llx", name ? name + 1 : path, (unsigned long long)((const uint8_t*)p - (const uint8_t*)m));
+    return buf;
+}

@@ -3,6 +3,7 @@
 // with the generic slots below; its objects are created by the template's factory and carry a
 // ParsedCommand* at +0x58 (the template's private area, used only by slots we replace).
 // Slot numbers: NOTES.md C1.
+#include <stdio.h>
 #include <string.h>
 
 #include <algorithm>
@@ -355,6 +356,22 @@ bool BindNumeric(Command& c, std::string* reason) {
     return true;
 }
 
+// Binding under SEH: a crash refuses only this command and names the faulting address.
+int BindFilter(EXCEPTION_POINTERS* ep, DWORD* code, void** where) {
+    *code = ep->ExceptionRecord->ExceptionCode;
+    *where = ep->ExceptionRecord->ExceptionAddress;
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+bool SafeBind(Command* c, std::string* reason, DWORD* code, void** where) {
+    __try {
+        if (c->numeric) return BindNumeric(*c, reason);
+        return c->kind == CommandKind::Effect ? BindEffect(*c) : BindTrigger(*c);
+    } __except (BindFilter(GetExceptionInformation(), code, where)) {
+        return false;
+    }
+}
+
 class EngineBackend : public NativeBackend {
 public:
     int Intern(const char* s) override { return Engine::Intern(s); }
@@ -366,9 +383,16 @@ public:
             *reason = "native script engine functions not found on this build";
             return false;
         }
-        if (c.numeric) return BindNumeric(c, reason);
-        bool ok = c.kind == CommandKind::Effect ? BindEffect(c) : BindTrigger(c);
-        if (!ok) *reason = "engine registry unavailable";
+        DWORD code = 0;
+        void* where = nullptr;
+        bool ok = SafeBind(&c, reason, &code, &where);
+        if (code) {
+            char buf[160];
+            sprintf_s(buf, "binding crashed (exception 0x%08lX at %s)", code, DescribeAddress(where).c_str());
+            *reason = buf;
+            return false;
+        }
+        if (!ok && reason->empty()) *reason = "engine registry unavailable";
         return ok;
     }
 };
