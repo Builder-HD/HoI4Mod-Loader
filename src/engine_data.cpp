@@ -40,6 +40,39 @@ const size_t kRelations = 0x08, kWarEnded = 0x49;                               
 
 using GetNameKey_t = const EngineString*(__fastcall*)(void* region);
 
+// military_counts / army_condition (kSigStateArray ... kSigPlanesStationed, kAnchorArmyDaily).
+using ShipsOf_t = const uint8_t*(__fastcall*)(void* navalUnit);  // -> { ships*, ?, count @+0xc }
+using WingRegion_t = void*(__fastcall*)(void* wing);
+using WingPlanes_t = int(__fastcall*)(void* wing);
+uint32_t g_stateArray = 0, g_stateCount = 0;
+uint32_t g_provinces = 0, g_provinceCount = 0;    // state / region -> CProvince* list
+uint32_t g_landUnits = 0, g_landUnitCount = 0;    // province -> land units
+uint32_t g_navalUnits = 0, g_navalUnitCount = 0;  // province -> naval units
+uint32_t g_unitOwner = 0;                         // unit -> owner tag
+ShipsOf_t g_shipsOf = nullptr;
+const size_t kShipCount = 0x0c;                   // kSigShipsInArea: movsxd r8,[rax+0xc]
+uint32_t g_provinceCombats = 0, g_provinceCombatCount = 0;
+uint32_t g_unitCombats = 0, g_unitCombatCount = 0;
+uint32_t g_countryDivisions = 0, g_countryDivisionCount = 0;
+CountryAir_t g_countryAirPlanes = nullptr;
+WingRegion_t g_wingRegion = nullptr;
+WingPlanes_t g_wingPlanes = nullptr;
+uint32_t g_airWings = 0, g_airWingCount = 0, g_regionIdField = 0;
+
+// A CPdxArray-style list { T* data @list, int count @count } of pointers.
+struct PtrList {
+    void* const* data = nullptr;
+    int count = 0;
+};
+PtrList ListAt(const void* obj, uint32_t list, uint32_t count) {
+    PtrList l;
+    if (!obj) return l;
+    l.data = Rd<void* const*>(obj, list);
+    l.count = Rd<int>(obj, count);
+    if (!l.data || l.count < 0 || l.count > 1000000) l.count = 0;
+    return l;
+}
+
 }  // namespace
 
 void ResolveData() {
@@ -68,7 +101,202 @@ void ResolveData() {
     if (HaveRegionControl())
         Log("Data triggers: region naval +0x%x, diplomacy +0x%x, relation war +0x%x", g_regionNavalOffset, g_diplomacyOffset,
             g_relationWarOffset);
+
+    // military_counts. The state and the region loops must agree on the province list layout,
+    // and both unit loops on the owner field.
+    uint32_t provinces2 = 0, provinceCount2 = 0, owner2 = 0;
+    if ((p = SigFindUnique("state_array", kSigStateArray)) != nullptr) {
+        g_stateCount = Rd<uint32_t>(p, kSigStateCountDisp);
+        g_stateArray = Rd<uint32_t>(p, kSigStateArrayDisp);
+    }
+    if ((p = SigFindUnique("state_land_units", kSigStateLandUnits)) != nullptr) {
+        g_provinces = Rd<uint8_t>(p, kSigLandProvincesDisp);
+        g_provinceCount = Rd<uint8_t>(p, kSigLandProvinceCountDisp);
+        g_landUnits = Rd<uint32_t>(p, kSigLandUnitsDisp);
+        g_landUnitCount = Rd<uint32_t>(p, kSigLandUnitCountDisp);
+        g_unitOwner = Rd<uint32_t>(p, kSigLandOwnerDisp);
+    }
+    if ((p = SigFindUnique("ships_in_area", kSigShipsInArea)) != nullptr) {
+        provinces2 = Rd<uint8_t>(p, kSigShipsProvincesDisp);
+        provinceCount2 = Rd<uint8_t>(p, kSigShipsProvinceCountDisp);
+        g_navalUnits = Rd<uint32_t>(p, kSigShipsNavalUnitsDisp);
+        g_navalUnitCount = Rd<uint32_t>(p, kSigShipsNavalCountDisp);
+        owner2 = Rd<uint32_t>(p, kSigShipsOwnerDisp);
+        g_shipsOf = (ShipsOf_t)SigFollowRel32(p + kSigShipsShipsCall);
+    }
+    if ((p = SigFindUnique("province_add_combat", kSigProvinceAddCombat)) != nullptr) {
+        g_provinceCombatCount = Rd<uint32_t>(p, kSigProvinceCombatCountDisp);
+        g_provinceCombats = Rd<uint32_t>(p, kSigProvinceCombatsDisp);
+    }
+    if ((p = SigFindUnique("unit_add_combat", kSigUnitAddCombat)) != nullptr) {
+        g_unitCombatCount = Rd<uint32_t>(p, kSigUnitCombatCountDisp);
+        g_unitCombats = Rd<uint32_t>(p, kSigUnitCombatsDisp);
+    }
+    if ((p = SigFindUnique("planes_stationed", kSigPlanesStationed)) != nullptr) {
+        g_countryAirPlanes = (CountryAir_t)SigFollowRel32(p + kSigPlanesCountryAir);
+        g_airWings = Rd<uint8_t>(p, kSigPlanesWingsDisp);
+        g_airWingCount = Rd<uint8_t>(p, kSigPlanesWingCountDisp);
+        g_wingRegion = (WingRegion_t)SigFollowRel32(p + kSigPlanesWingRegion);
+        g_regionIdField = Rd<uint8_t>(p, kSigPlanesRegionIdDisp);
+        g_wingPlanes = (WingPlanes_t)SigFollowRel32(p + kSigPlanesWingPlanes);
+        if ((TagToCountry_t)SigFollowRel32(p + kSigPlanesTagToCountry) != g_tagToCountry || g_countryAirPlanes != g_countryAir) {
+            Log("ERROR: data triggers: the planes call site reaches different country functions; planes unavailable");
+            g_wingPlanes = nullptr;
+        }
+    }
+    if (uint8_t* lea = AnchorFindLea("army.daily", kAnchorArmyDaily)) {
+        if (SigMatchAt(lea + kArmyDailyLoopFromLea, kCodeArmyDailyLoop)) {
+            g_countryDivisions = Rd<uint32_t>(lea, kArmyDailyListDisp);
+            g_countryDivisionCount = Rd<uint32_t>(lea, kArmyDailyCountDisp);
+        } else {
+            Log("ERROR: data triggers: the army.daily loop has an unexpected shape");
+        }
+    }
+    if (g_provinces && (g_provinces != provinces2 || g_provinceCount != provinceCount2 || g_unitOwner != owner2)) {
+        Log("ERROR: data triggers: state and region loops disagree on the layout; military_counts disabled");
+        g_provinces = 0;
+    }
+    if (HaveMilitaryCounts())
+        Log("Data triggers: states +0x%x/+0x%x, provinces +0x%x/+0x%x, land units +0x%x/+0x%x, naval units +0x%x/+0x%x, "
+            "owner +0x%x, combats province +0x%x unit +0x%x, divisions +0x%x/+0x%x",
+            g_stateArray, g_stateCount, g_provinces, g_provinceCount, g_landUnits, g_landUnitCount, g_navalUnits,
+            g_navalUnitCount, g_unitOwner, g_provinceCombats, g_unitCombats, g_countryDivisions, g_countryDivisionCount);
 }
+
+bool HaveMilitaryCounts() {
+    return HaveCountries() && HaveRegions() && g_stateArray && g_stateCount && g_provinces && g_provinceCount && g_landUnits &&
+           g_landUnitCount && g_navalUnits && g_navalUnitCount && g_unitOwner && g_shipsOf && g_provinceCombats &&
+           g_provinceCombatCount && g_unitCombats && g_unitCombatCount && g_countryDivisions && g_countryDivisionCount &&
+           g_relationWarOffset;
+}
+bool HavePlanes() { return HaveMilitaryCounts() && g_countryAirPlanes && g_wingRegion && g_wingPlanes && g_airWings; }
+
+void* StateById(int id) {
+    void* gs = GameState();
+    if (!gs || id <= 0 || !g_stateArray) return nullptr;
+    int count = Rd<int>(gs, g_stateCount);
+    void* const* arr = Rd<void* const*>(gs, g_stateArray);
+    return arr && id < count ? arr[id] : nullptr;
+}
+
+static bool SameCountry(int a, int b) {
+    if (a == b) return a > 0;
+    if (a <= 0 || b <= 0) return false;
+    return g_tagIndex(&a) == g_tagIndex(&b);  // the engine's own "same country" test (FUN_140bb52f0)
+}
+
+static bool OwnerMatches(int owner, int tag, UnitOwner who) {
+    switch (who) {
+        case UnitOwner::Own: return SameCountry(owner, tag);
+        case UnitOwner::Enemy: return AtWar(tag, owner);
+        default: return true;
+    }
+}
+
+static PtrList AreaProvinces(AreaKind kind, int id) {
+    void* area = kind == AreaKind::State ? StateById(id) : RegionById(id);
+    return ListAt(area, g_provinces, g_provinceCount);
+}
+
+bool CountDivisions(AreaKind kind, int id, int tag, UnitOwner who, int64_t* out) {
+    *out = 0;
+    if (!HaveMilitaryCounts()) return false;
+    PtrList provinces = AreaProvinces(kind, id);
+    if (!provinces.data && !(kind == AreaKind::State ? StateById(id) : RegionById(id))) return false;
+    for (int i = 0; i < provinces.count; ++i) {
+        PtrList units = ListAt(provinces.data[i], g_landUnits, g_landUnitCount);
+        for (int u = 0; u < units.count; ++u)
+            if (units.data[u] && OwnerMatches(Rd<int>(units.data[u], g_unitOwner), tag, who)) ++*out;
+    }
+    return true;
+}
+
+bool CountShips(AreaKind kind, int id, int tag, UnitOwner who, int64_t* out) {
+    *out = 0;
+    if (!HaveMilitaryCounts()) return false;
+    if (!(kind == AreaKind::State ? StateById(id) : RegionById(id))) return false;
+    PtrList provinces = AreaProvinces(kind, id);
+    for (int i = 0; i < provinces.count; ++i) {
+        PtrList units = ListAt(provinces.data[i], g_navalUnits, g_navalUnitCount);
+        for (int u = 0; u < units.count; ++u) {
+            if (!units.data[u] || !OwnerMatches(Rd<int>(units.data[u], g_unitOwner), tag, who)) continue;
+            const uint8_t* ships = g_shipsOf(units.data[u]);
+            int n = ships ? Rd<int>(ships, kShipCount) : 0;
+            if (n > 0 && n < 100000) *out += n;
+        }
+    }
+    return true;
+}
+
+bool CountBattles(AreaKind kind, int id, int64_t* out) {
+    *out = 0;
+    if (!HaveMilitaryCounts()) return false;
+    if (!(kind == AreaKind::State ? StateById(id) : RegionById(id))) return false;
+    PtrList provinces = AreaProvinces(kind, id);
+    for (int i = 0; i < provinces.count; ++i) *out += ListAt(provinces.data[i], g_provinceCombats, g_provinceCombatCount).count;
+    return true;
+}
+
+bool CountBattlesInvolving(int tag, int64_t* out) {
+    *out = 0;
+    if (!HaveMilitaryCounts()) return false;
+    void* country = CountryByTag(tag);
+    if (!country) return false;
+    // Distinct combats among the country's divisions; a fixed buffer, no allocation.
+    const void* seen[1024];
+    int nSeen = 0;
+    PtrList divisions = ListAt(country, g_countryDivisions, g_countryDivisionCount);
+    for (int d = 0; d < divisions.count; ++d) {
+        PtrList combats = ListAt(divisions.data[d], g_unitCombats, g_unitCombatCount);
+        for (int c = 0; c < combats.count; ++c) {
+            const void* combat = combats.data[c];
+            bool dup = !combat;
+            for (int s = 0; s < nSeen && !dup; ++s) dup = seen[s] == combat;
+            if (dup) continue;
+            if (nSeen < 1024) seen[nSeen++] = combat;
+            ++*out;
+        }
+    }
+    return true;
+}
+
+bool CountPlanesStationed(int regionId, int tag, int64_t* out) {
+    *out = 0;
+    if (!HavePlanes() || !RegionById(regionId)) return false;
+    void* country = CountryByTag(tag);
+    void* air = country ? g_countryAirPlanes(country) : nullptr;
+    if (!air) return country != nullptr;  // no air force: 0
+    PtrList wings = ListAt(air, g_airWings, g_airWingCount);
+    for (int w = 0; w < wings.count; ++w) {
+        if (!wings.data[w]) continue;
+        void* region = g_wingRegion(wings.data[w]);
+        if (region && Rd<int>(region, g_regionIdField) == regionId) *out += g_wingPlanes(wings.data[w]);
+    }
+    return true;
+}
+
+bool ForEachDivision(int tag, void (*fn)(void* division, void* ctx), void* ctx) {
+    if (!HaveMilitaryCounts()) return false;
+    void* country = CountryByTag(tag);
+    if (!country) return false;
+    PtrList divisions = ListAt(country, g_countryDivisions, g_countryDivisionCount);
+    for (int d = 0; d < divisions.count; ++d)
+        if (divisions.data[d]) fn(divisions.data[d], ctx);
+    return true;
+}
+
+bool ForEachAreaDivision(AreaKind kind, int id, void (*fn)(void* division, int owner, void* ctx), void* ctx) {
+    if (!HaveMilitaryCounts() || !(kind == AreaKind::State ? StateById(id) : RegionById(id))) return false;
+    PtrList provinces = AreaProvinces(kind, id);
+    for (int i = 0; i < provinces.count; ++i) {
+        PtrList units = ListAt(provinces.data[i], g_landUnits, g_landUnitCount);
+        for (int u = 0; u < units.count; ++u)
+            if (units.data[u]) fn(units.data[u], Rd<int>(units.data[u], g_unitOwner), ctx);
+    }
+    return true;
+}
+
+bool IsSameCountry(int a, int b) { return HaveCountries() && SameCountry(a, b); }
 
 bool HaveCountries() { return g_tagToCountry && g_tagIndex && GameState(); }
 bool HaveRegionControl() {
@@ -93,7 +321,8 @@ static void* Relation(int tagA, int tagB) {
 }
 
 bool AtWar(int tagA, int tagB) {
-    if (!HaveRegionControl() || tagA <= 0 || tagB <= 0 || tagA == tagB) return false;
+    if (!g_tagToCountry || !g_tagIndex || !g_diplomacyOffset || !g_relationWarOffset || tagA <= 0 || tagB <= 0 || tagA == tagB)
+        return false;
     void* rel = Relation(tagA, tagB);
     void* war = rel ? Rd<void*>(rel, g_relationWarOffset) : nullptr;
     return war && Rd<uint8_t>(war, kWarEnded) == 0;

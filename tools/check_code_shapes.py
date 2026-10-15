@@ -116,6 +116,11 @@ def check(path, codes):
     results.append(('kCodeBlockValueCheck (CTrigger slot 5)', block, hex(base[5])))
     results.append(('slot counts (count >= 24, ratio >= 26)', len(count) >= 24 and len(ratio) >= 26,
                     '%d/%d' % (len(count), len(ratio))))
+    # kCodeArmyDailyLoop right after the "army.daily" anchor's lea (+0x14).
+    text_va, text = cs.text_section(img.d)
+    refs, _ = cs.anchor_refs(img.d, text_va, text, 'army.daily')
+    ok = bool(refs) and len(refs) == 1 and img.match_at(refs[0] + 0x14, codes['kCodeArmyDailyLoop'])
+    results.append(('kCodeArmyDailyLoop (army.daily lea + 0x14)', ok, hex(refs[0]) if refs else '-'))
     return results
 
 

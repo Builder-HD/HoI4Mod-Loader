@@ -147,6 +147,40 @@ SIG(kSigNavalSums, "48 8B 71 40 45 33 FF 48 63 41 4C 41 8B FF 48 89 6C 24 58 41 
 static const size_t kSigNavalSumsTagToCountry = 0x3f, kSigNavalSumsDiplomacyDisp = 0x47, kSigNavalSumsTagIndex = 0x59,
                     kSigNavalSumsIsFriendly = 0x6c, kSigNavalSumsWarDisp = 0x7e;
 
+// --- Data triggers: military_counts (NOTES.md E1/E2) ----------------------------------------
+// divisions_in_state: state = gamestate->[disp32 +0x12][id], count [disp32 +9]. (0x1403ec5b6)
+SIG(kSigStateArray, "48 8B 05 ?? ?? ?? ?? 3B 98 ?? ?? ?? ?? 7D 0D 48 8B 80 ?? ?? ?? ?? 48 8B 14 D8 EB 02 33 D2 48 85 D2 0F 85 ?? ?? ?? ?? 41 B9 00 10 00 00 41 B8 ?? ?? 00 00 48 8D 15 ?? ?? ?? ?? 48 8D 4C 24 ?? E8 ?? ?? ?? ?? 48 8B F0 48 8D 54 24")
+static const size_t kSigStateCountDisp = 9, kSigStateArrayDisp = 0x12;
+// divisions_in_state unit loop: provinces state->[disp8 +3] (count [disp8 +7]); land units
+// province->[disp32 +0x1a] (count [disp32 +0x21]); owner tag unit->[disp32 +0x38]. (0x1403ec7ee)
+SIG(kSigStateLandUnits, "4C 8B 72 ?? 48 63 42 ?? 4D 8D 3C C6 4D 3B F7 74 ?? 90 49 8B 06 33 DB 48 8B B8 ?? ?? ?? ?? 48 63 80 ?? ?? ?? ?? 48 8D 34 C7 48 3B FE 74 ?? 0F 1F 40 00 48 8B 0F 48 81 C1 ?? ?? ?? ?? 8B 01 41 8B 55 08 3B C2")
+static const size_t kSigLandProvincesDisp = 3, kSigLandProvinceCountDisp = 7, kSigLandUnitsDisp = 0x1a,
+                    kSigLandUnitCountDisp = 0x21, kSigLandOwnerDisp = 0x38;
+// ships_in_area: region array/count (disp32 +0x19 / +9), provinces region->[disp8 +0x63] (count
+// [disp8 +0x32]), naval units province->[disp32 +0x83] (count [disp32 +0x6d]), owner
+// unit->[disp32 +0x92]; ships of a naval unit: E8 at +0xb6 -> array, count at [+0xc]. (0x1403eee00)
+SIG(kSigShipsInArea, "48 8B 15 ?? ?? ?? ?? 3B 82 ?? ?? ?? ?? 0F 8D ?? ?? ?? ?? 48 8B C8 48 8B 82 ?? ?? ?? ?? 48 8B 0C C8 48 89 4C 24 ?? 48 85 C9 0F 84 ?? ?? ?? ?? 48 63 41 ?? 48 89 84 24 ?? ?? ?? ?? 48 85 C0 0F 8E ?? ?? ?? ?? 48 89 74 24 ?? 4C 89 64 24 ?? 45 33 E4 4C 89 74 24 ?? 4C 89 7C 24 ?? 0F 1F 44 00 00 48 8B 41 ?? 33 F6 4E 8B 34 E0 4D 63 BE ?? ?? ?? ?? 4D 85 FF 0F 8E ?? ?? ?? ?? 66 0F 1F 44 00 00 49 8B 86 ?? ?? ?? ?? 41 8B 55 08 48 8B 3C F0 48 8D 8F ?? ?? ?? ?? 8B 01 3B C2 74 ?? 85 C0 74 ?? 85 D2 74 ?? E8 ?? ?? ?? ?? 84 C0 74 ?? 83 7D 58 00 48 8B CF 74 ?? E8 ?? ?? ?? ?? 4C 63 40 0C")
+static const size_t kSigShipsRegionCountDisp = 9, kSigShipsRegionArrayDisp = 0x19, kSigShipsProvinceCountDisp = 0x32,
+                    kSigShipsProvincesDisp = 0x63, kSigShipsNavalCountDisp = 0x6d, kSigShipsNavalUnitsDisp = 0x83,
+                    kSigShipsOwnerDisp = 0x92, kSigShipsShipsCall = 0xb6;
+// province->AddCombat(combat): combats province->[disp32 +0x22], count [disp32 +0x16]. (0x140e797f0)
+SIG(kSigProvinceAddCombat, "48 89 6C 24 20 41 56 48 83 EC 20 48 8B E9 4C 8B F2 33 C9 4C 63 8D ?? ?? ?? ?? 45 85 C9 7E ?? 48 8B 85 ?? ?? ?? ?? 33 D2 4C 39 30")
+static const size_t kSigProvinceCombatCountDisp = 0x16, kSigProvinceCombatsDisp = 0x22;
+// unit->AddCombat(combat): combats unit->[disp32 +0x23], count [disp32 +0xe]. (0x140bf9670)
+SIG(kSigUnitAddCombat, "48 89 6C 24 20 41 56 48 83 EC 20 4C 63 89 ?? ?? ?? ?? 45 33 C0 4C 8B F2 48 8B E9 45 85 C9 7E ?? 48 8B 81 ?? ?? ?? ?? 33 D2 0F 1F 80 00 00 00 00 4C 39 30")
+static const size_t kSigUnitCombatCountDisp = 0xe, kSigUnitCombatsDisp = 0x23;
+// num_planes_stationed_in_regions: air = CountryAir(country) (E8 at +0xa); wings air->[disp8 +0x12]
+// (count [disp8 +0x16]); region = WingBaseRegion(wing) (E8 at +0x2f), region id [disp8 +0x3b];
+// planes = WingPlanes(wing) (E8 at +0x68). (0x1403d1897)
+SIG(kSigPlanesStationed, "E8 ?? ?? ?? ?? 48 8B C8 33 F6 E8 ?? ?? ?? ?? 48 8B 58 ?? 48 63 40 ?? 4C 8D 34 C3 49 3B DE 74 ?? 48 89 6C 24 ?? 0F 1F 40 00 48 8B 2B 48 8B CD E8 ?? ?? ?? ?? 33 D2 33 C9 44 8B 48 ?? 48 63 47 ?? 85 C0 7E ?? 4C 8B C0 48 8B 47 ?? 44 39 08 74 ?? FF C2 48 FF C1 48 83 C0 04 49 3B C8 7C ?? EB ?? 83 FA FF 74 ?? 48 8B CD E8 ?? ?? ?? ?? 03 F0")
+static const size_t kSigPlanesTagToCountry = 0, kSigPlanesCountryAir = 0xa, kSigPlanesWingsDisp = 0x12,
+                    kSigPlanesWingCountDisp = 0x16, kSigPlanesWingRegion = 0x2f, kSigPlanesRegionIdDisp = 0x3b,
+                    kSigPlanesWingPlanes = 0x68;
+// CCountry::DailyUpdate "army.daily": the divisions list country->[disp32 at lea+0x17], count
+// [disp32 at lea+0x1e]; checked with kCodeArmyDailyLoop at lea+0x14.
+ANCHOR(kAnchorArmyDaily, "army.daily")
+static const size_t kArmyDailyLoopFromLea = 0x14, kArmyDailyListDisp = 0x17, kArmyDailyCountDisp = 0x1e;
+
 // --- Code shapes at RTTI-found addresses (numeric triggers, NOTES.md E2) -------------------
 // CODE(name, "..."): checked with SigMatchAt at an address reached through an RTTI vtable, not
 // scanned (so not required to be unique). tools/check_code_shapes.py checks them on exe copies.
@@ -169,6 +203,9 @@ CODE(kCodeValueReadValue, "48 89 5C 24 08 57 48 83 EC 40 48 8B DA 48 8B F9 E8 ??
 // CTrigger block ReadClause (base slot 5): "cmp dword [parser+0xc0], 3" (3 = block value),
 // somewhere in the first 0x80 bytes.
 CODE(kCodeBlockValueCheck, "83 BE C0 00 00 00 03")
+// The divisions loop right after the "army.daily" profiler zone (kAnchorArmyDaily, lea+0x14):
+// mov rbx,[rdi+list]; movsxd rax,[rdi+count]; ...; call [rax+0x98] per division.
+CODE(kCodeArmyDailyLoop, "48 8B 9F ?? ?? ?? ?? 48 63 87 ?? ?? ?? ?? 48 8D 34 C3 48 3B DE 74 ?? 0F 1F 40 00 48 8B 0B 48 8B 01 FF 90 98 00 00 00")
 
 #undef CODE
 #undef SIG

@@ -165,6 +165,22 @@ bool AirPower(int tag, int regionId, int64_t* our, int64_t* enemy);
 bool NavalDominance(int tag, int regionId, int64_t* friendly, int64_t* enemy);
 std::string RegionName(int regionId);  // display name (custom name included); tooltips only
 
+bool HaveMilitaryCounts();  // states, province unit/combat lists, country divisions
+bool HavePlanes();          // + air wings and their base regions
+enum class AreaKind { State, StrategicRegion };
+enum class UnitOwner { Any, Own, Enemy };  // Own: same country as tag; Enemy: at war with tag
+void* StateById(int id);
+bool IsSameCountry(int a, int b);
+// Counts in a state / strategic region. False if the area does not exist.
+bool CountDivisions(AreaKind kind, int id, int tag, UnitOwner who, int64_t* out);
+bool CountShips(AreaKind kind, int id, int tag, UnitOwner who, int64_t* out);
+bool CountBattles(AreaKind kind, int id, int64_t* out);   // combats located in its provinces
+bool CountBattlesInvolving(int tag, int64_t* out);         // distinct combats of its divisions
+bool CountPlanesStationed(int regionId, int tag, int64_t* out);  // its planes based in the region
+// The country's divisions, and the land units in an area (with their owner tag).
+bool ForEachDivision(int tag, void (*fn)(void* division, void* ctx), void* ctx);
+bool ForEachAreaDivision(AreaKind kind, int id, void (*fn)(void* division, int owner, void* ctx), void* ctx);
+
 // Fires the on_action like the engine fires on_startup: synced-RNG seed, events, random events
 // and effect. countryTag > 0: ROOT = that country; 0: no scope. name: at most 15 characters.
 // Returns false (and logs) on failure; an exception inside is contained.
