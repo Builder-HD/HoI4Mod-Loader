@@ -1590,3 +1590,224 @@ calls them.
 - **Afterwards:** `version.dll` was restored, and the kill switch stays commented out.
 - **D3 status:** steps 1-9 pass. Only step 10 (multiplayer and hot join) is open; it needs a
   second player.
+
+---
+
+# Part E: numeric data triggers
+
+## E1: findings (vanilla 1.19.3 copy in Ghidra; addresses for orientation only)
+
+Sources:
+- `documentation/triggers_documentation.md` and `dynamic_variables_documentation.md`;
+- the vanilla trigger classes found by RTTI (slot 22 = evaluate, slot 23 = value);
+- the UI code that shows the same numbers.
+
+Nothing below has been checked on 1.19.2 or the patched build yet; E2 does that per signature.
+
+### Engine number format (all values)
+
+- **Fixed point:** game values, script variables and value triggers use `CFixedPoint`, an
+  **`int64` scaled by 100000** (1.0 = 100000).
+  - Evidence: variables are converted with `/ 100000` (`FUN_1413a1cd0`); strength and
+    organisation ratios are computed as `cur * 100000 / max` and clamped to `[0, 100000]`.
+  - Integer arithmetic only, so it's **deterministic on every machine**. The loader computes in
+    `int64` the same way and never uses floats.
+- **Two vanilla numeric trigger bases:**
+  - **`CIntTrigger`** (e.g. `CNumOfFactoriesTrigger`): slot 22 `FUN_1413a1cd0` compares
+    `int GetValue(scope)` (slot 23) with an int or a variable (`/100000`). Operators: `>`
+    (token 0x1d3), `<` (0x1d4), `=` (equality).
+  - **`CValueTrigger`** (e.g. `CHasUnitStrengthTrigger`, `has_stability`): slot 22 `FUN_1413a2180`
+    compares a `CFixedPoint` (slot 23 writes it). The right side is a script value or variable,
+    evaluated with `FUN_140544c90`. Operators: `<` means less; **`>` and `=` both mean
+    "greater than"**, which is vanilla's quirk. An optional 0..1 range check is slot 25.
+- **Block triggers with operators exist in vanilla.** Examples: `divisions_in_state = { state = 5
+  size > 3 }`, `army_manpower_in_state = { amount < var }`.
+  - The block-item reader (slot 6, e.g. `FUN_140439320`) takes the operator from `parser+0x78`
+    when it reads the compare key and stores it next to the value: `size` → op `+0x13c`, value
+    `+0x138` via `FUN_1424c08d0` (int).
+  - Variable-capable parameters are read into a script-value holder (its vtable `+0x18` reads)
+    and evaluated with `FUN_140544c20` (int) or `FUN_140544c90` (fixed).
+
+### Data locations found
+
+| Data | Where | Cost per evaluation |
+|---|---|---|
+| Strategic region by id | `gamestate+0x2e0[id]`, count `+0x2ec` (already used by `region_names`) | O(1) |
+| State by id | `gamestate+0x2c8[id]`, count `+0x2d4` | O(1) |
+| Provinces of a state / strategic region | `obj+0x18` array, count `obj+0x24` (both, from `divisions_in_state` and `ships_in_area`) | O(provinces) |
+| Land units (divisions) in a province | `province+0x110`, count `+0x11c`; owner tag at `unit+0x1d8` | O(units there) |
+| Naval units (fleets/task forces) in a province | `province+0xf8`, count `+0x104`; ships of a unit via `FUN_140d6eeb0(unit)` → array, count `+0xc` | O(units × ships) |
+| Combats in a province | `province+0x170`, count `+0x17c` (added by `FUN_140e797f0`) | O(combats there) |
+| All combats | `CCombatManager` embedded at `gamestate+0x260`: array `+0x268`, count `+0x274`. `CLandCombat` (0xd8) and `CNavalCombat` (0x128) | O(all combats) |
+| Country's divisions | `country+0x290`, count `+0x29c` (the `army.daily` loop) | O(divisions) |
+| Division strength / organisation ratio | `CArmy` vtable slot 34 / 39 (`FUN_140c87920` / `FUN_140c82b60`): `cur*100000/max` via virtual getters `+0xf8/+0x108`, `+0x120/+0x130` | 4 virtual calls |
+| At war (A, B) | `country(A)+0xf88` → `+8[tagIndex(B)]` → `+0x2e8` war, and `war+0x49 == 0` (from `has_war_with`, `FUN_1403d9c40`) | O(1) |
+| Air power per country per region | `gamestate+0x690` air system → `+0x30[tagIndex]` country air → `+0xe0[region+0x60]`, entries of 0xa0 bytes; `[0]` = our power, `[1]` = enemy power (`FUN_140c54e30`) | O(1) |
+| Naval dominance per region | `region+0xe8` → array `+0x40` of 0x50-byte entries (country tag at `+0`, dominance `int64` at `+0x20`), count `+0x4c`; friendly vs enemy summed in `FUN_141003f50` (`has_naval_control`) | O(countries present) |
+| Military production | `country+0xf68` production object: `+0x2b8` military factories (fixed), `+0x2d8`/`+0x2f0` subtracted for "available" (`num_of_available_military_factories`) | O(1) |
+| Production lines | `CMilitaryProductionLine` (RTTI): country `+0x20`, equipment `+0x88` (→ `+0x3f0` type, archetype `+0x4d8`). **Line list location and the factories field are not pinned down yet** (save tokens of the line writer `0x35c9`, `0x2e42`, ... to match in E2) | O(lines) |
+
+**Air superiority as shown in the region panel** (`FUN_141880500`, `AIR_SUPERIORITY_BAR_TOOLTIP`):
+- **Formula:** `pct = our * 100000 / (our + enemy)`, clamped to `0..100000`, and 0 if both are 0.
+  The country is the player (`gamestate+0x520`).
+- **It is simulation state:** the same array is read by land combat (`FUN_1412af7c0`), unit
+  speed (`FUN_140c7fdb0`), raids and AI, so it must match on every machine. It's recomputed by
+  the air manager (`airmanager.daily` and hourly).
+- **Open question:** whether it's valid right after loading a save, before the first update.
+  An E2 test point.
+
+**Naval dominance** (1.13+ "Naval Dominance" with a "Control ratio" in the UI):
+- **Formula:** `has_naval_control` sums friendly (allied) and enemy (at war) dominance in the
+  region and compares the ratio with a define.
+- **Proposed value:** `friendly / (friendly + enemy)` as 0..1, the "control ratio". E2 must check
+  it against the UI.
+- **Synced:** dominance moves day by day toward a target, so it's simulation state.
+
+### Per wanted trigger
+
+1. **Air superiority (region, country).**
+   - Vanilla has nothing (no strategic-region triggers apart from `hidden_trigger` /
+     `meta_trigger`).
+   - Feasible: O(1) read; synced (used by combat).
+2. **Naval dominance (sea region, country).**
+   - Vanilla only has the yes/no `has_naval_control` / `has_enemy_naval_control`.
+   - Feasible: a small loop; synced.
+3. **Active battles (state / strategic region / involving country).**
+   - Vanilla has nothing at country or region level (only combatant-scope triggers inside a
+     battle).
+   - State and region: loop over provinces, read the combat count. Cheap.
+   - Country: loop over all combats and check both sides. That's O(combats), and the side
+     layout is still to be found in E2.
+   - Synced: combats are game state.
+4. **Units present.** Vanilla partly covers this, own units only:
+   - `divisions_in_state` (state; owner = scope country or the same tag group via
+     `FUN_140bb52f0`);
+   - `ships_in_area` (sea region, own);
+   - `num_planes_stationed_in_regions` (regions, own planes by base);
+   - country variables `num_armies_in_state@id`, `num_ships`, `num_deployed_planes`.
+
+   What's missing: strategic-region divisions, and the `any` / `enemy` owner filters.
+   - Divisions and ships: loop over the region's or state's provinces → units → owner check
+     (plus the at-war check for `enemy`).
+   - Planes: `own` loops over the country's air wings, as vanilla does. `enemy` / `any` would
+     either read counts from the 0xa0-byte air entry (if it has them, which E2 checks; the UI
+     shows "active fighters/bombers/CAS" per side) or fall back to looping over every
+     country's wings, which is too expensive.
+5. **Average strength / organisation.**
+   - Vanilla has unit-scope `unit_strength` / `unit_organization` (0..1) only.
+   - Country: loop over all divisions with 4 virtual calls each, 100-1000+ divisions. **The
+     most expensive item**; it must not sit in AI-evaluated blocks.
+   - State: divisions in the state's provinces. Cheap.
+6. **Factories assigned to an equipment type or archetype.**
+   - Vanilla has only totals (`num_of_military_factories`, `num_of_available_military_factories`).
+   - Loop over the country's production lines (tens). Cheap once the list is found (E2).
+   - Synced: production is game state.
+7. **Resource deficit: drop it, vanilla has it.**
+   - Variable `resource@steel` = "surplus resources in country".
+   - The trigger `has_resources_in_country = { resource = steel amount < 0 }` (the balance).
+   - The components are there too: `resource_produced@`, `resource_imported@`,
+     `resource_exported@`, `resource_consumed@`.
+   - So deficit = `-resource@X`: needed = consumed + exported, available = produced + imported.
+
+### Variables (`set_variable = { x = ... }`)
+
+- **How vanilla auto-generates them:** game variables are per-scope maps of
+  `std::function<CFixedPoint(scope, int target, CScopedVariable*)>`
+  (`NCountryGameVariableInitialization`, map at `DAT_143330ce0`). The "auto generated using the
+  trigger with same name" ones are added by
+  `CCountry/CState/CUnitLeader/CGameState::AddTriggerDynamicVariable(name, CValueTrigger* or
+  CIntTrigger*, desc)` (`FUN_1406d2a20` etc.).
+- **The dispatcher:** a value trigger's **vtable slot 18** (`FUN_1413aafb0` for `CValueTrigger`,
+  `FUN_1413aae70` for `CIntTrigger`) calls the right `AddTriggerDynamicVariable` for each scope
+  bit of its slot 14 mask.
+- **Consequence:** a native numeric trigger cloned from these bases can register itself as a
+  variable by calling its own slot 18 once, on a prototype object the loader keeps forever. Who
+  calls slot 18 in vanilla, and when, is still open; E2 makes sure the loader's call comes after
+  the engine's map exists.
+- **Limits:**
+  - **Scopes:** variables exist for country, state, unit leader and global scope only, not
+    strategic regions. So `air_superiority` can't be a region-scope variable.
+  - **Parameters:** a trigger-backed variable has no arguments, so it works only when every
+    parameter defaults from scope, e.g. `avg_division_strength` in country scope.
+- **Variables with a target** (`x = air_superiority@42`) would need the loader's own
+  `std::function` in the engine's map. That relies on MSVC STL binary compatibility and the
+  engine's map insert, so it's riskier. Proposed for later, not v1.
+
+### API proposal
+
+1. **Numeric value triggers** (`register_native_numeric_trigger`):
+   - **Value:** `int64 value(const Args&, const Scope&)` in fixed point. The kind is `Int` (a
+     count) or `Ratio` (0..1).
+   - **Templates:** the int kind clones a `CIntTrigger` (`CNumOfFactoriesTrigger`); the ratio
+     kind a `CValueTrigger`, with the 0..1 range check (slot 25) kept.
+   - **Value form:** `air_superiority > 0.6` when the scope supplies every parameter. Operators,
+     variables on the right (`> var`) and **variable registration (slot 18) come from the
+     engine**.
+   - **Ratios are 0..1 like vanilla** (`has_stability < 0.6`). The tooltip shows percent.
+2. **Block form with a comparison:**
+   - Example: `air_superiority = { region = 42 value > 0.6 }`.
+   - **Reading:** the loader's block-item reader stores `parser+0x78` (the operator) when it
+     reads the designated compare key (`value`, or `count` for counts). The right side goes
+     into an engine script-value holder (variable-capable, like vanilla's `state =` holder);
+     E2 finds its constructor and vtable in a vanilla block trigger.
+   - **Evaluation:** compute the value, resolve the right side with `FUN_140544c20/90`, compare.
+     The compare semantics are copied from the base (int: `=` `<` `>`; ratio: `<` and `>`,
+     with `=` meaning `>` as in vanilla, documented).
+3. **Parameter defaults from scope** (general; also for existing commands):
+   - `ParamSpec` gains `from_scope`: `StrategicRegion`, `State`, `Country`, or `RootCountry`.
+   - **Parse time:** a parameter that is missing but has a scope default isn't an error.
+   - **Evaluate time:** a missing value comes from the current scope (or ROOT for
+     `RootCountry`). If the scope doesn't provide it, the trigger is false and one line is
+     logged (no allocation on the hot path: a per-command flag).
+   - **Existing command:** `set_strategic_region_name = { name = KEY }` inside a strategic
+     region scope.
+   - **Which country:** in a strategic-region scope, data triggers use **ROOT** if it is a
+     country, else the scope's country if any.
+4. **Tooltips:**
+   - Ratio, e.g. "Air superiority over Bay of Biscay (42) above 60% (currently 64%)".
+   - Count, e.g. "Battles in Normandy (state 15): more than 2 (currently 3)".
+   - Built in the tooltip callback (allocation is fine there). The current value comes from
+     the same evaluator.
+
+### Thread rule (refining README "Threads and hooks")
+
+The current rule is "native triggers may only read atomics". Data triggers must read game state.
+
+**Proposed rule:**
+- `evaluate` may **read** game state. It's safe because all game-state writes happen serially on
+  the main thread (NOTES "Threading model"), and the engine's own triggers read the same data
+  from AI worker threads.
+- **No** writes, no caching across calls, no allocation, no logging (except one flag-guarded
+  line), and no locks.
+- **Never call an engine function that:**
+  - asserts or needs the main thread (synced RNG `FUN_142233fa0`, anything in the tick,
+    `DoFrame`);
+  - allocates;
+  - logs on its normal path. Several vanilla getters log on bad input, e.g. "Region ID had an
+    unexpected value". Validate ids before calling them.
+- **Loops must be bounded** by the data, with no recursion over scopes.
+
+**Getters found safe so far** (pure reads, no asserts in release, no allocation):
+- `FUN_140bb48f0` (tag → country), `FUN_140bb5490` (tag → index), `FUN_140bb52f0` (tag
+  group compare);
+- `FUN_1406f9600` (country air), `FUN_140c54e30` (air region entry);
+- `FUN_141003f50` (naval control: reads, plus a define via `FUN_14143c720`, to be checked);
+- `FUN_140d6eeb0` (ships of a naval unit);
+- `CArmy` slots 34/39 and the getters they call (to be checked in E2 for allocation);
+- `FUN_140c7e7c0` / `FUN_140b9f5c0` (unit → template → type);
+- direct reads of the arrays in the table above.
+
+The release asserts are compiled out, so "asserts" here means behaviour, not the check.
+
+### Feature split (one guard per group; a broken signature disables only its group)
+
+| Feature | Triggers | Depends on |
+|---|---|---|
+| `region_control` | `air_superiority`, `naval_dominance` | air system, air entry, region naval object, at-war / ally checks |
+| `military_counts` | `battles_count`, `divisions_count`, `ships_count`, `planes_count` | state/region province lists, province unit/combat arrays, combat manager, at-war check |
+| `army_condition` | `avg_division_strength`, `avg_division_organisation` | country division list, `CArmy` slots 34/39 (RTTI) |
+| `production_data` | `factories_assigned` | production lines (to be found) |
+
+Each feature requires `lifecycle` (native registration) and the new numeric API. Before it
+reports "supported", each one also runs a self-check: array sizes against the region and state
+counts, values in range.
