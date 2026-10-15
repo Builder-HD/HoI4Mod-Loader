@@ -1572,3 +1572,21 @@ calls them.
   same).
 - **Bonus threading data:** the second load in the same session summarised 17 flag changes made
   during play, with 0 off the main thread.
+
+### D3 step 9 passes (2026-10-15, without the loader: `version.dll` renamed)
+
+- **The loader did not run:** `loader.log` is unchanged since the 19:17 run.
+- **`old_save` loads normally.** `game.log` has `save migrated to data version 2 by the
+  on_weekly fallback` within the first week.
+- **`error.log` has no line about `on_game_loaded`.** An `on_actions` key nobody fires is
+  silently accepted, as D1 predicted.
+- **Expected errors:** `Unknown trigger-type` / `Unknown effect-type` for the three native region
+  commands (the test mod's decisions and scripted localisation) are the documented cost of
+  native commands without the loader.
+  - The user's verdict: acceptable. A mod that uses native commands requires the loader.
+  - Mods that must run without it use the flag protocol (README).
+- **Remaining `error.log` lines:** they are unrelated (mod descriptors, vanilla graphics, the
+  lobby `remotefile.cpp` exception) and appear with the loader too.
+- **Afterwards:** `version.dll` was restored, and the kill switch stays commented out.
+- **D3 status:** steps 1-9 pass. Only step 10 (multiplayer and hot join) is open; it needs a
+  second player.
