@@ -141,6 +141,39 @@ static void RefreshFlagsOnGameEntered(bool loadedFromSave) {
     Log("Plugin flags refreshed after loading a save");
 }
 
+// --- Trigger timing diagnostics ([diagnostics] trigger_timing = 1) -----------------------------
+// Every numeric trigger evaluation is timed (QueryPerformanceCounter, two calls per evaluation).
+// On the main thread, every 10 in-game days, loader.log gets per trigger: evaluations, average
+// time per evaluation, and time per in-game day; then the counters restart.
+static int g_timingDay = -1, g_timingDays = 0;
+static LARGE_INTEGER g_qpcFreq;
+
+static void TimingFrame() {
+    int hours = Engine::GameDateHours();
+    if (hours <= 0) {
+        g_timingDay = -1;
+        return;
+    }
+    int day = hours / 24;
+    if (day == g_timingDay) return;
+    if (g_timingDay >= 0 && day > g_timingDay) g_timingDays += day - g_timingDay;
+    g_timingDay = day;
+    if (g_timingDays < 10) return;
+    double totalMs = 0;
+    for (Command* c : NativeCommands()) {
+        if (!c->numeric || c->status != CommandStatus::Registered) continue;
+        long long n = InterlockedExchange64(&c->evalCount, 0);
+        long long ticks = InterlockedExchange64(&c->evalTicks, 0);
+        if (n == 0) continue;
+        double ms = ticks * 1000.0 / (double)g_qpcFreq.QuadPart;
+        totalMs += ms;
+        Log("Trigger timing (%d days): %s: %lld evaluations, %.0f ns each, %.3f ms per day", g_timingDays, c->name.c_str(), n,
+            ms * 1e6 / (double)n, ms / g_timingDays);
+    }
+    Log("Trigger timing (%d days): all numeric triggers %.3f ms per in-game day", g_timingDays, totalMs / g_timingDays);
+    g_timingDays = 0;
+}
+
 void FeaturesInit(bool engineAllowed, const wchar_t* iniPath) {
     for (Feature& f : g_features) {
         if (f.tier == Tier::Engine && !engineAllowed) {
@@ -172,6 +205,16 @@ void FeaturesInit(bool engineAllowed, const wchar_t* iniPath) {
         if (Engine::HaveTokens()) OnLexerReady(&NativeScriptRegisterWithEngine);
     } else if (!NativeCommands().empty()) {
         Log("Native script: %zu command(s) not registered, lifecycle feature inactive", NativeCommands().size());
+    }
+    if (iniPath && GetPrivateProfileIntW(L"diagnostics", L"trigger_timing", 0, iniPath) == 1) {
+        if (MainThreadQueueAvailable()) {
+            QueryPerformanceFrequency(&g_qpcFreq);
+            NativeSetTiming(true);
+            OnMainThreadFrame(&TimingFrame);
+            Log("Diagnostics: numeric trigger timing ON (report every 10 in-game days)");
+        } else {
+            Log("Diagnostics: trigger timing needs the main-thread queue; off");
+        }
     }
     register_virtual_file(L"common/scripted_triggers/hoi4_loader_detect.txt", &DetectTrigger);
     register_virtual_file(L"common/scripted_effects/hoi4_loader_detect.txt", &DetectEffect);

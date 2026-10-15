@@ -185,6 +185,7 @@ bool HaveDivisionCondition();  // CArmy strength / organisation getters
 // Strength and organisation of a division as ratios (100000 = full). False if not a CArmy.
 bool DivisionRatios(void* unit, int64_t* strength, int64_t* org);
 
+int GameDateHours();  // current game date in hours (0 without a game); for diagnostics
 void ResolveProduction();
 bool HaveProduction();  // production lines, equipment database
 // Equipment type or archetype by name token (null if unknown or not loaded yet).

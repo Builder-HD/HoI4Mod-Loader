@@ -30,6 +30,7 @@ TagIndex_t g_tagIndex = nullptr;
 CountryAir_t g_countryAir = nullptr;
 AirRegionEntry_t g_airRegionEntry = nullptr;
 IsFriendly_t g_isFriendly = nullptr;
+uint32_t g_gameDate = 0;           // CGameState -> current date (hours)
 uint32_t g_regionNavalOffset = 0;  // CStrategicRegion -> naval dominance object
 uint32_t g_diplomacyOffset = 0;    // CCountry -> diplomacy (relations at +8, indexed by tag index)
 uint32_t g_relationWarOffset = 0;  // relation -> CWar* (0 = no war)
@@ -158,6 +159,7 @@ void ResolveData() {
     }
     ResolveArmyCondition();
     ResolveProduction();
+    if ((p = SigFindUnique("game_date", kSigGameDate)) != nullptr) g_gameDate = Rd<uint32_t>(p, kSigGameDateDisp);
     if (HaveMilitaryCounts())
         Log("Data triggers: states +0x%x/+0x%x, provinces +0x%x/+0x%x, land units +0x%x/+0x%x, naval units +0x%x/+0x%x, "
             "owner +0x%x, combats province +0x%x unit +0x%x, divisions +0x%x/+0x%x",
@@ -501,6 +503,11 @@ std::string RegionName(int regionId) {
     void* region = RegionById(regionId);
     const EngineString* s = region && pRegionGetNameKey ? ((GetNameKey_t)pRegionGetNameKey)(region) : nullptr;
     return s && s->size > 0 && s->size < 4096 ? std::string(s->c_str(), (size_t)s->size) : "region " + std::to_string(regionId);
+}
+
+int GameDateHours() {
+    void* gs = GameState();
+    return gs && g_gameDate ? Rd<int>(gs, g_gameDate) : 0;
 }
 
 }  // namespace Engine

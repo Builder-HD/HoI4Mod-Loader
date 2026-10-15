@@ -181,6 +181,11 @@ static const size_t kSigPlanesTagToCountry = 0, kSigPlanesCountryAir = 0xa, kSig
 ANCHOR(kAnchorArmyDaily, "army.daily")
 static const size_t kArmyDailyLoopFromLea = 0x14, kArmyDailyListDisp = 0x17, kArmyDailyCountDisp = 0x1e;
 
+// Flag get-or-create stores the current game date: date = gamestate->[disp32 +9] (hours).
+// (0x140cbf8f5)
+SIG(kSigGameDate, "48 8B 05 ?? ?? ?? ?? 8B 88 ?? ?? ?? ?? 89 4C 33 18 48 8B 45 08 48 03 C3 E9")
+static const size_t kSigGameDateDisp = 9;
+
 // --- Data triggers: production_data (NOTES.md E2) -------------------------------------------
 // Equipment reference by name (has_equipment's resolver): if the database global (rip rel32 at
 // +0x26, cmp qword ...,0 at +0x23, length 8) is set, def = Lookup(DbGetter() (E8 at +0x2d),
