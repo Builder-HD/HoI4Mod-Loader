@@ -1560,3 +1560,15 @@ calls them.
     on_game_loaded".
   - **Steps 8 and 9 stay open.** One positive result: a version-1 save loaded with the loader was
     migrated by `on_game_loaded` right on load.
+
+### D3 step 8 passes (2026-10-15, kill switch `game_loaded = 0`)
+
+- **Startup:** `loader.log` has "Feature game_loaded (engine tier): DISABLED in
+  loader_config.ini [features]", and the guard is served as "no".
+- **Load:** `old_save` loads with no `on_game_loaded` and no event.
+- **Status event:** data version 1, migration pending, guard no.
+- **Fallback:** within the first week, "Save Migrated … by the on_weekly fallback". `game.log`
+  has `save migrated to data version 2 by the on_weekly fallback` (loaded twice, both times the
+  same).
+- **Bonus threading data:** the second load in the same session summarised 17 flag changes made
+  during play, with 0 off the main thread.
