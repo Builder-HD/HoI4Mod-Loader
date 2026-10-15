@@ -38,6 +38,7 @@ const char* TypeName(ParamType t) {
         case ParamType::Bool: return "bool";
         case ParamType::Country: return "country";
         case ParamType::Choice: return "choice";
+        case ParamType::Token: return "name";
         default: return "key";
     }
 }
@@ -558,7 +559,8 @@ bool NativeSetArg(ParsedCommand& pc, size_t index, const char* text, std::string
                 return false;
             }
             break;
-        case ParamType::Key: {
+        case ParamType::Key:
+        case ParamType::Token: {
             size_t n = strlen(text);
             bool ok = n > 0 && n <= 255;
             for (size_t i = 0; ok && i < n; ++i) ok = (unsigned char)text[i] > ' ' && text[i] != '"' && text[i] != '{' && text[i] != '}';
@@ -569,6 +571,13 @@ bool NativeSetArg(ParsedCommand& pc, size_t index, const char* text, std::string
             }
             pc.storage[index] = text;
             v.s = pc.storage[index].c_str();
+            if (spec.type == ParamType::Token) {
+                v.i = g_backend ? g_backend->Intern(text) : 0;
+                if (!v.i) {
+                    *error = std::string("'") + spec.name + "': cannot create a token for '" + text + "'";
+                    return false;
+                }
+            }
             break;
         }
         case ParamType::Country: {

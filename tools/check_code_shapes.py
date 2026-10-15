@@ -119,6 +119,19 @@ def check(path, codes):
     army = img.vtable('.?AVCArmy@@')
     ok = bool(army) and len(army[1]) > 39 and all(img.match_at(army[1][i], codes['kCodeArmyRatio']) for i in (34, 39))
     results.append(('kCodeArmyRatio (CArmy slots 34, 39)', ok, hex(army[0]) if army else '-'))
+    avail = img.vtable('.?AVCNumOfAvailableMilitaryFactoriesTrigger@@')
+    results.append(('kCodeAvailableMilitaryFactories (slot 23)',
+                    bool(avail) and img.match_at(avail[1][23], codes['kCodeAvailableMilitaryFactories']), '-'))
+    mil = img.vtable('.?AVCMilitaryProductionLine@@')
+    nav = img.vtable('.?AVCNavalProductionLine@@')
+    results.append(('kCodeLineEquipment (military line slot 11)',
+                    bool(mil) and img.match_at(mil[1][11], codes['kCodeLineEquipment']), '-'))
+    results.append(('kCodeNavalLineEquipment (naval line slot 11)',
+                    bool(nav) and img.match_at(nav[1][11], codes['kCodeNavalLineEquipment']), '-'))
+    text_va, text = cs.text_section(img.d)
+    refs, _ = cs.anchor_refs(img.d, text_va, text, 'production.daily_serial')
+    ok = bool(refs) and len(refs) == 1 and img.match_at(refs[0] + 0x13, codes['kCodeProductionDaily'])
+    results.append(('kCodeProductionDaily (lea + 0x13)', ok, hex(refs[0]) if refs else '-'))
     # kCodeArmyDailyLoop right after the "army.daily" anchor's lea (+0x14).
     text_va, text = cs.text_section(img.d)
     refs, _ = cs.anchor_refs(img.d, text_va, text, 'army.daily')

@@ -181,6 +181,21 @@ static const size_t kSigPlanesTagToCountry = 0, kSigPlanesCountryAir = 0xa, kSig
 ANCHOR(kAnchorArmyDaily, "army.daily")
 static const size_t kArmyDailyLoopFromLea = 0x14, kArmyDailyListDisp = 0x17, kArmyDailyCountDisp = 0x1e;
 
+// --- Data triggers: production_data (NOTES.md E2) -------------------------------------------
+// Equipment reference by name (has_equipment's resolver): if the database global (rip rel32 at
+// +0x26, cmp qword ...,0 at +0x23, length 8) is set, def = Lookup(DbGetter() (E8 at +0x2d),
+// token) (E8 at +0x37); a def counts only if its byte [disp8 +0x47] is set. (0x1413b0970)
+SIG(kSigEquipmentLookup, "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 60 49 8B E8 48 8B F2 48 8B F9 8B 1A 85 DB 74 ?? 48 83 3D ?? ?? ?? ?? 00 74 ?? E8 ?? ?? ?? ?? 8B D3 48 8B C8 E8 ?? ?? ?? ?? 48 89 47 10 48 85 C0 74 ?? 80 78 ?? 00")
+static const size_t kSigEquipDbCmp = 0x23, kSigEquipDbGetter = 0x2d, kSigEquipLookup = 0x37, kSigEquipValidDisp = 0x47;
+// production.daily_serial line loop: lines production->[disp8 +3] ... factories line->[disp8 +0x2a]
+// ("Deleting non productive line" when 0). (0x140e67130)
+SIG(kSigProductionLineFactories, "48 8B 43 ?? 48 8B 0C 07 48 8B 01 FF 50 50 48 8B 43 ?? 48 8B 0C 07 48 8B 01 FF 90 F0 00 00 00 48 8B 43 ?? 48 8B 0C 07 44 39 71 ?? 75")
+static const size_t kSigLineFactoriesListDisp = 3, kSigLineFactoriesDisp = 0x2a;
+// "production.daily_serial" profiler zone; kCodeProductionDaily at lea+0x13: lines
+// production->[disp8 +0x1d] (count [disp8 +0x21]).
+ANCHOR(kAnchorProductionDaily, "production.daily_serial")
+static const size_t kProductionDailyCodeFromLea = 0x13, kProductionDailyLinesDisp = 0x1d, kProductionDailyCountDisp = 0x21;
+
 // --- Code shapes at RTTI-found addresses (numeric triggers, NOTES.md E2) -------------------
 // CODE(name, "..."): checked with SigMatchAt at an address reached through an RTTI vtable, not
 // scanned (so not required to be unique). tools/check_code_shapes.py checks them on exe copies.
@@ -206,6 +221,17 @@ CODE(kCodeBlockValueCheck, "83 BE C0 00 00 00 03")
 // CArmy strength / organisation ratio (RTTI .?AVCArmy@@ slots 34 and 39): cur (slot at +0x1f) *
 // 100000 / max (slot at +0x34), clamped to 0..1. Both slots must have this shape.
 CODE(kCodeArmyRatio, "48 89 5C 24 18 48 89 74 24 20 57 48 83 EC 20 48 8B 01 48 8B FA 48 8D 54 24 30 48 8B D9 FF 90 ?? ?? ?? ?? 4C 8B 03 48 8D 54 24 38 48 8B CB 48 8B F0 41 FF 90 ?? ?? ?? ?? 48 8B 08 48 85 C9")
+// After the "production.daily_serial" lea (+0x13): the production object's line list.
+CODE(kCodeProductionDaily, "48 8D 8B ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B 83 ?? ?? ?? ?? 4C 8B B0 ?? ?? ?? ?? 48 8B 7B ?? 48 63 43 ?? 48 8D 34 C7 48 3B FE 74 ?? 49 8B D6 48 8B 0F E8")
+// CNumOfAvailableMilitaryFactoriesTrigger slot 23: production = TagToCountry(tag)->[disp32 +0x32].
+CODE(kCodeAvailableMilitaryFactories, "40 53 48 83 EC 20 48 8B 01 48 8B DA 4C 8B C2 48 8D 54 24 30 FF 50 40 83 7C 24 30 00 7F 07 8B 43 08 89 44 24 30 48 8D 4C 24 30 E8 ?? ?? ?? ?? 48 8B 88 ?? ?? ?? ??")
+static const size_t kCodeAvailMilTagToCountry = 0x2a, kCodeAvailMilProductionDisp = 0x32;
+// CMilitaryProductionLine slot 11: equipment line->[disp32 +3], its type ->[disp32 +0xa], the
+// type's archetype ->[disp32 +0x23].
+CODE(kCodeLineEquipment, "48 8B 81 ?? ?? ?? ?? 48 8B 90 ?? ?? ?? ?? 48 8B 82 ?? ?? ?? ?? 48 8B C8 48 C1 E9 20 84 C9 75 ?? 48 8B 82 ?? ?? ?? ??")
+static const size_t kCodeLineEquipmentDisp = 3, kCodeLineTypeDisp = 0xa, kCodeLineArchetypeDisp = 0x23;
+// CNavalProductionLine slot 11: mov rcx,[rcx+<equipment>]; jmp ... (same equipment field).
+CODE(kCodeNavalLineEquipment, "48 8B 89 ?? ?? ?? ?? E9")
 // The divisions loop right after the "army.daily" profiler zone (kAnchorArmyDaily, lea+0x14):
 // mov rbx,[rdi+list]; movsxd rax,[rdi+count]; ...; call [rax+0x98] per division.
 CODE(kCodeArmyDailyLoop, "48 8B 9F ?? ?? ?? ?? 48 63 87 ?? ?? ?? ?? 48 8D 34 C3 48 3B DE 74 ?? 0F 1F 40 00 48 8B 0B 48 8B 01 FF 90 98 00 00 00")

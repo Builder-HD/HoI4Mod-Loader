@@ -157,6 +157,7 @@ void ResolveData() {
         g_provinces = 0;
     }
     ResolveArmyCondition();
+    ResolveProduction();
     if (HaveMilitaryCounts())
         Log("Data triggers: states +0x%x/+0x%x, provinces +0x%x/+0x%x, land units +0x%x/+0x%x, naval units +0x%x/+0x%x, "
             "owner +0x%x, combats province +0x%x unit +0x%x, divisions +0x%x/+0x%x",
@@ -318,6 +319,101 @@ void ResolveArmyCondition() {
 }
 
 bool HaveDivisionCondition() { return HaveMilitaryCounts() && g_armyVtable; }
+
+// --- production_data: production lines and equipment (kSigEquipmentLookup ... kCodeLineEquipment) -
+namespace {
+using EquipDb_t = void*(__fastcall*)();
+using EquipLookup_t = const uint8_t*(__fastcall*)(void* db, int token);
+EquipDb_t g_equipDb = nullptr;
+EquipLookup_t g_equipLookup = nullptr;
+void* const* g_equipDbGlobal = nullptr;  // set once the equipment database exists
+uint32_t g_equipValid = 0;               // def byte that must be set
+uint32_t g_countryProduction = 0, g_lines = 0, g_lineCount = 0, g_lineFactories = 0;
+uint32_t g_lineEquipment = 0, g_equipType = 0, g_typeArchetype = 0;
+void** g_militaryLineVt = nullptr;
+void** g_navalLineVt = nullptr;
+}  // namespace
+
+void ResolveProduction() {
+    uint8_t* p;
+    if ((p = SigFindUnique("equipment_lookup", kSigEquipmentLookup)) != nullptr) {
+        g_equipDbGlobal = (void* const*)SigRipTarget(p + kSigEquipDbCmp, 3, 8);
+        g_equipDb = (EquipDb_t)SigFollowRel32(p + kSigEquipDbGetter);
+        g_equipLookup = (EquipLookup_t)SigFollowRel32(p + kSigEquipLookup);
+        g_equipValid = Rd<uint8_t>(p, kSigEquipValidDisp);
+    }
+    uint32_t lines2 = 0;
+    if ((p = SigFindUnique("production_line_factories", kSigProductionLineFactories)) != nullptr) {
+        lines2 = Rd<uint8_t>(p, kSigLineFactoriesListDisp);
+        g_lineFactories = Rd<uint8_t>(p, kSigLineFactoriesDisp);
+    }
+    if (uint8_t* lea = AnchorFindLea("production.daily_serial", kAnchorProductionDaily)) {
+        uint8_t* code = lea + kProductionDailyCodeFromLea;
+        if (SigMatchAt(code, kCodeProductionDaily)) {
+            g_lines = Rd<uint8_t>(code, kProductionDailyLinesDisp);
+            g_lineCount = Rd<uint8_t>(code, kProductionDailyCountDisp);
+        }
+    }
+    size_t n = 0;
+    void** availVt = FindVtableByRtti(".?AVCNumOfAvailableMilitaryFactoriesTrigger@@", &n);
+    if (availVt && n > 23 && SigMatchAt((uint8_t*)availVt[23], kCodeAvailableMilitaryFactories) &&
+        (void*)SigFollowRel32((uint8_t*)availVt[23] + kCodeAvailMilTagToCountry) == (void*)g_tagToCountry)
+        g_countryProduction = Rd<uint32_t>(availVt[23], kCodeAvailMilProductionDisp);
+    g_militaryLineVt = FindVtableByRtti(".?AVCMilitaryProductionLine@@", &n);
+    if (g_militaryLineVt && n > 11 && SigMatchAt((uint8_t*)g_militaryLineVt[11], kCodeLineEquipment)) {
+        g_lineEquipment = Rd<uint32_t>(g_militaryLineVt[11], kCodeLineEquipmentDisp);
+        g_equipType = Rd<uint32_t>(g_militaryLineVt[11], kCodeLineTypeDisp);
+        g_typeArchetype = Rd<uint32_t>(g_militaryLineVt[11], kCodeLineArchetypeDisp);
+    }
+    g_navalLineVt = FindVtableByRtti(".?AVCNavalProductionLine@@", &n);
+    if (g_navalLineVt && (n <= 11 || !SigMatchAt((uint8_t*)g_navalLineVt[11], kCodeNavalLineEquipment) ||
+                          Rd<uint32_t>(g_navalLineVt[11], 3) != g_lineEquipment)) {
+        Log("data triggers: naval production lines have another layout; factories_assigned counts military lines only");
+        g_navalLineVt = nullptr;
+    }
+    if (g_lines && lines2 && g_lines != lines2) {
+        Log("ERROR: data triggers: the two production loops disagree on the line list");
+        g_lines = 0;
+    }
+    if (HaveProduction())
+        Log("Data triggers: production +0x%x, lines +0x%x/+0x%x, factories +0x%x, equipment +0x%x -> type +0x%x -> "
+            "archetype +0x%x",
+            g_countryProduction, g_lines, g_lineCount, g_lineFactories, g_lineEquipment, g_equipType, g_typeArchetype);
+}
+
+bool HaveProduction() {
+    return HaveCountries() && g_equipDb && g_equipLookup && g_equipDbGlobal && g_countryProduction && g_lines && g_lineCount &&
+           g_lineFactories && g_lineEquipment && g_equipType && g_typeArchetype && g_militaryLineVt;
+}
+
+const void* EquipmentByToken(int token) {
+    if (!HaveProduction() || token <= 0 || !*g_equipDbGlobal) return nullptr;
+    const uint8_t* def = g_equipLookup(g_equipDb(), token);
+    return def && Rd<uint8_t>(def, g_equipValid) ? def : nullptr;
+}
+
+bool FactoriesAssigned(int tag, const void* equipment, int64_t* out) {
+    *out = 0;
+    if (!HaveProduction()) return false;
+    void* country = CountryByTag(tag);
+    void* production = country ? Rd<void*>(country, g_countryProduction) : nullptr;
+    if (!production) return false;
+    PtrList lines = ListAt(production, g_lines, g_lineCount);
+    for (int i = 0; i < lines.count; ++i) {
+        void* line = lines.data[i];
+        void** vt = line ? *(void***)line : nullptr;
+        if (!vt || (vt != g_militaryLineVt && vt != g_navalLineVt)) continue;
+        if (equipment) {
+            void* equip = Rd<void*>(line, g_lineEquipment);
+            void* type = equip ? Rd<void*>(equip, g_equipType) : nullptr;
+            void* archetype = type ? Rd<void*>(type, g_typeArchetype) : nullptr;
+            if (type != equipment && archetype != equipment) continue;
+        }
+        int f = Rd<int>(line, g_lineFactories);
+        if (f > 0) *out += f;
+    }
+    return true;
+}
 
 bool DivisionRatios(void* unit, int64_t* strength, int64_t* org) {
     if (!g_armyVtable || !unit || *(void***)unit != g_armyVtable) return false;  // divisions only

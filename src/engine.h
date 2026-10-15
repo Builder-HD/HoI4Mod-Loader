@@ -185,6 +185,14 @@ bool HaveDivisionCondition();  // CArmy strength / organisation getters
 // Strength and organisation of a division as ratios (100000 = full). False if not a CArmy.
 bool DivisionRatios(void* unit, int64_t* strength, int64_t* org);
 
+void ResolveProduction();
+bool HaveProduction();  // production lines, equipment database
+// Equipment type or archetype by name token (null if unknown or not loaded yet).
+const void* EquipmentByToken(int token);
+// Factories assigned to the country's military and naval production lines (dockyards for ships);
+// only lines producing `equipment` (a type, or any type of an archetype) unless it is null.
+bool FactoriesAssigned(int tag, const void* equipment, int64_t* out);
+
 // Fires the on_action like the engine fires on_startup: synced-RNG seed, events, random events
 // and effect. countryTag > 0: ROOT = that country; 0: no scope. name: at most 15 characters.
 // Returns false (and logs) on failure; an exception inside is contained.
