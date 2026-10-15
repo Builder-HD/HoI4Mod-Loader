@@ -354,10 +354,26 @@ Strategic region values can't be variables, because HOI4 has no region-scope var
 - Counts and ratios over an area read the area's provinces and units.
 - `battles_count = { involving = ... }` and the country-wide averages loop over every division of
   the country.
-- Measured costs are in NOTES.md (Part E, in-game results). With `[diagnostics] trigger_timing = 1`
-  in `loader_config.ini`, `loader.log` reports evaluations, time per evaluation and time per
-  in-game day, every 10 days.
-- Keep the country-wide averages out of blocks the AI evaluates for every country every day.
+- Measured (vanilla 1.19.3, 1936, speed 5). The test mod's AI probe made every AI country
+  evaluate six of the triggers in `ai_will_do`, and that cost **about 1.8 ms per in-game day in
+  total**. Speed 5 runs about 620 ms per day, so that is roughly 0.3%. Time per evaluation:
+
+  | Trigger | per evaluation |
+  |---|---|
+  | `naval_dominance`, `air_superiority` | 0.2-0.3 탎 |
+  | `battles_count` | 0.4 탎 |
+  | `factories_assigned` | 0.7 탎 |
+  | `divisions_count` (strategic region) | 0.8 탎 |
+  | `avg_division_organisation` (country) | 0.8 탎 |
+  | `avg_division_strength` (country) | 1.5 탎 |
+  | `planes_count` | 1.6 탎 |
+
+  The country-wide averages and `involving` grow with the number of divisions (France: 74). Even a
+  few hundred divisions stay in the 탎 range, so no caching is needed. Hovering a tooltip
+  re-evaluates it every frame; that costs nothing noticeable either.
+- With `[diagnostics] trigger_timing = 1` in `loader_config.ini`, `loader.log` reports
+  evaluations, time per evaluation and time per in-game day every 10 days, so you can measure your
+  own mod. Details are in NOTES.md (Part E, in-game results).
 
 **Multiplayer:** all values are game state that every machine computes the same way (integer
 fixed point, no floats), so the triggers are as deterministic as vanilla's.

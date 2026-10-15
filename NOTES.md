@@ -2007,3 +2007,27 @@ counts, values in range.
   - **Test mod:** the HOI4 loc parser drops "{" plus the next two characters; descriptions now use
     parentheses. fighter_equipment no longer exists in 1.19 (it correctly showed "unavailable");
     the test now uses small_plane_airframe.
+- **Steps 3-9, second pass (DLL `67f8e6b8`, new FRA 1936 game, user):**
+  - **Production:** 17 in total (6 military + 11 dockyards, as the Factories panel shows),
+    infantry_equipment / infantry_equipment_1 2 each, small_plane_airframe 0, ship_hull_light 4,
+    no_such_equipment unavailable. The line dump matches the history file (the submarine lines
+    beyond the 11 dockyards get 0).
+  - **Comparisons and variables:** LOW and HIGH flip decisions 12 and 17 as predicted. Decisions 7
+    and 15 stay as predicted, and the tooltips show the variable's current value. Decision 18's
+    event shows 59.9% / 100% / 17.
+  - **Caveats:** the "NOT without a region" decision is available and logged once. The
+    `owner = enemy` parse error is logged once at load and the decision is never available.
+  - **Cost (step 9), 60 in-game days at speed 5, AI probe on:** steady windows of 10 days take
+    6.2-7.1 s of real time. All numeric triggers together cost 1.73-1.78 ms per in-game day, about
+    0.3% of the day.
+    - Per evaluation: air_superiority 310 ns, naval_dominance 200 ns, battles_count 430 ns,
+      divisions_count 770-830 ns, avg_division_strength 1.48-1.54 µs (FRA, whole army),
+      avg_division_organisation 770-860 ns, factories_assigned 715-745 ns.
+    - About 580 evaluations per day of each probe trigger.
+    - The first window (9.9 ms/day, 56k air_superiority evaluations) was the paused testing phase:
+      hovered tooltips re-evaluate every frame. That is not a gameplay cost.
+    - **Decision: no caching.** README "Cost" now gives these numbers.
+  - **Open:**
+    - step 5 (at war: enemy counts, battles, air/naval below 100%);
+    - step 10 (without the loader);
+    - D3 step 10 (multiplayer).
