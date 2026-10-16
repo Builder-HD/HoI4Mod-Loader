@@ -114,6 +114,12 @@ static bool ValueCount(const Args& a, const Scope&, int64_t* out) {
     *out = a.i(0) % 10;
     return true;
 }
+static int g_ownerSeen = 0;
+static bool ValueOwner(const Args& a, const Scope&, int64_t* out) {
+    g_ownerSeen = a.has(0) ? a.i(0) : 0;
+    *out = 1;
+    return true;
+}
 static void SubjectRegion(const Args& a, const Scope&, TooltipText& out) { out.add("Region ").add(a.i(0)); }
 
 static NativeEffect Effect(const char* name, std::vector<ParamSpec> params, Form form = Form::Block) {
@@ -175,6 +181,18 @@ int main() {
                                                                &ValueCount, nullptr},
                                           "feat_e"),
           "numeric count trigger queued");
+    CHECK(register_native_numeric_trigger(
+              NativeNumericTrigger{"num_owner", "Owner.", NumericKind::Count,
+                                   {{"owner", ParamType::Country, false, ScopeDefault::None, "any"},
+                                    {"foe", ParamType::Country, false, ScopeDefault::None, nullptr, true}},
+                                   ScopeMask::Any, "count", &ValueOwner, nullptr},
+              "feat_e"),
+          "numeric trigger with an any-country and a reserved parameter queued");
+    CHECK(!register_native_numeric_trigger(NativeNumericTrigger{"num_badany", "h", NumericKind::Count,
+                                                                {{"who", ParamType::Country, false, ScopeDefault::None, "all"}},
+                                                                0, "count", &ValueCount, nullptr},
+                                           "feat_e"),
+          "country parameter with a choice other than any refused");
     CHECK(!register_native_numeric_trigger(NativeNumericTrigger{"num_clash", "h", NumericKind::Count,
                                                                 {{"value", ParamType::Int, true}}, 0, "value", &ValueCount, nullptr},
                                            "feat_e"),
@@ -199,7 +217,7 @@ int main() {
     be.failBind.insert("bind_fails");
     document_on_action("on_test_loaded", "feat_d", "Fires in tests.");
     int n = NativeScriptFinalize(be, L"");
-    CHECK(n == 7, "7 commands registered (got %d)", n);
+    CHECK(n == 8, "8 commands registered (got %d)", n);
     CHECK(NativeScriptFinalized(), "window closed after finalize");
     CHECK(NativeFeatureComplete("feat_a"), "feat_a complete (all registered)");
     CHECK(!NativeFeatureComplete("feat_b"), "feat_b incomplete (vanilla name refused)");
@@ -411,6 +429,26 @@ int main() {
     CHECK(count->evalCount == evals + 1 && v == 5, "timing counts evaluations when enabled");
     NativeSetTiming(false);
 
+    const Command* owner = nullptr;
+    for (const Command* c : NativeCommands())
+        if (c->name == "num_owner") owner = c;
+    CHECK(owner != nullptr, "num_owner found");
+    if (!owner) return g_fail;
+    ParsedCommand* o1 = NativeNewParsed(*owner);
+    CHECK(NativeSetArg(*o1, 0, "any", &err) && o1->args[0].i == kCountryAny, "any parsed where allowed");
+    o1->comparePresent = true;
+    CHECK(NativeValidate(*o1) && NativeNumericValue(o1, &noRegion, &v) && g_ownerSeen == kCountryAny,
+          "any reaches the callback unresolved (%d)", g_ownerSeen);
+    ParsedCommand* o2 = NativeNewParsed(*owner);
+    CHECK(NativeSetArg(*o2, 0, "ROOT", &err), "ROOT accepted next to any");
+    o2->comparePresent = true;
+    CHECK(NativeNumericValue(o2, &regionScope, &v) && g_ownerSeen == 5, "ROOT resolved per use (%d)", g_ownerSeen);
+    CHECK(!NativeSetArg(*o2, 1, "GER", &err) && err == "'foe' is not supported by num_owner yet", "reserved parameter: %s",
+          err.c_str());
+    ParsedCommand* e5 = NativeNewParsed(*echo);
+    CHECK(!NativeSetArg(*e5, 1, "any", &err) && err.find("does not accept any") != std::string::npos,
+          "any refused where not allowed: %s", err.c_str());
+
     docs = NativeScriptDocs();
     const char* expected9[] = {
         "TRUE under NOT",
@@ -421,6 +459,9 @@ int main() {
         "Compare with `>`, `<` or `=` (equal)",
         "  - `owner`: choice (any/own/enemy), optional\n",
         "  - `who`: country (tag, THIS, ROOT, FROM or PREV), optional: from ROOT (or the country scope)\n",
+        "  - `owner`: country (tag, THIS, ROOT, FROM, PREV or any), optional\n",
+        "  - `foe`: country (tag, THIS, ROOT, FROM or PREV), reserved: not supported yet (a parse error)\n",
+        "- Usage: `num_owner > <int>` or `num_owner = { owner = <country>/any count > <int> }`\n",
     };
     for (const char* e : expected9)
         CHECK(docs.find(e) != std::string::npos, "docs contain: %.70s", e);

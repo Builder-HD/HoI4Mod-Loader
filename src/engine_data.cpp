@@ -2,6 +2,7 @@
 // that the engine computes anyway. Everything here may run on any thread (native trigger
 // evaluate): plain reads and calls into engine getters that only read; no allocation, no logging
 // on the hot path. Resolved once from src/signatures.h.
+#include <ctype.h>
 #include <string.h>
 
 #include "engine.h"
@@ -30,6 +31,9 @@ TagIndex_t g_tagIndex = nullptr;
 CountryAir_t g_countryAir = nullptr;
 AirRegionEntry_t g_airRegionEntry = nullptr;
 IsFriendly_t g_isFriendly = nullptr;
+using TagLookup_t = int(__fastcall*)(void* db, const EngineString* text);
+void* const* g_tagDb = nullptr;  // CCountryTag database global (null until loaded)
+TagLookup_t g_tagLookup = nullptr;
 uint32_t g_gameDate = 0;           // CGameState -> current date (hours)
 uint32_t g_regionNavalOffset = 0;  // CStrategicRegion -> naval dominance object
 uint32_t g_diplomacyOffset = 0;    // CCountry -> diplomacy (relations at +8, indexed by tag index)
@@ -83,6 +87,10 @@ void ResolveData() {
         tagToCountryAir = (TagToCountry_t)SigFollowRel32(p + kSigAirUiTagToCountry);
         g_countryAir = (CountryAir_t)SigFollowRel32(p + kSigAirUiCountryAir);
         g_airRegionEntry = (AirRegionEntry_t)SigFollowRel32(p + kSigAirUiRegionEntry);
+    }
+    if ((p = SigFindUnique("country_tag_from_text", kSigCountryTagFromText)) != nullptr) {
+        g_tagDb = (void* const*)SigRipTarget(p + kSigTagDbInsn, 3, 7);
+        g_tagLookup = (TagLookup_t)SigFollowRel32(p + kSigTagLookupCall);
     }
     if ((p = SigFindUnique("naval_control_eval", kSigNavalControlEval)) != nullptr)
         g_regionNavalOffset = Rd<uint32_t>(p, kSigNavalRegionDisp);
@@ -189,12 +197,21 @@ static bool SameCountry(int a, int b) {
     return g_tagIndex(&a) == g_tagIndex(&b);  // the engine's own "same country" test (FUN_140bb52f0)
 }
 
-static bool OwnerMatches(int owner, int tag, UnitOwner who) {
-    switch (who) {
-        case UnitOwner::Own: return SameCountry(owner, tag);
-        case UnitOwner::Enemy: return AtWar(tag, owner);
-        default: return true;
-    }
+static void* Relation(int tagA, int tagB);
+
+bool HaveAlliance() { return g_isFriendly != nullptr; }
+
+static bool AlliedWith(int owner, int tag) {
+    if (!g_isFriendly || SameCountry(owner, tag)) return false;
+    void* r = Relation(owner, tag);  // owner's relation to tag, as the naval control sums read it
+    return r && g_isFriendly(r);
+}
+
+static bool OwnerMatches(int owner, const UnitFilter& f) {
+    if (f.owner && !SameCountry(owner, f.owner)) return false;
+    if (f.enemyOf && !AtWar(f.enemyOf, owner)) return false;
+    if (f.alliedWith && !AlliedWith(owner, f.alliedWith)) return false;
+    return true;
 }
 
 static PtrList AreaProvinces(AreaKind kind, int id) {
@@ -202,7 +219,7 @@ static PtrList AreaProvinces(AreaKind kind, int id) {
     return ListAt(area, g_provinces, g_provinceCount);
 }
 
-bool CountDivisions(AreaKind kind, int id, int tag, UnitOwner who, int64_t* out) {
+bool CountDivisions(AreaKind kind, int id, const UnitFilter& f, int64_t* out) {
     *out = 0;
     if (!HaveMilitaryCounts()) return false;
     PtrList provinces = AreaProvinces(kind, id);
@@ -210,12 +227,12 @@ bool CountDivisions(AreaKind kind, int id, int tag, UnitOwner who, int64_t* out)
     for (int i = 0; i < provinces.count; ++i) {
         PtrList units = ListAt(provinces.data[i], g_landUnits, g_landUnitCount);
         for (int u = 0; u < units.count; ++u)
-            if (units.data[u] && OwnerMatches(Rd<int>(units.data[u], g_unitOwner), tag, who)) ++*out;
+            if (units.data[u] && OwnerMatches(Rd<int>(units.data[u], g_unitOwner), f)) ++*out;
     }
     return true;
 }
 
-bool CountShips(AreaKind kind, int id, int tag, UnitOwner who, int64_t* out) {
+bool CountShips(AreaKind kind, int id, const UnitFilter& f, int64_t* out) {
     *out = 0;
     if (!HaveMilitaryCounts()) return false;
     if (!(kind == AreaKind::State ? StateById(id) : RegionById(id))) return false;
@@ -223,7 +240,7 @@ bool CountShips(AreaKind kind, int id, int tag, UnitOwner who, int64_t* out) {
     for (int i = 0; i < provinces.count; ++i) {
         PtrList units = ListAt(provinces.data[i], g_navalUnits, g_navalUnitCount);
         for (int u = 0; u < units.count; ++u) {
-            if (!units.data[u] || !OwnerMatches(Rd<int>(units.data[u], g_unitOwner), tag, who)) continue;
+            if (!units.data[u] || !OwnerMatches(Rd<int>(units.data[u], g_unitOwner), f)) continue;
             const uint8_t* ships = g_shipsOf(units.data[u]);
             int n = ships ? Rd<int>(ships, kShipCount) : 0;
             if (n > 0 && n < 100000) *out += n;
@@ -232,12 +249,44 @@ bool CountShips(AreaKind kind, int id, int tag, UnitOwner who, int64_t* out) {
     return true;
 }
 
-bool CountBattles(AreaKind kind, int id, int64_t* out) {
+namespace {
+// Distinct combats without allocation: a fixed stack buffer. Past its size a combat is still
+// counted but no longer remembered (an area with over 1024 battles may count some twice).
+struct CombatSet {
+    const void* seen[1024];
+    int n = 0;
+    int64_t count = 0;
+    void add(const void* combat) {
+        if (!combat) return;
+        for (int i = 0; i < n; ++i)
+            if (seen[i] == combat) return;
+        if (n < 1024) seen[n++] = combat;
+        ++count;
+    }
+};
+}  // namespace
+
+bool CountBattles(AreaKind kind, int id, bool locationOnly, int64_t* out) {
     *out = 0;
     if (!HaveMilitaryCounts()) return false;
     if (!(kind == AreaKind::State ? StateById(id) : RegionById(id))) return false;
     PtrList provinces = AreaProvinces(kind, id);
-    for (int i = 0; i < provinces.count; ++i) *out += ListAt(provinces.data[i], g_provinceCombats, g_provinceCombatCount).count;
+    CombatSet set;
+    for (int i = 0; i < provinces.count; ++i) {
+        PtrList combats = ListAt(provinces.data[i], g_provinceCombats, g_provinceCombatCount);
+        for (int c = 0; c < combats.count; ++c) set.add(combats.data[c]);
+    }
+    if (!locationOnly) {
+        for (int i = 0; i < provinces.count; ++i) {
+            PtrList units = ListAt(provinces.data[i], g_landUnits, g_landUnitCount);
+            for (int u = 0; u < units.count; ++u) {
+                if (!units.data[u]) continue;
+                PtrList combats = ListAt(units.data[u], g_unitCombats, g_unitCombatCount);
+                for (int c = 0; c < combats.count; ++c) set.add(combats.data[c]);
+            }
+        }
+    }
+    *out = set.count;
     return true;
 }
 
@@ -246,21 +295,15 @@ bool CountBattlesInvolving(int tag, int64_t* out) {
     if (!HaveMilitaryCounts()) return false;
     void* country = CountryByTag(tag);
     if (!country) return false;
-    // Distinct combats among the country's divisions; a fixed buffer, no allocation.
-    const void* seen[1024];
-    int nSeen = 0;
+    // Distinct combats among the country's divisions.
+    CombatSet set;
     PtrList divisions = ListAt(country, g_countryDivisions, g_countryDivisionCount);
     for (int d = 0; d < divisions.count; ++d) {
+        if (!divisions.data[d]) continue;
         PtrList combats = ListAt(divisions.data[d], g_unitCombats, g_unitCombatCount);
-        for (int c = 0; c < combats.count; ++c) {
-            const void* combat = combats.data[c];
-            bool dup = !combat;
-            for (int s = 0; s < nSeen && !dup; ++s) dup = seen[s] == combat;
-            if (dup) continue;
-            if (nSeen < 1024) seen[nSeen++] = combat;
-            ++*out;
-        }
+        for (int c = 0; c < combats.count; ++c) set.add(combats.data[c]);
     }
+    *out = set.count;
     return true;
 }
 
@@ -497,6 +540,20 @@ bool HaveCountries() { return g_tagToCountry && g_tagIndex; }  // resolved; a ga
 bool HaveRegionControl() {
     return g_tagToCountry && g_tagIndex && g_countryAir && g_airRegionEntry && g_isFriendly && g_regionNavalOffset &&
            g_diplomacyOffset && g_relationWarOffset && HaveRegions();
+}
+
+int TagFromText(const char* text) {
+    if (!g_tagDb || !g_tagLookup || !text) return 0;
+    size_t n = strlen(text);
+    if (n == 0 || n > 15) return 0;
+    EngineString str{};  // inline buffer, like the engine's own short std::string
+    for (size_t i = 0; i < n; ++i) str.buf[i] = (char)toupper((unsigned char)text[i]);
+    str.size = n;
+    str.cap = 15;
+    void* db = *g_tagDb;
+    if (!db) return 0;
+    int tag = g_tagLookup(db, &str);
+    return tag > 0 ? tag : 0;
 }
 
 void* CountryByTag(int tag) {

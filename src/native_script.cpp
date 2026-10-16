@@ -79,6 +79,10 @@ std::string CheckParams(const std::vector<ParamSpec>& params) {
                 if (!((*c >= 'a' && *c <= 'z') || (*c >= '0' && *c <= '9') || *c == '_' || *c == '|'))
                     return std::string("choices of '") + p.name + "' must be a-z 0-9 _ separated by |";
         }
+        if (p.type == ParamType::Country && p.choices && strcmp(p.choices, "any") != 0)
+            return std::string("country parameter '") + p.name + "' accepts only \"any\" as extra choice";
+        if (p.reserved && (p.required || p.fromScope != ScopeDefault::None))
+            return std::string("reserved parameter '") + p.name + "' cannot be required or come from scope";
         if (p.fromScope != ScopeDefault::None) {
             if (p.required) return std::string("parameter '") + p.name + "' comes from scope, so it cannot be required";
             bool fits = (p.fromScope == ScopeDefault::Country || p.fromScope == ScopeDefault::RootCountry)
@@ -124,7 +128,7 @@ Command* NewCommand(CommandKind kind, const char* feature, const char* name, con
     }
     for (size_t i = 0; i < params.size(); ++i)
         c->params.push_back({c->paramNames[i].c_str(), params[i].type, params[i].required, params[i].fromScope,
-                             params[i].type == ParamType::Choice ? c->choiceStorage[i].c_str() : nullptr});
+                             params[i].choices ? c->choiceStorage[i].c_str() : nullptr, params[i].reserved});
     return c;
 }
 
@@ -160,6 +164,7 @@ std::string ParamUsage(const ParamSpec& p) {
             if (ch == '|') ch = '/';
         return c;
     }
+    if (p.type == ParamType::Country && p.choices) return "<country>/any";
     return std::string("<") + TypeName(p.type) + ">";
 }
 
@@ -171,7 +176,8 @@ std::string Usage(const Command& c) {
         if (!c.params.empty()) {
             if (!s.empty()) s += " or ";
             s += "`" + c.name + " = {";
-            for (const ParamSpec& p : c.params) s += std::string(" ") + p.name + " = " + ParamUsage(p);
+            for (const ParamSpec& p : c.params)
+                if (!p.reserved) s += std::string(" ") + p.name + " = " + ParamUsage(p);
             s += " " + c.compareKey + " > " + rhs + " }`";
         }
         return s;
@@ -179,7 +185,8 @@ std::string Usage(const Command& c) {
     std::string s = "`" + c.name + " = ";
     if (c.form == Form::Value) return s + ParamUsage(c.params[0]) + "`";
     s += "{";
-    for (const ParamSpec& p : c.params) s += std::string(" ") + p.name + " = " + ParamUsage(p);
+    for (const ParamSpec& p : c.params)
+        if (!p.reserved) s += std::string(" ") + p.name + " = " + ParamUsage(p);
     return s + " }`";
 }
 
@@ -294,7 +301,7 @@ bool ResolveArgs(const ParsedCommand& pc, const Scope& s, ArgValue* out) {
             out[i].present = true;
             continue;
         }
-        if (out[i].present && p.type == ParamType::Country) {
+        if (out[i].present && p.type == ParamType::Country && out[i].i != kCountryAny) {
             out[i].i = CountryFromKeyword(out[i].i, s);
             if (out[i].i <= 0) {
                 LogOnce(&const_cast<Command&>(c).scopeLogged,
@@ -482,8 +489,10 @@ std::string NativeScriptDocs() {
                 for (const ParamSpec& p : c->params) {
                     s += std::string("  - `") + p.name + "`: " + TypeName(p.type);
                     if (p.type == ParamType::Choice) s += " (" + ParamUsage(p) + ")";
-                    if (p.type == ParamType::Country) s += " (tag, THIS, ROOT, FROM or PREV)";
-                    if (p.fromScope != ScopeDefault::None) s += std::string(", optional: from ") + DefaultName(p.fromScope);
+                    if (p.type == ParamType::Country)
+                        s += p.choices ? " (tag, THIS, ROOT, FROM, PREV or any)" : " (tag, THIS, ROOT, FROM or PREV)";
+                    if (p.reserved) s += ", reserved: not supported yet (a parse error)";
+                    else if (p.fromScope != ScopeDefault::None) s += std::string(", optional: from ") + DefaultName(p.fromScope);
                     else s += p.required ? ", required" : ", optional";
                     s += "\n";
                 }
@@ -539,6 +548,10 @@ bool NativeSetArg(ParsedCommand& pc, size_t index, const char* text, std::string
     const ParamSpec& spec = pc.cmd->params[index];
     ArgValue& v = pc.args[index];
     text = text ? text : "";
+    if (spec.reserved) {
+        *error = std::string("'") + spec.name + "' is not supported by " + pc.cmd->name + " yet";
+        return false;
+    }
     switch (spec.type) {
         case ParamType::Int: {
             char* end = nullptr;
@@ -588,6 +601,14 @@ bool NativeSetArg(ParsedCommand& pc, size_t index, const char* text, std::string
             int code = 0;
             for (const auto& w : kWords)
                 if (_stricmp(text, w.word) == 0) code = w.code;
+            if (!code && _stricmp(text, "any") == 0) {
+                if (!spec.choices) {
+                    *error = std::string("'") + spec.name + "' does not accept any in " + pc.cmd->name +
+                             "; give a country (tag, THIS, ROOT, FROM or PREV)";
+                    return false;
+                }
+                code = kCountryAny;
+            }
             if (!code && g_backend) code = g_backend->CountryTag(text);
             if (!code) {
                 *error = std::string("'") + spec.name + "' expects a country tag or THIS/ROOT/FROM/PREV, got '" + text + "'";

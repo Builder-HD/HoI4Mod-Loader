@@ -2031,3 +2031,221 @@ counts, values in range.
     - step 5 (at war: enemy counts, battles, air/naval below 100%);
     - step 10 (without the loader);
     - D3 step 10 (multiplayer).
+
+### E3. Battles in an area, unit filters, literal tags (2026-10-16)
+
+**User report (step 5, at war):** battles in France counted. A battle located in Northern France
+whose attackers stand in Western Germany did not count for Western Germany.
+
+- **battles_count in an area:**
+  - Each battle counts once if it is located in the area's provinces (province +0x170) or a
+    division standing in the area fights in it (unit combat list +0x1a8).
+  - Deduplication uses a fixed 1024-entry stack buffer; there is no allocation.
+  - `location = only` gives the old behaviour.
+  - `involving` keeps counting per division.
+- **Unit filters** (divisions_count, ships_count): `owner = <country>/any`, `enemy_of = <country>`
+  and `allied_with = <country>`, combined with AND.
+  - `allied_with` uses the IsFriendly relation test (FUN_140d25410, from kSigNavalSums), the one
+    naval control uses. The country itself is excluded.
+  - Without IsFriendly the parameter is reserved.
+- **planes_count:** `owner = <country>` (default ROOT, else the country scope). `any`, `enemy_of`
+  and `allied_with` give clear parse errors. The new `reserved` ParamSpec flag gives "'enemy_of' is
+  not supported by planes_count yet".
+- **Literal tags never worked.** EngineBackend did not implement CountryTag, so `GER` was refused
+  at parse time. Earlier tests used only ROOT. Now kSigCountryTagFromText
+  (CCountryTag-from-text, FUN_140bb4640; unique on all 3 builds) gives:
+  - the static tag database global;
+  - its lookup FUN_14071bc80(db, const std::string*), a hash-map read that returns -1 if unknown
+    and works while scripts are parsed.
+
+  The military_counts self-check round-trips the player's tag (name -> tag -> same country).
+- **Docs and params:** a Country param with choices "any" accepts `any` (kCountryAny stays
+  unresolved). Usage lines skip reserved params.
+
+**In-game test plan (DLL `42a6c3f6`; the test mod is synced):**
+1. **Startup:**
+   - `country_tag_from_text` resolves and 12 of 12 commands register.
+   - `loader.log` has exactly two parse errors from the test mod: `'enemy_of' is not supported
+     by planes_count yet` and `'owner' does not accept any in planes_count; …`.
+   - No error for GER / ENG.
+2. **Any new game:** the military_counts self-check line ends with "tag text FRA -> same
+   country".
+3. **1939 bookmark as France, after 3 September**, with an attack running from the Saar border
+   into Germany (or a German attack into France). "Battles: located vs. fought from":
+   - Western Germany (7) default >= Western Germany located only.
+   - A battle located in Northern France whose German attackers stand in Western Germany counts
+     in both region 7 (default) and region 19, but not in region 7 with `location = only`.
+   - "Battles involving GER" > 0.
+4. **"Unit filters":**
+   - divisions of GER in region 7 > 0 (tooltip "Divisions of GER in Western Germany (7)");
+   - at war with FRA: the same number, as long as only Germany has troops there;
+   - GER and at war with FRA: the same;
+   - divisions allied with FRA in Northern France: the British BEF once it lands (0 before);
+   - all divisions in Northern France: own + allied + enemy;
+   - British ships in the North Sea (16): > 0;
+   - allied ships in the Channel (18): British ships there;
+   - German planes based in Western Germany: compare with the air wings in the region view.
+5. **"State scope form":** with France's divisions in Ile de France, all three lines are met
+   without a `state` parameter. The tooltip shows the state block.
+6. **Old decisions with the new syntax:** "Military counts: status" (divisions of FRA / at war
+   with FRA in Northern France) and "French divisions in Ile de France > count variable" behave
+   as before.
+7. **Parse-error decisions:** "Planes with a reserved parameter" and "Planes with owner = any" are
+   never available.
+
+## Part F: strategic region scope (investigation)
+
+Investigation only, nothing implemented. Addresses are from vanilla 1.19.3 (`hoi4_copy.exe`). The
+scope-mask scan and the setter signature were also checked on patched 1.19.3 and on 1.19.2.
+
+### F1. Does vanilla script ever enter a strategic region scope?
+
+**No.** STRATEGIC_REGION is a real scope type (mask `0x40`; the mask→name builder
+`FUN_141480d30` prints "STRATEGIC_REGION" for bit 0x40). However, no script command creates
+one.
+
+- **Who declares 0x40.** A scan of the scope-mask slot of every registered command (439
+  `CEffectEntry<>` and 519 `CTriggerEntry<>`; effect slot 19, trigger slot 14; all constant
+  `mov eax,imm; ret`) finds only:
+  - `add_region_efficiency` (`CAddRegionEfficiency`, mask exactly 0x40);
+  - `hidden_trigger`, `meta_trigger` (0x3ffe = every scope);
+  - the unregistered generic classes `CContextTrigger` and `CScriptedEffect` (0x3ffe).
+
+  The result is the same on 1.19.3 vanilla, patched 1.19.3 and 1.19.2. The game's own
+  `documentation/*_documentation.md` agrees: the "STRATEGIC_REGION" sections list only these
+  commands.
+- **Any-scope commands.** 74 triggers and 79 effects have mask 0 ("any"): variables, global flags,
+  event targets, `if`/`else`, the any_/all_ country and state iterators, and so on. Those work
+  inside a region scope too. So do our own region-aware data triggers, which already default
+  `region` from the scope (`Scope::strategicRegionId`, CEventScope `+0x48`).
+- **No vanilla script uses it.** `add_region_efficiency` appears in no file under `common/`,
+  `events/` or `history/`, and nothing in the scripts enters a region scope.
+- **Closest vanilla tool.** `any_state_in = { strategic_region = 42 ... }` iterates the *states*
+  of a region in state scope.
+- **Engine side.** `CEventScope::SetStrategicRegion(scope, CStrategicRegion*, bool clear)` =
+  `FUN_14053b670`. It calls the clear routine `FUN_14053bd00` when `clear` is set, then writes
+  `+0x48`. Its 34 call sites are all C++:
+  - the event-target resolver `FUN_14147de40`, but only when it copies an existing scope
+    (THIS/ROOT/FROM/PREV or a saved event target, `FUN_1401dbc30`);
+  - saved-scope loading (`FUN_140539530`, save key token 0x2eee: region id → gamestate
+    `+0x2e0[id]`) and saving (`FUN_14053a750`: region → saved `+0x20`);
+  - unit leader abilities (`CTriggerAbilityCommand` slots 9 and 10);
+  - command power UI (`FUN_1406ee8f0`) and one large UI routine (`FUN_141d1c2a0`);
+  - **12 script collection template instantiations** (strings "Collection operator %s doesn't
+    support … strategic_region"). Collections support region elements internally, but no
+    collection input or operator produces them. The documented inputs are `game:all_countries`,
+    `all_possible_countries`, `all_states`, `scope`, `constant` and named collections.
+
+  So a region scope, once created, survives `PREV`/`ROOT`/`FROM`, saved event targets and
+  savegames. Script just has no way to create one.
+
+### F2. Prefix scopes (`mio:`, `sp:`): can we add `region:42`?
+
+The prefixes are **hard-coded if-chains, not a table.** The relevant code:
+
+| Where | What |
+|---|---|
+| `FUN_140546530` (scopedvariable.cpp, 9 KB) | `CScopedVariable` parse (value positions): `strncmp`/`StartsWith` chain `var:`, `temp_var:`, `token:`, `mtth:`, `mio:`, `sp:`, `constant:`, `event_target`, `global_event_target` |
+| `FUN_14147db70` → `FUN_14147fe10` (eventtarget.cpp, 2.5 KB) | scope-key parse (`GER = {`, `16 = {`, `var:x = {`, `event_target:x`, dotted chains `a.b`) into a 0x148-byte target link (`+0x0` key token, `+0x48` prefix token, `+0x4c` value token, `+0x50` next link) |
+| `FUN_1414807f0` | prefix validation: `FUN_1424be210` splits `prefix:value`, then token 0x4d37 (`mio`) / 0x4d38 (`sp`) are looked up in their databases ("does not match any MIO in database") |
+| `FUN_14147fb80` | target → resulting scope mask (hard-coded token cases: 0x4d37→0x200, 0x4d38→0x1000, 0x2996/0x2a7d→0x2000, `capital_scope` 0x29fe→2, …) |
+| `FUN_14147de40` (7.5 KB) | target → CEventScope at runtime (same hard-coded cases; then `SetMio`/`SetSpecialProject`/`SetFaction`/… setters) |
+| `FUN_1413a5ad0` (7 KB) | the tooltip header for `X = { }` (TRIGGER_OWNER, "State ", TRIGGER_CAPITAL, …); **has no region case** |
+
+`region:42` would need **4–5 detours** on large engine functions (parse validation, mask, resolve,
+tooltip header, and the CScopedVariable parse if it should also work in value positions). Each
+detour would need a byte signature and would handle our prefix token before falling through to
+the original.
+
+- **Feasibility:** feasible.
+- **Update risk:** these functions grow every time Paradox adds a scope type (sp: and factions
+  were recent additions). They run on worker threads during AI evaluation.
+- **Data structure:** there is no registry to insert into.
+
+### F3. Scope changers to clone
+
+All generic `X = { … }` scope changes are **`CContextTrigger` / `CContextEffect`**. The trigger
+factory `FUN_140550030` (and the effect factory `FUN_140540ee0`) builds one when a block key is
+not a registered command.
+
+| | `CContextTrigger` (0x60, vt 0x1429b84c0) | `CContextEffect` (0x68, vt 0x1429b6608) |
+|---|---|---|
+| base | `CAndTrigger` (children `CPdxArray<CTrigger*>` at +0x8, count +0x14) | `CEffect` list (same layout) |
+| target | `+0x58` → 0x148-byte target link | `+0x58`, flag `+0x60` |
+| scope switch | slot 3 `FUN_1413a41c0`: `FUN_14147de40(target, &stackScope, cur)`; if valid (`+0xac`) → `FUN_14054d0b0(this, &stackScope)` (base `CTrigger::Evaluate`: scope check "Invalid Scope, supported:", then slot 22 = `CAndTrigger::Evaluate` `FUN_14054ab30`); dtor `FUN_140535820` | slot 12 `FUN_141393830`: same, then base `FUN_14053d9e0` (→ slot 13 = children loop `FUN_14053e130`) |
+| tooltip | slot 11 `FUN_1413a2730`: resolve scope, header `FUN_1413a5ad0`, children `FUN_14054c580(this,out,newScope,0,indent,depth+1,…)` evaluated **in the new scope** (✓/✗ per child), joined with ":" | slots 7–10 |
+| scope mask | slot 14 → 0x3ffe | — |
+
+The iterator templates are generic and **driven by vtable slots**:
+
+- **`any_state` = `CAnyStateTrigger`**
+  - `CTargetTrigger<CAnyStateTrigger, CState, 2, 0>`; 0x148 bytes, vt 0x1427b02c8; factory
+    `CTriggerEntry<>` slot 1 `FUN_140467ea0`.
+  - Slot 22 `FUN_140463a90` evaluates:
+    1. stack CEventScope `FUN_140534f00`, with ROOT/FROM copied and PREV = parent;
+    2. `count` = CScopedVariable `+0x78` via `FUN_140544c90`;
+    3. loop over the gamestate states `+0x2c8/+0x2d4`;
+    4. per state: slot 26 filter, slot 25 `SetScope` (`FUN_140473e10` → `SetState`), then
+       `CAndTrigger::Evaluate`;
+    5. true once `count` states match.
+  - Slot 23 = header loc key ("TRIGGER_ANY_STATE_STARTS").
+  - Slot 6 item handler `FUN_140473280`: `tooltip` (0x92) → `+0x58`, `count` (0x29ea) → `+0x78`,
+    anything else → the trigger factory.
+  - Slot 11 tooltip `FUN_1403e0480`: `TARGET_TRIGGER_COUNT_PREFIX` when count > 1, the header
+    from slot 23 (or the custom `tooltip` key), then the children at depth+1 (indented).
+- **`random_state` = `CRandomStateEffect`** (0x108 bytes, vt 0x14276d618)
+  - Slot 13 `FUN_1402f4520`: clear the candidate array (`+0xd0`, count `+0xdc`) → slot 25
+    collect → slot 27 pick → slot 26 `SetScope` → children (`FUN_14053e130`).
+  - Slot 25 `FUN_1403383f0`: loop over all states (optionally the `prioritize` list
+    `+0xf0/+0xfc` first); evaluate the embedded `limit` trigger at `+0x78` per state.
+  - Slot 27 `FUN_1402f7510`: **synced random from the scope's own RNG**: seed `+0x10`, counter
+    `+0xc` incremented, hash, `% n`. Deterministic, so multiplayer-safe.
+  - Slot 28: the state name for `display_individual_scopes`.
+- **`every_state` = `CEveryStateEffect`** (0xf0 bytes): same slot layout (25 collect, 26
+  `SetScope`, 27, 28).
+- **Children's parse-time scope:** `CAndTrigger` ReadClause (slot 5 `FUN_14054fd00`) passes the
+  scope mask it receives to every child item. A clone's slot 5 can pass 0x40, so children are
+  validated against region scope ("Invalid scope type for trigger" on the factory's slot 16
+  check).
+
+**Engine pieces a native implementation needs:**
+
+| Piece | Where it comes from | New signature? |
+|---|---|---|
+| `SetStrategicRegion` `FUN_14053b670` | `48 89 5C 24 08 57 48 83 EC 20 48 8B FA 48 8B D9 45 84 C0 74 14 E8 ?? ?? ?? ?? 48 89 7B 48 …`, unique on all 3 builds (or the CODE call in `CTriggerAbilityCommand` slot 9/10) | 1 |
+| CEventScope(parent) ctor `FUN_140534f00` | the first call in `CAnyStateTrigger` slot 22, via RTTI + CODE | RTTI |
+| `CTrigger::Evaluate` base `FUN_14054d0b0` | `CAndTrigger` slot 3 | RTTI |
+| `CAndTrigger` ReadClause | slot 5 | RTTI |
+| `CAndTrigger::Evaluate` | slot 22 | RTTI |
+| `CEffect` base execute | slot 12 | RTTI |
+| children loop | slot 13 | RTTI |
+| CEventScope dtor `FUN_140535820` | already resolved by the loader | — |
+| region array | gamestate `+0x2e0/+0x2ec`, already resolved by the loader | — |
+
+### F4. Options
+
+| Option | Script syntax | Effort | New engine hooks / sigs | Crash risk | MP desync risk | Update fragility | Nested-block tooltip |
+|---|---|---|---|---|---|---|---|
+| **A. Prefix scope** `region:42 = { }` | vanilla-style, chainable, works in triggers and effects | 4–6 days | 4–5 **detours** on big parse/resolve/tooltip functions + byte sigs | medium (detours in hot paths, worker threads) | low (deterministic) | **high**: each new scope type changes those functions | Header needs a detour of `FUN_1413a5ad0` (no region case); without it the header is empty. Children are shown evaluated (✓/✗) like `GER = { }`. |
+| **B. Native scope changers** (recommended) | `strategic_region = { region = 42 … }` (trigger and effect; `region` optional from scope); `any_strategic_region = { count = 2 tooltip = key … }`; `every_strategic_region` / `random_strategic_region = { limit = { … } random_select_amount / display_individual_scopes … }` | 3–4 days | **no detours**; 1 byte sig (SetStrategicRegion) + RTTI/CODE for the rest; our own objects only (vtable clones like the existing native commands) | low (the engine only calls our slots; SEH around ours) | low: random picks use the scope's synced RNG; iteration in region id order | low–medium: template slot numbers (22–28) are CODE-checked on each build | `strategic_region`: our own slot 11 prints "<region name>:" and then the children evaluated in the region scope (✓/✗), like `GER = { }`. `any_strategic_region`: **vanilla tooltip code** (count prefix, custom `tooltip`, indented children) with our header key `HOI4_LOADER_ANY_STRATEGIC_REGION_STARTS` (needs a loc entry; virtual yml or the mod). every/random: vanilla effect tooltip with our header key; `display_individual_scopes` uses our slot 28 (region name). |
+| C. Global event targets per region (created by the loader at game start) | `event_target:hoi4_region_42 = { }` | 2 days | writes into the gamestate's event-target map | medium | medium (must be created identically on every machine; saved into savegames) | medium | vanilla, but the header shows the event-target name |
+| D. Collection input `game:all_strategic_regions` | `every_collection_element = { collection = game:all_strategic_regions … }` | 4+ days (collections internals not yet mapped) | detour of the hard-coded input parser | medium | low | high | vanilla collection tooltips (name from the collection) |
+
+**Without the loader** (all options): `strategic_region = {…}` or `region:42 = {…}` is an unknown
+trigger or effect, or an invalid event target. error.log logs it and the block is dropped. A
+dropped trigger block means the surrounding condition becomes **true**, so the existing guard
+rule (`hoi4_loader_feature_<x> = yes` in the same AND block) applies unchanged.
+
+**Recommendation: B.** It fits the loader's existing native-command model: guard trigger,
+generated docs, the self-check and fail-safe. It needs no detours, reuses the vanilla iterator
+skeletons (count/tooltip/limit/random/display_individual_scopes) by replacing only the
+iterate/set-scope/name slots, and is multiplayer-safe by construction. Our region-aware triggers
+(`air_superiority`, `naval_dominance`, `divisions_count`, `battles_count`, `planes_count`) and
+`set_strategic_region_name` then work without a `region` parameter inside these blocks.
+
+**Limitations:**
+- `prioritize` (a list of state ids in `random_state`) has no region meaning and should be
+  rejected with a parse error.
+- Only any-scope vanilla commands (and ours) are valid inside the block.
+
+Option A can follow later if the nicer syntax becomes important.

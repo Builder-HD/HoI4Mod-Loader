@@ -384,9 +384,19 @@ bool SafeBind(Command* c, std::string* reason, DWORD* code, void** where) {
     }
 }
 
+// Literal country tags while scripts are parsed; any fault reads as an unknown tag.
+int SafeTagFromText(const char* text) {
+    __try {
+        return Engine::TagFromText(text);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+
 class EngineBackend : public NativeBackend {
 public:
     int Intern(const char* s) override { return Engine::Intern(s); }
+    int CountryTag(const char* text) override { return SafeTagFromText(text); }
     bool EngineHas(CommandKind kind, int token) override {
         return kind == CommandKind::Effect ? Engine::EffectRegistered(token) : Engine::TriggerRegistered(token);
     }

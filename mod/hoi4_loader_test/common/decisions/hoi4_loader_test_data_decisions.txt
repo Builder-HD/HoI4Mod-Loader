@@ -100,11 +100,11 @@ hoi4_loader_data_category = {
 			battles_count = { region = 19 count > 0 }
 			battles_count = { involving = ROOT count > 0 }
 			divisions_count = { state = 16 count > 0 }
-			divisions_count = { region = 19 owner = own count > 0 }
-			divisions_count = { region = 19 owner = enemy count > 0 }
+			divisions_count = { region = 19 owner = ROOT count > 0 }
+			divisions_count = { region = 19 enemy_of = ROOT count > 0 }
 			ships_count = { region = 42 count > 0 }
-			ships_count = { region = 18 owner = own count > 0 }
-			planes_count = { region = 19 owner = own count > 0 }
+			ships_count = { region = 18 owner = ROOT count > 0 }
+			planes_count = { region = 19 owner = ROOT count > 0 }
 		}
 		ai_will_do = { base = 0 }
 	}
@@ -128,17 +128,77 @@ hoi4_loader_data_category = {
 		visible = { hoi4_loader_feature_military_counts = yes }
 		available = {
 			hoi4_loader_feature_military_counts = yes
-			divisions_count = { state = 16 owner = own count > global.hoi4_loader_test_count }
+			divisions_count = { state = 16 owner = ROOT count > global.hoi4_loader_test_count }
 		}
 		ai_will_do = { base = 0 }
 	}
-	# Reserved owner value: loader.log must say "'owner' expects one of own, got 'enemy'" once,
+	# Reserved parameter: loader.log must say "'enemy_of' is not supported by planes_count yet" once,
 	# and this requirement is never met.
 	hoi4_loader_data_planes_reserved = {
 		icon = generic_research
 		cost = 0
 		visible = { hoi4_loader_feature_military_counts = yes }
-		available = { hoi4_loader_feature_military_counts = yes planes_count = { region = 19 owner = enemy count > 0 } }
+		available = { hoi4_loader_feature_military_counts = yes planes_count = { region = 19 enemy_of = ROOT count > 0 } }
+		ai_will_do = { base = 0 }
+	}
+
+	# --- battles and unit filters (1939, France at war with Germany) ---------------------------
+	# Region 7 = Western Germany, 19 = Northern France, 16 = North Sea, 18 = English Channel.
+	# Default battles_count: located in the area OR fought by divisions standing in it (each once);
+	# location = only: located there only.
+	hoi4_loader_data_battles_status = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_military_counts = yes }
+		available = {
+			hoi4_loader_feature_military_counts = yes
+			battles_count = { region = 7 count > 0 }
+			battles_count = { region = 7 location = only count > 0 }
+			battles_count = { region = 19 count > 0 }
+			battles_count = { region = 19 location = only count > 0 }
+			battles_count = { involving = GER count > 0 }
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_data_filters_status = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_military_counts = yes }
+		available = {
+			hoi4_loader_feature_military_counts = yes
+			divisions_count = { region = 7 owner = GER count > 0 }
+			divisions_count = { region = 7 enemy_of = ROOT count > 0 }
+			divisions_count = { region = 7 owner = GER enemy_of = ROOT count > 0 }
+			divisions_count = { region = 19 allied_with = ROOT count > 0 }
+			divisions_count = { region = 19 owner = any count > 0 }
+			ships_count = { region = 16 owner = ENG count > 0 }
+			ships_count = { region = 18 allied_with = ROOT count > 0 }
+			planes_count = { region = 7 owner = GER count > 0 }
+		}
+		ai_will_do = { base = 0 }
+	}
+	# State and area from the scope: inside a state scope no `state` is needed.
+	hoi4_loader_data_state_scope = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_military_counts = yes }
+		available = {
+			hoi4_loader_feature_military_counts = yes
+			16 = {
+				divisions_count = { owner = ROOT count > 0 }
+				divisions_count > 0
+				battles_count = { count = 0 }
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+	# Parse error test: owner = any is not supported by planes_count. loader.log:
+	# "'owner' does not accept any in planes_count; ..." once; never available.
+	hoi4_loader_data_planes_any = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_military_counts = yes }
+		available = { hoi4_loader_feature_military_counts = yes planes_count = { region = 19 owner = any count > 0 } }
 		ai_will_do = { base = 0 }
 	}
 
@@ -225,7 +285,7 @@ hoi4_loader_ai_cost_category = {
 			modifier = { factor = 1 avg_division_strength < 0.5 }
 			modifier = { factor = 1 avg_division_organisation < 0.5 }
 			modifier = { factor = 1 battles_count = { involving = ROOT count > 0 } }
-			modifier = { factor = 1 divisions_count = { region = 19 owner = enemy count > 0 } }
+			modifier = { factor = 1 divisions_count = { region = 19 enemy_of = ROOT count > 0 } }
 			modifier = { factor = 1 air_superiority = { region = 19 value > 0.5 } }
 			modifier = { factor = 1 factories_assigned = { equipment = infantry_equipment count > 5 } }
 			modifier = { factor = 0 always = yes }

@@ -303,9 +303,9 @@ after a game update only switches off its own group.
 |---|---|---|
 | `region_control` | `air_superiority` | ratio: the region panel's air superiority bar, own side / (own + enemy) air power; 0 if neither side flies there |
 | `region_control` | `naval_dominance` | ratio: naval dominance of the country and its friends / (friends + countries at war with it), the sums `has_naval_control` uses; 0 in land regions |
-| `military_counts` | `battles_count` | battles located in a state / strategic region, or battles the country's divisions fight in (`involving`) |
-| `military_counts` | `divisions_count`, `ships_count` | divisions / ships in a state or strategic region; `owner = any / own / enemy` |
-| `military_counts` | `planes_count` | a country's planes stationed (by air base) in a strategic region; `owner = own` only for now |
+| `military_counts` | `battles_count` | battles in a state / strategic region: located there or fought by divisions standing there, each once (`location = only`: located there only); or the battles a country's divisions fight in (`involving`) |
+| `military_counts` | `divisions_count`, `ships_count` | divisions / ships in a state or strategic region; filters `owner = <country>/any`, `enemy_of = <country>`, `allied_with = <country>` |
+| `military_counts` | `planes_count` | a country's planes based (by air base) in a strategic region; `owner = <country>` only (`enemy_of`, `allied_with` reserved) |
 | `army_condition` | `avg_division_strength`, `avg_division_organisation` | ratio: average over the country's whole army (country scope) or the divisions in a state |
 | `production_data` | `factories_assigned` | factories on the country's production lines (dockyards on naval lines), optionally for one equipment type or archetype |
 
@@ -316,7 +316,9 @@ air_superiority > 0.6                                        # inside a strategi
 air_superiority = { region = 19 country = GER value > 0.6 }  # block form; `value` holds the comparison
 naval_dominance = { region = 42 value < global.my_threshold } # variables work on the right side
 battles_count = { involving = ROOT count > 0 }
-divisions_count = { state = 16 owner = enemy count > 5 }
+divisions_count = { state = 16 enemy_of = ROOT count > 5 }
+16 = { divisions_count = { owner = ROOT count > 0 } }        # state from the scope
+battles_count = { region = 7 location = only count > 0 }    # only battles located there
 avg_division_strength < 0.7                                  # country scope: the whole army
 factories_assigned = { equipment = infantry_equipment count > 10 }
 ```
@@ -332,7 +334,18 @@ factories_assigned = { equipment = infantry_equipment count > 10 }
 **Defaults:**
 - Without `region` / `state` the triggers use the current strategic region or state scope.
 - Without `country` they use ROOT, else the country scope (the averages and `factories_assigned`
-  use the country scope).
+  use the country scope). `planes_count` takes its country from `owner` the same way.
+
+**Unit filters** (`divisions_count`, `ships_count`): all optional, combined with AND; a country is
+a tag, THIS, ROOT, FROM or PREV.
+- `owner = <country>`: units of that country; `owner = any` (or no `owner`): every unit.
+- `enemy_of = <country>`: units of countries at war with it.
+- `allied_with = <country>`: units of its allies, as naval control counts allies (faction
+  members, subjects and overlords); the country itself is not included.
+
+**Battles in an area** count each battle once, if it is located in the area's provinces or a
+division standing in the area fights in it (an attack from Western Germany into Northern France
+counts for both regions). `location = only` counts only the battles located there.
 - If a value cannot be determined (unknown region, missing scope, an unknown equipment name, no
   divisions to average), the trigger is **false**, and true under `NOT` (see above).
 
@@ -360,16 +373,16 @@ Strategic region values can't be variables, because HOI4 has no region-scope var
 
   | Trigger | per evaluation |
   |---|---|
-  | `naval_dominance`, `air_superiority` | 0.2-0.3 µs |
-  | `battles_count` | 0.4 µs |
-  | `factories_assigned` | 0.7 µs |
-  | `divisions_count` (strategic region) | 0.8 µs |
-  | `avg_division_organisation` (country) | 0.8 µs |
-  | `avg_division_strength` (country) | 1.5 µs |
-  | `planes_count` | 1.6 µs |
+  | `naval_dominance`, `air_superiority` | 0.2-0.3 Âµs |
+  | `battles_count` | 0.4 Âµs |
+  | `factories_assigned` | 0.7 Âµs |
+  | `divisions_count` (strategic region) | 0.8 Âµs |
+  | `avg_division_organisation` (country) | 0.8 Âµs |
+  | `avg_division_strength` (country) | 1.5 Âµs |
+  | `planes_count` | 1.6 Âµs |
 
   The country-wide averages and `involving` grow with the number of divisions (France: 74). Even a
-  few hundred divisions stay in the µs range, so no caching is needed. Hovering a tooltip
+  few hundred divisions stay in the Âµs range, so no caching is needed. Hovering a tooltip
   re-evaluates it every frame; that costs nothing noticeable either.
 - With `[diagnostics] trigger_timing = 1` in `loader_config.ini`, `loader.log` reports
   evaluations, time per evaluation and time per in-game day every 10 days, so you can measure your

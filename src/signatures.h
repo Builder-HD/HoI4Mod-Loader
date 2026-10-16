@@ -130,6 +130,12 @@ static const size_t kSigSessionServerDisp8 = 0xf;
 // and many UI texts use it). Function start. (0x140bb4e70)
 SIG(kSigCountryTagName, "40 53 48 83 EC 30 48 83 3D ?? ?? ?? ?? 00 48 8B D9 0F 84 ?? ?? ?? ?? 83 39 00 0F 84 ?? ?? ?? ?? 80 3D ?? ?? ?? ?? 00 0F 84 ?? ?? ?? ?? 80 3D ?? ?? ?? ?? 00 75")
 
+// CCountryTag from text (FUN_140bb4640): first the static tag database, db = [rip+disp32 at
+// +0x15] (insn +0x12, 7 bytes), lookup(db, const std::string*) -> tag or -1 = E8 at +0x1e (a hash
+// map read, FUN_14071bc80); then event targets. Used to parse literal tags such as GER.
+SIG(kSigCountryTagFromText, "40 53 56 57 48 83 EC 30 33 DB 48 8B F9 89 19 48 8B F2 48 8B 0D ?? ?? ?? ?? 48 85 C9 74 ?? E8 ?? ?? ?? ?? 89 07 85 C0 0F 8F")
+static const size_t kSigTagDbInsn = 0x12, kSigTagLookupCall = 0x1e;
+
 // --- Data triggers: region_control (NOTES.md E1/E2) -----------------------------------------
 // Region panel air superiority bar: country = TagToCountry(&tag) (E8 at +4); air = CountryAir(country)
 // (E8 at +0xc); entry = AirRegionEntry(air, region) (E8 at +0x1b) = { int64 our, int64 enemy }.

@@ -157,6 +157,9 @@ void ResolveData();
 bool HaveCountries();      // tag -> country, tag -> index
 bool HaveRegionControl();  // air power, naval dominance, war relations
 void* CountryByTag(int tag);
+// "GER" -> tag (> 0) from the engine's static tag database; 0 if unknown or not loaded yet.
+// Pure read; safe while scripts are parsed.
+int TagFromText(const char* text);
 bool AtWar(int tagA, int tagB);  // a war between them that has not ended
 // Air power in a strategic region from a country's side: its side and the enemy side.
 bool AirPower(int tag, int regionId, int64_t* our, int64_t* enemy);
@@ -168,13 +171,23 @@ std::string RegionName(int regionId);  // display name (custom name included); t
 bool HaveMilitaryCounts();  // states, province unit/combat lists, country divisions
 bool HavePlanes();          // + air wings and their base regions
 enum class AreaKind { State, StrategicRegion };
-enum class UnitOwner { Any, Own, Enemy };  // Own: same country as tag; Enemy: at war with tag
+// Which units count, by their owner. Each set field (a country tag > 0) must hold: owner is that
+// country, owner is at war with enemyOf, owner is an ally of alliedWith (the engine's IsFriendly
+// relation test that naval control uses; alliedWith itself excluded). All 0: every unit.
+struct UnitFilter {
+    int owner = 0;
+    int enemyOf = 0;
+    int alliedWith = 0;
+};
 void* StateById(int id);
 bool IsSameCountry(int a, int b);
+bool HaveAlliance();  // alliedWith is available (IsFriendly resolved)
 // Counts in a state / strategic region. False if the area does not exist.
-bool CountDivisions(AreaKind kind, int id, int tag, UnitOwner who, int64_t* out);
-bool CountShips(AreaKind kind, int id, int tag, UnitOwner who, int64_t* out);
-bool CountBattles(AreaKind kind, int id, int64_t* out);   // combats located in its provinces
+bool CountDivisions(AreaKind kind, int id, const UnitFilter& f, int64_t* out);
+bool CountShips(AreaKind kind, int id, const UnitFilter& f, int64_t* out);
+// Distinct combats located in the area's provinces, plus (unless locationOnly) the combats of the
+// divisions standing in its provinces wherever those combats are located.
+bool CountBattles(AreaKind kind, int id, bool locationOnly, int64_t* out);
 bool CountBattlesInvolving(int tag, int64_t* out);         // distinct combats of its divisions
 bool CountPlanesStationed(int regionId, int tag, int64_t* out);  // its planes based in the region
 // The country's divisions, and the land units in an area (with their owner tag).

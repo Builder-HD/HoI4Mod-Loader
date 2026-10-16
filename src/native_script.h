@@ -58,11 +58,15 @@ struct ParamSpec {
     ParamType type;
     bool required;     // must be written in script (false when fromScope is set)
     ScopeDefault fromScope = ScopeDefault::None;
-    const char* choices = nullptr;  // Choice only: "a|b|c"
+    const char* choices = nullptr;  // Choice: "a|b|c". Country: "any" also accepts `any`.
+    // Declared but not supported yet: writing it is a parse error ("not supported yet"), so the
+    // name stays reserved for a later version instead of reading as a typo.
+    bool reserved = false;
 };
 
-// Country parameter values below 1 are scope keywords, resolved per evaluation.
-enum : int { kCountryThis = -1, kCountryRoot = -2, kCountryFrom = -3, kCountryPrev = -4 };
+// Country parameter values below 1 are scope keywords, resolved per evaluation; kCountryAny
+// (only where the parameter's choices are "any") stays as it is.
+enum : int { kCountryThis = -1, kCountryRoot = -2, kCountryFrom = -3, kCountryPrev = -4, kCountryAny = -5 };
 
 struct ArgValue {
     bool present = false;
