@@ -369,6 +369,10 @@ bool EvalHasCustomName(const Args& a, const Scope&) {
 
 // Requirement line, e.g. "Strategic region Loader Test Sea A (42) has a custom name".
 void TooltipHasCustomName(const Args& a, const Scope&, bool negated, TooltipText& out) {
+    if (!a.has(0)) {  // no region here (e.g. under an iterator's header)
+        out.add(negated ? "Does NOT have a custom name" : "Has a custom name");
+        return;
+    }
     int id = a.i(0);
     void* region = Engine::RegionById(id);
     const EngineString* name = region ? GetNameKeyDetour(region) : nullptr;  // what the UI shows now

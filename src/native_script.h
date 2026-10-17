@@ -116,9 +116,14 @@ public:
     TooltipText& add(const char* s) { text_ += s ? s : ""; return *this; }
     TooltipText& add(int v) { text_ += std::to_string(v); return *this; }
     const std::string& text() const { return text_; }
+    // Numeric subjects: the scope lacks what the value is about (e.g. no area under an
+    // iterator's header), so the line shows no current value.
+    void markScopeMissing() { scopeMissing_ = true; }
+    bool scopeMissing() const { return scopeMissing_; }
 
 private:
     std::string text_;
+    bool scopeMissing_ = false;
 };
 
 // A tooltip text a mod may translate: its localisation key and the English text used when no
@@ -157,7 +162,8 @@ struct NativeTrigger {
     // Hot path: called by AI and UI, possibly on several threads at once. No locks, no
     // allocation, no logging, game state only.
     bool (*evaluate)(const Args&, const Scope&);
-    // Optional; none = generic line "<name>: <param>=<value> ...".
+    // Optional; none = generic line "<name>: <param>=<value> ...". A parameter whose scope
+    // default the scope lacks (e.g. no region under an iterator's header) is absent (Args::has).
     void (*tooltip)(const Args&, const Scope&, bool negated, TooltipText&);
 };
 
@@ -180,6 +186,8 @@ struct NativeNumericTrigger {
     // Return false if the value does not exist (unknown region etc.): the trigger is false.
     bool (*value)(const Args&, const Scope&, int64_t* out);
     // Optional; the subject of the tooltip line, e.g. "Air superiority over Bay of Biscay (42)".
+    // A parameter whose scope default the scope lacks is absent (Args::has): leave it out, e.g.
+    // "Air superiority of FRA" under an iterator's header. The line then shows no current value.
     void (*subject)(const Args&, const Scope&, TooltipText&);
 };
 

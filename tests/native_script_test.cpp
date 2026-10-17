@@ -120,7 +120,10 @@ static bool ValueOwner(const Args& a, const Scope&, int64_t* out) {
     *out = 1;
     return true;
 }
-static void SubjectRegion(const Args& a, const Scope&, TooltipText& out) { out.add("Region ").add(a.i(0)); }
+static void SubjectRegion(const Args& a, const Scope&, TooltipText& out) {
+    if (a.has(0)) out.add("Region ").add(a.i(0));
+    else out.add("Some region");
+}
 static bool TargetRegion(const Args& a, const Scope& s, ScopeTarget* out) {
     out->type = ScopeMask::StrategicRegion;
     out->id = a.has(0) ? a.i(0) : s.strategicRegionId();
@@ -485,7 +488,13 @@ int main() {
     tip = NativeNumericTooltip(r1, &regionScope, true, CompareOp::Less, 0, false);
     CHECK(tip == "NOT: Region 42 below ? (currently 42%)", "negated tooltip, unknown right side: '%s'", tip.c_str());
     tip = NativeNumericTooltip(r1, &noRegion, false, CompareOp::Greater, 60000, true);
-    CHECK(tip == "num_ratio above 60% (currently unavailable)", "tooltip without scope value: '%s'", tip.c_str());
+    CHECK(tip == "Some region above 60%", "tooltip without the scope value: subject without it, no current value: '%s'",
+          tip.c_str());
+    ParsedCommand* r3 = NativeNewParsed(*ratio);
+    NativeSetArg(*r3, 0, "99", &err);
+    r3->comparePresent = true;
+    tip = NativeNumericTooltip(r3, &noRegion, false, CompareOp::Greater, 60000, true);
+    CHECK(tip == "Region 99 above 60% (currently unavailable)", "tooltip of a value that does not exist: '%s'", tip.c_str());
 
     ParsedCommand* c2 = NativeNewParsed(*count);
     c2->valueForm = true;

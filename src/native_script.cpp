@@ -300,7 +300,10 @@ int CountryFromKeyword(int code, const Scope& s) {
 
 // Copies the parsed arguments to `out` with scope defaults and country keywords resolved.
 // Returns false (and logs once) if a value the command needs is not available in this scope.
-bool ResolveArgs(const ParsedCommand& pc, const Scope& s, ArgValue* out) {
+// `partial` (tooltips): a scope default the scope does not provide stays absent instead, without
+// a log line; *missing (if given) tells whether that happened.
+bool ResolveArgs(const ParsedCommand& pc, const Scope& s, ArgValue* out, bool partial = false, bool* missing = nullptr) {
+    if (missing) *missing = false;
     const Command& c = *pc.cmd;
     for (size_t i = 0; i < pc.args.size(); ++i) {
         out[i] = pc.args[i];
@@ -317,6 +320,10 @@ bool ResolveArgs(const ParsedCommand& pc, const Scope& s, ArgValue* out) {
                     break;
                 }
                 default: break;
+            }
+            if (v <= 0 && partial) {
+                if (missing) *missing = true;
+                continue;
             }
             if (v <= 0) {
                 LogOnce(&const_cast<Command&>(c).scopeLogged,
@@ -839,8 +846,12 @@ std::string NativeNumericTooltip(const ParsedCommand* pc, const void* engineScop
     Scope scope(engineScope);
     TooltipText subject;
     ArgValue resolved[kMaxParams];
-    bool argsOk = !pc->parseError && ResolveArgs(*pc, scope, resolved);
-    if (argsOk && c.subject) {
+    // A scope default this scope lacks (e.g. no region under an iterator's header) stays absent:
+    // the subject leaves it out and the line shows no current value.
+    bool missing = false;
+    bool resolvedOk = !pc->parseError && ResolveArgs(*pc, scope, resolved, true, &missing);
+    bool argsOk = resolvedOk && !missing;
+    if (resolvedOk && c.subject) {
         Args args(resolved, pc->args.size());
         DWORD code = 0;
         if (!SafeEffectTooltip(c.subject, &args, &scope, &subject, &code)) {
@@ -858,7 +869,9 @@ std::string NativeNumericTooltip(const ParsedCommand* pc, const void* engineScop
     }
     s += rhsKnown ? NativeFormatNumber(c.numericKind, ratio ? rhs : rhs * 100000) : std::string("?");
     int64_t current = 0;
-    if (argsOk && NativeNumericValue(pc, engineScope, &current))
+    if (missing || subject.scopeMissing())
+        ;  // the value depends on the scope the line is evaluated in
+    else if (argsOk && NativeNumericValue(pc, engineScope, &current))
         s += " (currently " + NativeFormatNumber(c.numericKind, ratio ? current : current * 100000) + ")";
     else
         s += " (currently unavailable)";
@@ -919,8 +932,10 @@ std::string NativeTooltip(const ParsedCommand* pc, const void* engineScope, bool
     TooltipText out;
     DWORD code = 0;
     ArgValue resolved[kMaxParams];
-    bool argsOk = !pc->parseError && ResolveArgs(*pc, scope, resolved);
-    Args args(argsOk ? resolved : pc->args.data(), pc->args.size());
+    bool missing = false;
+    bool resolvedOk = !pc->parseError && ResolveArgs(*pc, scope, resolved, true, &missing);
+    bool argsOk = resolvedOk && !missing;
+    Args args(resolvedOk ? resolved : pc->args.data(), pc->args.size());
     if (c.kind == CommandKind::Effect) {
         if (!c.effectTooltip || !argsOk) return "";
         if (!SafeEffectTooltip(c.effectTooltip, &args, &scope, &out, &code)) {
@@ -929,7 +944,8 @@ std::string NativeTooltip(const ParsedCommand* pc, const void* engineScope, bool
         }
         return out.text();
     }
-    if (c.triggerTooltip && argsOk) {
+    // Trigger tooltips also run when a scope default is missing (the parameter is then absent).
+    if (c.triggerTooltip && resolvedOk) {
         if (SafeTriggerTooltip(c.triggerTooltip, &args, &scope, negated, &out, &code)) return out.text();
         LogException(c, "tooltip", code);
     }

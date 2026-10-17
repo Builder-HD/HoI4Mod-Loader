@@ -49,9 +49,11 @@ bool NavalValue(const Args& a, const Scope&, int64_t* out) {
     return true;
 }
 
+// Parameters missing from the scope (no region under an iterator's header) are left out.
 void Subject(const char* what, const Args& a, TooltipText& out) {
-    out.add(what).add(" of ").add(Engine::CountryTagName(a.i(1)).c_str()).add(" over ");
-    out.add(Engine::RegionName(a.i(0)).c_str()).add(" (").add(a.i(0)).add(")");
+    out.add(what);
+    if (a.has(1)) out.add(" of ").add(Engine::CountryTagName(a.i(1)).c_str());
+    if (a.has(0)) out.add(" over ").add(Engine::RegionName(a.i(0)).c_str()).add(" (").add(a.i(0)).add(")");
 }
 void AirSubject(const Args& a, const Scope&, TooltipText& out) { Subject("Air superiority", a, out); }
 void NavalSubject(const Args& a, const Scope&, TooltipText& out) { Subject("Naval dominance", a, out); }

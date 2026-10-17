@@ -2556,3 +2556,17 @@ Install the DLL and sync the test mod, start a 1939 game as France, and keep
      "Requires hoi4_loader" line.
    - Stubs keep `always = no`. Inside the `custom_trigger_tooltip` the stub's line is not shown
      either.
+3. **Data trigger lines without their scope object.**
+   - **How tooltips resolve now:** they resolve parameters "partially". A scope default the scope
+     lacks stays absent, with no log line (the evaluation still logs it once).
+   - **Numeric triggers:** the subject leaves the part out, and the line drops "(currently ...)".
+     Example: "Air superiority of FRA above 50%" under any_strategic_region's header, instead of
+     "air_superiority above 50% (currently unavailable)".
+   - **Subjects that read the scope themselves** (divisions/ships/battles/planes areas) call
+     `TooltipText::markScopeMissing()`.
+   - **Other trigger tooltips** also run with absent parameters:
+     `strategic_region_has_custom_name` shows "Has a custom name".
+   - **Side effect:** test decision 8 (NOT air_superiority outside a region) now reads
+     "NOT: Air superiority of FRA above 0%".
+   - **Unchanged:** "(currently unavailable)" remains for values that do not exist (unknown
+     region id etc.).

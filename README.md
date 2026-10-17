@@ -318,6 +318,9 @@ gets one line. Inside `NOT` that counts as true.
 - If the scope doesn't provide the value, an effect does nothing and a trigger is **false**.
   Under `NOT` it is therefore **true**, the same as a dropped trigger.
 - `loader.log` notes it once per command ("... not given and not available from the scope").
+- **Tooltips** leave the missing part out and show no current value, e.g. "Air superiority of
+  FRA above 50%" under `any_strategic_region`'s header, where the region is only known per
+  region.
 - So write the parameter explicitly wherever the scope isn't certain, or wrap the trigger together
   with a condition that guarantees the scope.
 
@@ -534,7 +537,9 @@ bool MyFeatureInit() {
   - **Game variables:** with every parameter from scope and country or state among the scopes,
     the trigger is also a game variable.
   - **Missing value:** return false when the value does not exist; the trigger is then false.
-  - **`subject`:** optional, the start of the tooltip line.
+  - **`subject`:** optional, the start of the tooltip line. A parameter whose scope default the
+    scope lacks arrives absent (`Args::has`): leave it out. If the subject reads the scope itself
+    and finds nothing, call `out.markScopeMissing()`. Either way the line shows no current value.
 - **Scope blocks and iterators:** `register_native_scope_block` (a block whose other keys run in
   the scope a `target` callback picks, e.g. `strategic_region`) and `register_native_iterator`
   (any / every / random over every object of a scope type, cloned from the game's state

@@ -72,6 +72,7 @@ void BattlesSubject(const Args& a, const Scope& s, TooltipText& out) {
         out.add(LocationOnly(a) ? "Battles located in " : "Battles in or fought from ").add(AreaText(kind, id).c_str());
     } else {
         out.add("Battles");
+        out.markScopeMissing();
     }
 }
 
@@ -104,6 +105,7 @@ void UnitsSubject(const char* what, const Args& a, const Scope& s, TooltipText& 
     if (f.enemyOf) out.add(" at war with ").add(Engine::CountryTagName(f.enemyOf).c_str());
     if (f.alliedWith) out.add(" allied with ").add(Engine::CountryTagName(f.alliedWith).c_str());
     if (Area(a, s, &kind, &id)) out.add(" in ").add(AreaText(kind, id).c_str());
+    else out.markScopeMissing();  // no area here (e.g. under an iterator's header)
 }
 void DivisionsSubject(const Args& a, const Scope& s, TooltipText& out) { UnitsSubject("Divisions", a, s, out); }
 void ShipsSubject(const Args& a, const Scope& s, TooltipText& out) { UnitsSubject("Ships", a, s, out); }
@@ -117,8 +119,9 @@ bool PlanesValue(const Args& a, const Scope& s, int64_t* out) {
 }
 void PlanesSubject(const Args& a, const Scope& s, TooltipText& out) {
     int region = a.has(0) ? a.i(0) : s.strategicRegionId();
-    out.add("Planes of ").add(Engine::CountryTagName(CountryArg(a, 1)).c_str()).add(" based in ");
-    out.add(Engine::RegionName(region).c_str()).add(" (").add(region).add(")");
+    out.add("Planes of ").add(Engine::CountryTagName(CountryArg(a, 1)).c_str());
+    if (region > 0) out.add(" based in ").add(Engine::RegionName(region).c_str()).add(" (").add(region).add(")");
+    else out.markScopeMissing();
 }
 
 // --- Self-check on every game entry (main thread) ----------------------------------------------
