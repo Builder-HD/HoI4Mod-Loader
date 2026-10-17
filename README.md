@@ -456,6 +456,13 @@ random_strategic_region = {
 - **Cost:** a block costs what its contents cost, plus building one scope. An iterator checks its
   contents in each of the 304 regions, so `any_strategic_region` with a data trigger inside costs
   up to 304 evaluations of that trigger. `trigger_timing` reports both.
+  - **Measured** (1939, France, vanilla 1.19.3):
+    - `strategic_region` with a few triggers inside: about 1.7 µs per evaluation.
+    - `any_strategic_region = { is_sea_region = yes air_superiority > 0.5 }`: 27 µs per
+      evaluation in peacetime and 49 µs at war (about 90–160 ns per region). With every country
+      evaluating it as an AI weight, that added 4.5–11 ms per in-game day.
+    - Use it in AI weights and frequently checked triggers only when needed; prefer
+      `strategic_region = { region = <id> ... }` when the region is known.
 
 ## Writing a native effect or trigger (for plugin authors)
 

@@ -2467,3 +2467,38 @@ Install the DLL and sync the test mod, start a 1939 game as France, and keep
    - Then "reset all renamed regions".
 9. **Cost:** after 10 in-game days, the timing block lists `any_strategic_region` and
    `air_superiority` (AI probe plus hovering), with evaluations and ns each.
+
+**In-game results (2026-10-17, vanilla 1.19.3, 1939 France)**
+
+- **First run (DLL `f8745ca8`): the lexer-ready callback crashed** in the trigger name-conflict
+  check, so every native command was off.
+  - **Cause:** the check walked the trigger registry object as a std::map. The map is at +0x18
+    (an array and allocator come first), so the walk had always read unrelated heap memory. It
+    returned "not present" by luck until the heap layout changed.
+  - **Fix `e38b986`:**
+    - the offset is now read from the trigger Register (`kCodeTriggerRegisterMap`, +0x18 on
+      all three builds);
+    - the lookup checks the map's shape, runs under SEH, and refuses the name on failure.
+- **Second run (DLL `ec5d1a53`): startup, self-check and cost pass.**
+  - **Startup:**
+    - `map +0x18`;
+    - 20 of 20 commands registered;
+    - the iterator keys as expected (2 / 5 / 4, limit 0x2a0a);
+    - every guard is yes.
+  - **Errors:** `error.log` has only the `prioritize` unexpected-token error from the region
+    scope decisions (plus the two known planes errors). `loader.log` has the prioritize line
+    once.
+  - **Self-check:** "304 strategic regions, 98 sea; state 1 lies in Tyrrhenian Sea (169)".
+    Region 169 is a mixed region: Corsica's land provinces plus sea.
+  - **Timing:**
+
+    | Window | `strategic_region` | `any_strategic_region` | air_superiority | Numeric triggers only |
+    |---|---|---|---|---|
+    | 1, peacetime with hovering | 4319 evaluations, 1721 ns | 4059 evaluations, 26882 ns (10.9 ms/day) | 149412 evaluations, 130 ns | 5.2 ms/day |
+    | 2, war from 3 September | 45 evaluations | 918 evaluations, 49369 ns (4.5 ms/day) | | 2.0 ms/day |
+
+    - That is about 90–160 ns per region visited.
+    - The "all numeric triggers" total excludes scope blocks and iterators, as designed.
+  - **Not related to the loader:** the AI's "invalid command: unlock_trait_command" spam (851
+    lines in the run before part 3 too) and the AI's order_* commands at war.
+  - **Pending, steps 3–8:** the hover and effect checks of the region scope decisions.
