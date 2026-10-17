@@ -121,6 +121,20 @@ static bool ValueOwner(const Args& a, const Scope&, int64_t* out) {
     return true;
 }
 static void SubjectRegion(const Args& a, const Scope&, TooltipText& out) { out.add("Region ").add(a.i(0)); }
+static bool TargetRegion(const Args& a, const Scope& s, ScopeTarget* out) {
+    out->type = ScopeMask::StrategicRegion;
+    out->id = a.has(0) ? a.i(0) : s.strategicRegionId();
+    return out->id > 0;
+}
+static bool TargetCrash(const Args&, const Scope&, ScopeTarget*) {
+    volatile int* p = nullptr;
+    return *p == 1;
+}
+static bool TargetWrongType(const Args&, const Scope&, ScopeTarget* out) {
+    out->type = ScopeMask::State;
+    out->id = 3;
+    return true;
+}
 
 static NativeEffect Effect(const char* name, std::vector<ParamSpec> params, Form form = Form::Block) {
     return NativeEffect{name, "Help text.", form, params, ScopeMask::Any, &Exec, nullptr};
@@ -209,6 +223,60 @@ int main() {
                                                  &EvalEcho, nullptr},
                                    "feat_e"),
           "choice without choices refused");
+    // Scope blocks and iterators (checked in 10).
+    const std::vector<ParamSpec> kRegionOpt = {{"region", ParamType::Int, false}};
+    CHECK(register_native_scope_block(NativeScopeBlock{"in_region", "Block.", CommandKind::Trigger, kRegionOpt, ScopeMask::Any,
+                                                       ScopeMask::StrategicRegion, &TargetRegion},
+                                      "feat_s"),
+          "scope block trigger queued");
+    CHECK(register_native_scope_block(NativeScopeBlock{"in_region", "Block.", CommandKind::Effect, kRegionOpt, ScopeMask::Any,
+                                                       ScopeMask::StrategicRegion, &TargetRegion},
+                                      "feat_s"),
+          "scope block effect with the trigger's name queued");
+    CHECK(!register_native_scope_block(NativeScopeBlock{"in_region", "Block.", CommandKind::Trigger, kRegionOpt, 0,
+                                                        ScopeMask::StrategicRegion, &TargetRegion},
+                                       "feat_s"),
+          "duplicate scope block refused");
+    CHECK(!register_native_scope_block(NativeScopeBlock{"in_state", "Block.", CommandKind::Trigger, kRegionOpt, 0,
+                                                        ScopeMask::State, &TargetRegion},
+                                       "feat_s"),
+          "scope block for another scope type refused");
+    CHECK(!register_native_scope_block(NativeScopeBlock{"no_target", "Block.", CommandKind::Effect, kRegionOpt, 0,
+                                                        ScopeMask::StrategicRegion, nullptr},
+                                       "feat_s"),
+          "scope block without target callback refused");
+    CHECK(register_native_scope_block(NativeScopeBlock{"crash_region", "Block.", CommandKind::Trigger, {}, 0,
+                                                       ScopeMask::StrategicRegion, &TargetCrash},
+                                      "feat_s"),
+          "scope block without parameters queued");
+    CHECK(register_native_scope_block(NativeScopeBlock{"wrong_region", "Block.", CommandKind::Trigger, {}, 0,
+                                                       ScopeMask::StrategicRegion, &TargetWrongType},
+                                      "feat_s"),
+          "scope block (target of the wrong type at runtime) queued");
+    CHECK(register_native_iterator(NativeIterator{"any_region", "Any.", IteratorKind::Any, ScopeMask::StrategicRegion, "KEY",
+                                                  "Any region"},
+                                   "feat_s"),
+          "any iterator queued");
+    CHECK(register_native_iterator(NativeIterator{"every_region", "Every.", IteratorKind::Every, ScopeMask::StrategicRegion,
+                                                  nullptr, nullptr},
+                                   "feat_s"),
+          "every iterator queued");
+    CHECK(register_native_iterator(NativeIterator{"random_region", "Random.", IteratorKind::Random, ScopeMask::StrategicRegion,
+                                                  nullptr, nullptr},
+                                   "feat_s"),
+          "random iterator queued");
+    CHECK(!register_native_iterator(NativeIterator{"any_nohead", "Any.", IteratorKind::Any, ScopeMask::StrategicRegion,
+                                                   nullptr, nullptr},
+                                    "feat_s"),
+          "any iterator without header text refused");
+    CHECK(!register_native_iterator(NativeIterator{"every_state2", "Every.", IteratorKind::Every, ScopeMask::State, nullptr,
+                                                   nullptr},
+                                    "feat_s"),
+          "iterator over another scope type refused");
+    CHECK(!register_native_iterator(NativeIterator{"any_region", "Any.", IteratorKind::Any, ScopeMask::StrategicRegion, "K",
+                                                   "Any"},
+                                    "feat_s"),
+          "duplicate iterator refused");
     CHECK(!NativeFeatureComplete("feat_a"), "feature incomplete before engine registration");
     CHECK(NativeFeatureComplete("no_commands"), "feature without native commands counts as complete");
 
@@ -217,7 +285,7 @@ int main() {
     be.failBind.insert("bind_fails");
     document_on_action("on_test_loaded", "feat_d", "Fires in tests.");
     int n = NativeScriptFinalize(be, L"");
-    CHECK(n == 8, "8 commands registered (got %d)", n);
+    CHECK(n == 15, "15 commands registered (got %d)", n);
     CHECK(NativeScriptFinalized(), "window closed after finalize");
     CHECK(NativeFeatureComplete("feat_a"), "feat_a complete (all registered)");
     CHECK(!NativeFeatureComplete("feat_b"), "feat_b incomplete (vanilla name refused)");
@@ -464,6 +532,52 @@ int main() {
         "- Usage: `num_owner > <int>` or `num_owner = { owner = <country>/any count > <int> }`\n",
     };
     for (const char* e : expected9)
+        CHECK(docs.find(e) != std::string::npos, "docs contain: %.70s", e);
+
+    // 10. Scope blocks and iterators.
+    const Command* blockT = nullptr;
+    const Command* blockE = nullptr;
+    const Command* crashBlock = nullptr;
+    const Command* wrongBlock = nullptr;
+    const Command* every = nullptr;
+    for (const Command* c : NativeCommands()) {
+        if (c->name == "in_region" && c->kind == CommandKind::Trigger) blockT = c;
+        if (c->name == "in_region" && c->kind == CommandKind::Effect) blockE = c;
+        if (c->name == "crash_region") crashBlock = c;
+        if (c->name == "wrong_region") wrongBlock = c;
+        if (c->name == "every_region") every = c;
+    }
+    CHECK(blockT && blockE && crashBlock && wrongBlock && every, "scope blocks and iterators found");
+    if (!blockT || !blockE || !crashBlock || !wrongBlock || !every) return g_fail;
+    CHECK(blockT->scopeBlock && blockT->childScope == ScopeMask::StrategicRegion && blockT->form == Form::Block,
+          "scope block flags");
+    CHECK(every->iterator && every->kind == CommandKind::Effect && every->iteratorKind == IteratorKind::Every,
+          "every iterator is an effect");
+    ScopeTarget t;
+    ParsedCommand* b1 = NativeNewParsed(*blockT);
+    CHECK(NativeSetArg(*b1, 0, "42", &err) && NativeValidate(*b1), "region parsed");
+    CHECK(NativeScopeTarget(b1, &noRegion, &t) && t.id == 42 && t.type == ScopeMask::StrategicRegion, "explicit region (%d)", t.id);
+    ParsedCommand* b2 = NativeNewParsed(*blockE);
+    CHECK(NativeValidate(*b2), "region is optional");
+    CHECK(NativeScopeTarget(b2, &regionScope, &t) && t.id == 42, "region from the scope (%d)", t.id);
+    CHECK(!NativeScopeTarget(b2, &noRegion, &t), "no region: no target");
+    ParsedCommand* b3 = NativeNewParsed(*crashBlock);
+    CHECK(!NativeScopeTarget(b3, &regionScope, &t) && LogCount("'crash_region': target crashed") == 1,
+          "crashing target contained and logged");
+    ParsedCommand* b4 = NativeNewParsed(*wrongBlock);
+    CHECK(!NativeScopeTarget(b4, &regionScope, &t), "target of another scope type rejected");
+    docs = NativeScriptDocs();
+    const char* expected10[] = {
+        "- Usage: `in_region = { region = <int> <triggers> }`\n",
+        "- Usage: `in_region = { region = <int> <effects> }`\n",
+        "- Usage: `crash_region = { <triggers> }`\n",
+        "- Children run in: StrategicRegion scope\n",
+        "- Usage: `any_region = { count = <int> tooltip = <key> <triggers> }`\n",
+        "- Usage: `every_region = { limit = { <triggers> } random_select_amount = <int> display_individual_scopes = yes "
+        "tooltip = <key> <effects> }`\n",
+        "- Usage: `random_region = { limit = { <triggers> } tooltip = <key> <effects> }`\n",
+    };
+    for (const char* e : expected10)
         CHECK(docs.find(e) != std::string::npos, "docs contain: %.70s", e);
 
     printf("%s (%d failure(s))\n", g_fail ? "FAILED" : "PASSED", g_fail);

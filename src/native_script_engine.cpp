@@ -10,32 +10,9 @@
 
 #include "engine.h"
 #include "loader.h"
-#include "native_script.h"
+#include "native_binding.h"
 
-namespace {
-
-const size_t kRecordOffset = 0x58;
-
-// Effect slots.
-const size_t kE_ReadClause = 3, kE_Item = 4, kE_Validate = 5, kE_Value = 6, kE_Tooltip = 7, kE_Execute = 13, kE_Scopes = 19;
-// Trigger slots.
-const size_t kT_Value = 4, kT_ReadClause = 5, kT_Item = 6, kT_Validate = 7, kT_Scopes = 14, kT_Targets = 15,
-             kT_Tooltip = 21, kT_Evaluate = 22;
-
-struct EffectEntryObj {  // engine reads { vtable, help }
-    void** vtable;
-    const char* help;
-    Command* cmd;
-    void** objectVtable;
-};
-struct TriggerEntryObj {  // engine reads { vtable, help, flag }
-    void** vtable;
-    const char* help;
-    uint8_t flag;
-    uint8_t pad[7];
-    Command* cmd;
-    void** objectVtable;
-};
+namespace NativeBinding {
 
 ParsedCommand* Rec(void* self) { return *(ParsedCommand**)((uint8_t*)self + kRecordOffset); }
 
@@ -127,11 +104,13 @@ void* __fastcall TriggerEntryCreate(TriggerEntryObj* e) {
     return obj;
 }
 
-// Vtable copy with the RTTI locator at [-1]; returns the vtable pointer.
-void** Clone(const Engine::Vtable& tmpl) {
-    auto** block = new void*[tmpl.slots + 1];
+// Vtable copy with the RTTI locator at [-1]; returns the vtable pointer. `tail` is stored one
+// slot past the copy (vt[tmpl.slots]), for slot functions that need per-command data.
+void** Clone(const Engine::Vtable& tmpl, void* tail) {
+    auto** block = new void*[tmpl.slots + 2];
     block[0] = tmpl.vt[-1];
     memcpy(block + 1, tmpl.vt, tmpl.slots * sizeof(void*));
+    block[tmpl.slots + 1] = tail;
     return block + 1;
 }
 
@@ -378,6 +357,8 @@ int BindFilter(EXCEPTION_POINTERS* ep, DWORD* code, void** where) {
 bool SafeBind(Command* c, std::string* reason, DWORD* code, void** where) {
     __try {
         if (c->numeric) return BindNumeric(*c, reason);
+        if (c->scopeBlock) return BindScopeBlock(*c, reason);
+        if (c->iterator) return BindIterator(*c, reason);
         return c->kind == CommandKind::Effect ? BindEffect(*c) : BindTrigger(*c);
     } __except (BindFilter(GetExceptionInformation(), code, where)) {
         return false;
@@ -419,7 +400,7 @@ public:
     }
 };
 
-}  // namespace
+}  // namespace NativeBinding
 
 // --- Scope (read-only view of CEventScope; NOTES.md C1 scope table) ---------------------------
 namespace {
@@ -467,7 +448,7 @@ Scope Scope::prev() const { return link(0x28); }
 
 // Runs at lexer-ready (lifecycle): registers every queued command and writes the docs file.
 void NativeScriptRegisterWithEngine() {
-    static EngineBackend backend;  // kept: resolves country tags while scripts are parsed
+    static NativeBinding::EngineBackend backend;  // kept: resolves country tags while scripts are parsed
     std::wstring docs = LoaderOutputPath(L"loader_script_docs.md");
     int n = NativeScriptFinalize(backend, docs);
     Log("Native script: %d of %zu command(s) registered", n, NativeCommands().size());

@@ -21,6 +21,7 @@
 // Token: a key interned as an engine token at parse time (Args::i = token, Args::key = text), for
 // names the evaluate callback looks up without allocating (equipment names).
 enum class ParamType { Int, Bool, Key, Country, Choice, Token };
+enum class CommandKind { Effect, Trigger };
 enum class Form { Value, Block };          // name = <value>   |   name = { key = value ... }
 
 // Where an omitted parameter comes from (evaluated per use). If the scope does not provide it,
@@ -171,6 +172,50 @@ bool register_native_effect(const NativeEffect& def, const char* feature);
 bool register_native_trigger(const NativeTrigger& def, const char* feature);
 bool register_native_numeric_trigger(const NativeNumericTrigger& def, const char* feature);
 
+// --- Scope blocks and iterators (NOTES.md F5) -------------------------------------------------
+// The scope a block runs its children in: one ScopeMask bit (only StrategicRegion is supported,
+// id = the region id).
+struct ScopeTarget {
+    uint32_t type = 0;
+    int id = 0;
+};
+
+// Scope block: `name = { <params> <children> }`. The block's other keys are triggers (or
+// effects), vanilla or native, run in the scope `target` picks per use; when the script is parsed
+// they are checked against `childScope`. A trigger is true if all children are true there (false
+// without a target, so true under NOT); an effect runs them there (nothing without a target).
+// Tooltip: the target's name and ":", then the children indented and evaluated in the target.
+struct NativeScopeBlock {
+    const char* name;
+    const char* help;
+    CommandKind kind;
+    std::vector<ParamSpec> params;  // the block's own keys (optional ones); may be empty
+    uint32_t scopes;                // where the block may be used, 0 = any
+    uint32_t childScope;            // ScopeMask bit the children run in (StrategicRegion)
+    // Hot path, same rules as NativeTrigger::evaluate. False: no target in this scope.
+    bool (*target)(const Args&, const Scope&, ScopeTarget* out);
+};
+
+// Iterator over every object of one scope type, in id order, cloned from the game's state
+// iterators (block keys and tooltips as there):
+//   Any (trigger):   any_x = { count = <int> tooltip = <key> <triggers> }                as any_state
+//   Every (effect):  every_x = { limit = { <triggers> } random_select_amount = <int>
+//                      display_individual_scopes = yes tooltip = <key> <effects> }      as every_state
+//   Random (effect): random_x = { limit = { <triggers> } tooltip = <key> <effects> }    as random_state;
+//                      prioritize (state ids) is a parse error
+enum class IteratorKind { Any, Every, Random };
+struct NativeIterator {
+    const char* name;
+    const char* help;
+    IteratorKind kind;
+    uint32_t elements;       // ScopeMask bit of the objects iterated (StrategicRegion)
+    const char* headerKey;   // Any: tooltip header localisation key (a mod may define it) ...
+    const char* headerText;  // ... and the text shown when it is not localised
+};
+
+bool register_native_scope_block(const NativeScopeBlock& def, const char* feature);
+bool register_native_iterator(const NativeIterator& def, const char* feature);
+
 // True once engine registration ran and every native command of `feature` was registered
 // (true for features without native commands). Drives hoi4_loader_feature_<name>.
 bool NativeFeatureComplete(const char* feature);
@@ -185,7 +230,6 @@ void document_on_action(const char* name, const char* feature, const char* help)
 // ===========================================================================================
 // Internal: core <-> engine binding (native_script.cpp / native_script_engine.cpp)
 // ===========================================================================================
-enum class CommandKind { Effect, Trigger };
 enum class CommandStatus { Pending, Registered, Refused };
 
 struct Command {
@@ -208,6 +252,14 @@ struct Command {
     bool (*value)(const Args&, const Scope&, int64_t*) = nullptr;
     void (*subject)(const Args&, const Scope&, TooltipText&) = nullptr;
     std::vector<std::string> choiceStorage;  // owns ParamSpec::choices
+    // Scope blocks and iterators (bound by native_scope_engine.cpp).
+    bool scopeBlock = false;
+    uint32_t childScope = 0;
+    bool (*target)(const Args&, const Scope&, ScopeTarget*) = nullptr;
+    bool iterator = false;
+    IteratorKind iteratorKind = IteratorKind::Any;
+    std::string headerKey, headerText;
+    std::string keysDoc;  // iterators: the block keys the engine's template reads (set when bound)
 
     CommandStatus status = CommandStatus::Pending;
     std::string reason;               // why refused
@@ -268,6 +320,10 @@ bool NativeEvaluate(const ParsedCommand* pc, const void* engineScope);
 // generic line; effects without one get "".
 std::string NativeTooltip(const ParsedCommand* pc, const void* engineScope, bool negated);
 
+// Scope blocks: the target for this use. False if a scope default is missing, the callback finds
+// none or crashed (logged once).
+bool NativeScopeTarget(const ParsedCommand* pc, const void* engineScope, ScopeTarget* out);
+
 // Numeric triggers. Value: false if a scope default is missing, the callback says the value does
 // not exist, or it crashed (all logged once).
 bool NativeNumericValue(const ParsedCommand* pc, const void* engineScope, int64_t* out);
@@ -281,9 +337,12 @@ std::string NativeNumericTooltip(const ParsedCommand* pc, const void* engineScop
 // Fixed point (100000 = 1) as text: Ratio -> "64%", Count -> "3".
 std::string NativeFormatNumber(NumericKind kind, int64_t v);
 
-// Timing diagnostics for numeric triggers (loader_config.ini [diagnostics] trigger_timing = 1).
+// Timing diagnostics for numeric triggers, scope blocks and iterators (loader_config.ini
+// [diagnostics] trigger_timing = 1). NativeTimingAdd records one evaluation of `ticks`
+// QueryPerformanceCounter ticks.
 void NativeSetTiming(bool on);
 bool NativeTimingEnabled();
+void NativeTimingAdd(const Command& c, long long ticks);
 
 // Test hook: forget everything (smoke test only).
 void NativeScriptResetForTests();

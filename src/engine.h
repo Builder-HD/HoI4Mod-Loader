@@ -210,6 +210,46 @@ bool FactoriesAssigned(int tag, const void* equipment, int64_t* out);
 // equipment names. Main thread.
 void LogProductionLines(int tag);
 
+// --- Region data (region_scope; engine_data.cpp) ----------------------------------------------
+bool HaveRegionData();  // province lists of states and regions, the region's sea share
+// The region has a sea province (the engine's own test in its region console command).
+bool RegionIsSea(int regionId, bool* sea);
+// The state has a province in the region. False if either does not exist.
+bool RegionHasState(int regionId, int stateId, bool* has);
+// The region holding the state's first province (0 if none).
+int RegionOfState(int stateId);
+
+// --- Scope blocks and iterators (region_scope; engine_scope.cpp, NOTES.md F5) -----------------
+// The vanilla state iterators the region iterators are cloned from. keys: the block keys the
+// vanilla item handler reads itself (decoded from its compare chain); limitKey: the one whose
+// handler reads the embedded `limit` trigger (every / random).
+struct IteratorTemplate {
+    Vtable vt;
+    void** entryVtable = nullptr;  // CTriggerEntry<T> / CEffectEntry<T>: slot 1 = factory
+    int keys[8] = {};
+    int keyCount = 0;
+    int limitKey = 0;
+};
+extern IteratorTemplate anyStateTemplate, everyStateTemplate, randomStateTemplate;
+extern Vtable andTrigger;  // .?AVCAndTrigger@@: slot 21 = empty own line, slot 22 = AND of the children
+void ResolveScopeBlocks();
+bool HaveScopeBlocks();
+// Child scopes as the vanilla iterators build them: a copy of the parent with the parent's ROOT
+// and FROM and PREV = the parent. ScopeSetRegion makes it a strategic region scope (the other
+// scope fields cleared). The buffer is kScopeBuffer bytes, 16-byte aligned; ScopeEnd destroys it.
+const size_t kScopeBuffer = 0x400;
+void ScopeBegin(void* buf, const void* parent);
+void ScopeSetRegion(void* scope, void* region);
+void ScopeEnd(void* buf);
+// Frees an engine-owned std::string (tooltip temporaries the engine hands back), leaving it empty.
+void FreeEngineString(EngineString* s);
+// Object layout of the cloned iterators (checked by kCodeTargetEffectExecute / Limit).
+const size_t kIterCount = 0x78;       // any: `count` (CScopedVariable); `tooltip` key at +0x58
+const size_t kIterLimit = 0x78;       // every / random: the embedded `limit` trigger
+const size_t kIterCandidates = 0xd0;  // every / random: CPdxArray { T** data, int cap, int count, allocator* }
+// engine.cpp: the CEventScope destructor (player_scope's), null if unresolved.
+void* EventScopeDestructor();
+
 // Fires the on_action like the engine fires on_startup: synced-RNG seed, events, random events
 // and effect. countryTag > 0: ROOT = that country; 0: no scope. name: at most 15 characters.
 // Returns false (and logs) on failure; an exception inside is contained.

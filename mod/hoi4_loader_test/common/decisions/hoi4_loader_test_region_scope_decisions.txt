@@ -1,0 +1,209 @@
+# Test decisions for hoi4_loader's strategic region scopes (README "Strategic region scopes",
+# NOTES.md F5). Regions: 7 Western Germany (land), 16 North Sea, 18 English Channel,
+# 19 Northern France (land; holds state 16 Ile de France), 42 Bay of Biscay (sea). 98 of the 304
+# regions have sea provinces.
+#
+# Every decision is guarded with hoi4_loader_feature_region_scope = yes, so without the loader
+# they are hidden (the game still logs the unknown triggers and effects when parsing this file).
+# The rename decisions also need region_names; "reset names" undoes them.
+
+hoi4_loader_data_category = {
+
+	# --- strategic_region (trigger) and the region identity triggers --------------------------
+	# Hover: "Northern France:" with three lines under it, "Bay of Biscay:" with two, and the
+	# state-scope form. Every line ticked.
+	hoi4_loader_rs_identity = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_region_scope = yes }
+		available = {
+			hoi4_loader_feature_region_scope = yes
+			strategic_region = {
+				region = 19
+				strategic_region_id = 19
+				is_sea_region = no
+				region_has_state = 16
+			}
+			strategic_region = { region = 42 is_sea_region = yes NOT = { region_has_state = 16 } }
+			16 = { strategic_region = { strategic_region_id = 19 } }
+			NOT = { strategic_region = { region = 7 is_sea_region = yes } }
+		}
+		ai_will_do = { base = 0 }
+	}
+	# Data triggers inside a block take the region from the scope. Hover: the lines read
+	# "Air superiority over Northern France (19) ...", "Divisions in Northern France (19) ...".
+	hoi4_loader_rs_data_inside = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_region_scope = yes }
+		available = {
+			hoi4_loader_feature_region_scope = yes
+			hoi4_loader_feature_region_control = yes
+			hoi4_loader_feature_military_counts = yes
+			strategic_region = {
+				region = 19
+				air_superiority > 0
+				divisions_count > 0
+				battles_count = { count = 0 }
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# --- any_strategic_region ------------------------------------------------------------------
+	# Hover: "Any strategic region:" headers; the count lines start "At least 98 of"; the custom
+	# tooltip line reads "Bay of Biscay is one of them (custom tooltip)". Every line ticked.
+	hoi4_loader_rs_any = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_region_scope = yes }
+		available = {
+			hoi4_loader_feature_region_scope = yes
+			any_strategic_region = { is_sea_region = yes }
+			any_strategic_region = { count = 98 is_sea_region = yes }
+			NOT = { any_strategic_region = { count = 99 is_sea_region = yes } }
+			any_strategic_region = { tooltip = hoi4_loader_rs_any_tt strategic_region_id = 42 }
+			any_strategic_region = { region_has_state = 16 strategic_region_id = 19 }
+		}
+		ai_will_do = { base = 0 }
+	}
+	# The cost case: a data trigger evaluated in every region (trigger_timing measures it).
+	# Available only where ROOT has more than 50% air superiority over some sea region.
+	hoi4_loader_rs_any_air = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_region_scope = yes }
+		available = {
+			hoi4_loader_feature_region_scope = yes
+			hoi4_loader_feature_region_control = yes
+			any_strategic_region = { is_sea_region = yes air_superiority > 0.5 }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# --- strategic_region (effect) ------------------------------------------------------------
+	# Hover: "Bay of Biscay:" with the rename and the variable line under it. Take: the Bay of
+	# Biscay shows "Loader Test Sea A" and the description shows 1.
+	hoi4_loader_rs_block_effect = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_region_scope = yes hoi4_loader_feature_region_names = yes }
+		complete_effect = {
+			strategic_region = {
+				region = 42
+				set_strategic_region_name = { name = HOI4_LOADER_TEST_REGION_NAME_A }
+				set_variable = { global.hoi4_loader_rs_effect_ran = 1 }
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# --- every_strategic_region ---------------------------------------------------------------
+	# Counts the sea regions where ROOT has more than 50% air superiority, listing them one by one
+	# in the tooltip (display_individual_scopes). The description shows the count after taking it.
+	hoi4_loader_rs_every_air = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_region_scope = yes hoi4_loader_feature_region_control = yes }
+		complete_effect = {
+			set_variable = { global.hoi4_loader_rs_air_regions = 0 }
+			every_strategic_region = {
+				limit = { is_sea_region = yes air_superiority > 0.5 }
+				display_individual_scopes = yes
+				add_to_variable = { global.hoi4_loader_rs_air_regions = 1 }
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+	# random_select_amount = 3 of the 98 sea regions: the description shows 3 after taking it.
+	hoi4_loader_rs_every_amount = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_region_scope = yes }
+		complete_effect = {
+			set_variable = { global.hoi4_loader_rs_amount = 0 }
+			every_strategic_region = {
+				limit = { is_sea_region = yes }
+				random_select_amount = 3
+				add_to_variable = { global.hoi4_loader_rs_amount = 1 }
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+	# Renames through the iterator: the Bay of Biscay shows "Loader Test Sea B".
+	hoi4_loader_rs_every_rename = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_region_scope = yes hoi4_loader_feature_region_names = yes }
+		complete_effect = {
+			every_strategic_region = {
+				limit = { strategic_region_id = 42 }
+				set_strategic_region_name = { name = HOI4_LOADER_TEST_REGION_NAME_B }
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# --- random_strategic_region --------------------------------------------------------------
+	# One of the North Sea, the English Channel and the Bay of Biscay gets "Loader Test Sea C";
+	# the tooltip names the one that will be picked.
+	hoi4_loader_rs_random = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_region_scope = yes hoi4_loader_feature_region_names = yes }
+		complete_effect = {
+			random_strategic_region = {
+				limit = { OR = { strategic_region_id = 16 strategic_region_id = 18 strategic_region_id = 42 } }
+				set_strategic_region_name = { name = HOI4_LOADER_TEST_REGION_NAME_C }
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+	# Parse error test: prioritize is not supported. loader.log: "prioritize (a list of state ids)
+	# is not supported; ignored" once; error.log: an unexpected token in this file. The rest still
+	# works: the description shows 1 after taking it.
+	hoi4_loader_rs_random_prioritize = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_region_scope = yes }
+		complete_effect = {
+			random_strategic_region = {
+				prioritize = { 42 }
+				limit = { strategic_region_id = 42 }
+				set_variable = { global.hoi4_loader_rs_prioritize_ran = 1 }
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# Undo the renames above: every region with a loader name gets its original name back.
+	hoi4_loader_rs_reset_names = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_region_scope = yes hoi4_loader_feature_region_names = yes }
+		complete_effect = {
+			every_strategic_region = {
+				limit = { strategic_region_has_custom_name = { } }
+				reset_strategic_region_name = { }
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+}
+
+# AI cost measurement for any_strategic_region (every country evaluates it; never taken).
+hoi4_loader_ai_cost_category = {
+	hoi4_loader_ai_cost_region_probe = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_region_scope = yes
+			hoi4_loader_feature_region_control = yes
+		}
+		ai_will_do = {
+			base = 1
+			modifier = { factor = 1 any_strategic_region = { is_sea_region = yes air_superiority > 0.5 } }
+			modifier = { factor = 0 always = yes }
+		}
+	}
+}

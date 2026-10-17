@@ -2249,3 +2249,171 @@ iterate/set-scope/name slots, and is multiplayer-safe by construction. Our regio
 - Only any-scope vanilla commands (and ours) are valid inside the block.
 
 Option A can follow later if the nicer syntax becomes important.
+
+### F5. Implementation: option B (2026-10-17)
+
+Approved as option B; option A stays a possible later upgrade. Feature `region_scope`
+(`src/plugin_region_scope.cpp`), guard `hoi4_loader_feature_region_scope`:
+
+- `strategic_region = { region = 42 ... }`, as a trigger and as an effect.
+- `any_strategic_region`, `every_strategic_region`, `random_strategic_region`.
+- `strategic_region_id = <int>`, `is_sea_region = yes/no`, `region_has_state = <state id>`, all
+  with scope mask 0x40 only.
+
+No vanilla trigger reads the region in scope: the game's documentation lists only
+`hidden_trigger` and `meta_trigger` for STRATEGIC_REGION. Vanilla's `region` trigger is a
+**state** trigger ("check state's strategic area id").
+
+**API** (`native_script.h`):
+- `register_native_scope_block`: the block's own parameters, plus a `target` callback that picks
+  the scope (`ScopeTarget { type, id }`, only StrategicRegion supported).
+- `register_native_iterator`: Any / Every / Random over every object of one scope type.
+- Both go through the same registry as the other native commands: name conflicts, docs
+  (`- Children run in:`, `- Keys (as the game's state iterator):`), guard trigger and status.
+
+**Binding** (`src/native_scope_engine.cpp`; engine pieces in `src/engine_scope.cpp`):
+
+| Command | Object | Replaced slots |
+|---|---|---|
+| `strategic_region` trigger | `CAlwaysTrigger` clone, `ParsedCommand*` at +0x58 (as the generic triggers) | 5 = `CTrigger` block loop; 6 = parameter, else `CTrigger` slot 6 (child factory) with mask 0x40; 11 / 12 = tooltips; 21 = `CAndTrigger`'s empty line; 22 = evaluate (child scope, `CAndTrigger::Evaluate` on its own children) |
+| `strategic_region` effect | `CRenameProvinceEffect` clone, `ParsedCommand*` at +0x58 | 3 = `CEffect` block loop; 4 = parameter, else `CEffect` slot 4 with mask 0x40; 7 = `CEffect`'s empty line; 8 / 10 = tooltips; 13 = children loop (`CEffect` slot 13) in the child scope |
+| `any_strategic_region` | built by `CTriggerEntry<CAnyStateTrigger>`, vtable swapped | 6 = vanilla keys to the vanilla handler, others to the child factory with mask 0x40; 22 = loop over regions in id order (`count` from +0x78, as vanilla); 23 = header text |
+| `every_strategic_region` | built by `CEffectEntry<CEveryStateEffect>` | 4 = item (`limit` read with mask 0x40); 10 = per-region tooltip; 25 = collect into the candidate list; 26 = `SetStrategicRegion`; 27 = highlighted region name |
+| `random_strategic_region` | built by `CEffectEntry<CRandomStateEffect>` | 4 = item (`prioritize` rejected); 25; 26; 28 = region name. Slot 27 (the synced-RNG pick) stays vanilla. |
+
+- **Iterator data:** each iterator clone keeps an `IteratorInfo*` one slot past the template's
+  last slot, so the shared slot functions find their command without a lookup table.
+- **Kept vanilla:** execute, tooltips, `random_select_amount` trimming and the pick all stay
+  vanilla. They reach the elements only through slots 25–28, which were checked in the
+  decompilation.
+- **every_state slot 10 (`FUN_14036c840`):** the one vanilla slot that reads an element as a
+  state directly (`SetState(elem+0x58)`), so it is replaced.
+- **Child scopes, built as the vanilla iterators build them:**
+  - CEventScope copy constructor `FUN_140534f00(child, parent)`. It copies all fields, including
+    the scope's synced RNG seed and counter (+0xc).
+  - Then ROOT/FROM = the parent's, and PREV = the parent.
+  - Then `SetStrategicRegion(child, region, clear = true)`, which clears the copied
+    state/country/etc.
+  - Destroyed with the CEventScope destructor.
+  - One child scope per evaluation; the region is re-set per element, as `any_state` re-sets the
+    state.
+- **Item handlers.** The vanilla handler's compare chain is decoded at startup:
+  - The pattern is `cmp r8d,<key>` / `je|jne` ... `mov r9d,2` / `jmp <child factory>`.
+  - The decoder yields the keys the vanilla handler reads itself; the `limit` key's handler is
+    recognised by its code (`kCodeTargetEffectLimit`).
+  - Our handler sends those keys to the vanilla handler, reads `limit` into the embedded trigger
+    at +0x78 with mask 0x40 (a second `limit` goes to vanilla for its "Multiple limits" error),
+    and sends every other key to the child factory with mask 0x40.
+  - The same keys on all three builds:
+
+    | Template | Keys |
+    |---|---|
+    | any_state | 0x92 (`tooltip`), 0x29ea (`count`) |
+    | every_state | 0x92, 0x2a0a (`limit`), 0x3b8b, 0x3fff, 0x4bed |
+    | random_state | 0x3640 (`prioritize`), 0x92, 0x2a0a, 0x3b8b |
+
+  - `loader_script_docs.md` names them via the token table.
+- **Rejecting `prioritize`.** The key named `prioritize` among random_state's keys is rejected
+  with the engine's "unexpected token" (file and line, value skipped) and one loader.log line.
+  The rest of the block works.
+- **Tooltip temporaries.** Strings the engine returns are freed with the engine's
+  `operator delete`, taken from `CEveryStateEffect`'s scalar deleting destructor, using MSVC's
+  `_Tidy_deallocate` rule. The engine's own string destructor exists twice (identical copies,
+  0x14011ebd0 and 0x140a0cf30), so it cannot be a unique signature.
+- **Tooltip formats:**
+  - Trigger slot 11, the formatter form: "<region>:" as one requirement line, marked by the
+    whole block (the base slot 3 in the outer scope), then the children through `CTrigger`
+    slot 11 at indent + 1 in the region scope. This is the shape of `CContextTrigger`'s slot 11.
+  - Trigger slot 12, the text form: 3 spaces per indent level, the `TRIGGER_(UN)FULLFILLED_PREFIX`
+    rule of `FUN_1403e0940`, "<region>:\n", then the children through `CTrigger` slot 12.
+  - Effect slots 8 / 10: "<indent><region>:" then the children through `CEffect` slot 8 / 10 at
+    indent + 1.
+- **any_ header text (request item 2).**
+  - **Options weighed:**
+    - a stub loc file in the stub pack, served through the VFS: needs a yml per language and
+      depends on the load order;
+    - text the loader provides itself.
+  - **Chosen: the loader provides the text.** Slot 23 returns the localisation of
+    `HOI4_LOADER_ANY_STRATEGIC_REGION_STARTS` if a mod defines it, else "Any strategic region".
+    It is looked up once per session, at the first tooltip. No file, works in every language, and
+    a mod can still translate it.
+  - every_ and random_ need no key: vanilla builds their headers from the element names
+    (slots 27 / 28).
+- **`is_sea_region`.**
+  - **Source:** the region's sea-province share (fixed point at `region+0xa0`, written with
+    +0x98 and +0xa8 in `FUN_140e23bb0`). The game's own region console command tests it for
+    "Selected region has no sea province" (`kSigRegionSeaShare`).
+  - **Checked offline:** the map files give 98 of 304 regions with sea provinces, and the
+    self-check logs the engine's count.
+  - **Not usable:** the region's naval object (+0xe8) is created for every region in the
+    `CStrategicRegion` constructor, so it says nothing about sea.
+- **`region_has_state`:** a pointer compare between the state's and the region's province
+  lists. `RegionOfState` (used without `region` in a state scope) is the region holding the
+  state's first province. State 16 lies wholly in region 19.
+- **Fail safe:**
+  - `HaveScopeBlocks()` needs every piece; otherwise the feature does not start.
+  - Engine calls that run children (evaluate, execute, collect) run under SEH. A fault logs once
+    and turns all scope blocks and iterators off (false / nothing) for the session.
+  - The self-check on game entry checks every region's id and sea flag and state 1's region; a
+    failure deactivates the feature.
+
+**New signatures and shapes:**
+
+| Name | What | Checked |
+|---|---|---|
+| `kSigScopeSetRegion` (SIG) | `SetStrategicRegion` | unique on vanilla 1.19.3, patched 1.19.3, 1.19.2 |
+| `kSigRegionSeaShare` (SIG) | the sea share offset | unique on all three |
+| `kCodeAnyStateEvaluate` (CODE) | any_state slot 22: copy constructor call; it must also call the known scope destructor and `scriptValueEval` | all three |
+| `kCodeTargetEffectExecute` (CODE) | every/random slot 13: candidate count +0xdc, collect = slot 25 | all three |
+| `kCodeTargetEffectLimit` (CODE) | the `limit` handler: limit trigger at +0x78 | all three |
+| `kCodeScalarDeletingDtor` (CODE) | every_state slot 0: `operator delete` | all three |
+
+`tools/check_code_shapes.py` decodes the key chains the same way. `tools/check_signatures.py`
+also passes on all three builds.
+
+**Tests:** `native_script_test` covers:
+- registration rules: duplicates, scope type, missing target or header;
+- target resolution: explicit, from the scope, none, a crash, the wrong type;
+- the docs lines.
+
+All pass. The engine side is not testable offline beyond the shape checks.
+
+### F6. In-game test plan (part 3)
+
+Install the DLL and sync the test mod, start a 1939 game as France, and keep
+`trigger_timing = 1` on.
+
+1. **Startup (`loader.log`):**
+   - `region_scope: scope copy ..., any_state keys 2, every_state keys 5 (limit 0x2a0a), random_state keys 4 (limit 0x2a0a)`.
+   - `registered` for `strategic_region` (trigger and effect), the three iterators and the three
+     identity triggers.
+   - `loader_script_docs.md` lists the iterators' keys by name.
+   - `error.log`: one unexpected-token error for `prioritize` in
+     `hoi4_loader_test_region_scope_decisions.txt`, and no other error from that file.
+2. **Game entry:** `region_scope: self-check passed (304 strategic regions, 98 sea; state 1 lies in ... (169))`.
+3. **Hover "Region scope: strategic_region and identity triggers":**
+   - "Northern France:" with three ticked lines;
+   - "Bay of Biscay:" with two;
+   - the state form;
+   - the NOT line.
+4. **Hover "Region scope: data triggers inside":** the data trigger lines name Northern France
+   (19) and show current values.
+5. **Hover "Region scope: any_strategic_region":**
+   - the header is "Any strategic region";
+   - the count lines read "At least 98 of" / "99";
+   - the custom tooltip line;
+   - all ticked.
+6. **"Region scope: rename the Bay of Biscay to A":** the tooltip shows "Bay of Biscay:" with the
+   rename line. Take it: the map shows "Loader Test Sea A" and the description shows "Ran: 1".
+7. **every_strategic_region decisions:**
+   - "count the sea regions with our air superiority above 50 percent" lists the regions (none in
+     peacetime).
+   - "3 random sea regions" shows "Last count: 3" after taking it.
+   - "rename ... to B" renames the Bay of Biscay.
+8. **random_strategic_region:**
+   - The tooltip names one of the North Sea, Channel or Bay of Biscay, and taking it renames that
+     one to C.
+   - The prioritize decision shows "Ran: 1".
+   - Then "reset all renamed regions".
+9. **Cost:** after 10 in-game days, the timing block lists `any_strategic_region` and
+   `air_superiority` (AI probe plus hovering), with evaluations and ns each.

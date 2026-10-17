@@ -140,6 +140,105 @@ def check(path, codes):
     refs, _ = cs.anchor_refs(img.d, text_va, text, 'army.daily')
     ok = bool(refs) and len(refs) == 1 and img.match_at(refs[0] + 0x14, codes['kCodeArmyDailyLoop'])
     results.append(('kCodeArmyDailyLoop (army.daily lea + 0x14)', ok, hex(refs[0]) if refs else '-'))
+    results += check_region_scope(img, codes, text_va, text)
+    return results
+
+
+def rel32(img, insn):
+    """Target of the rel32 at insn+1 (call / jmp)."""
+    return insn + 5 + struct.unpack_from('<i', img.d, img.va2off(insn) + 1)[0]
+
+
+def decode_key_chain(img, va, factory):
+    """The vanilla item handler's compare chain, as engine_scope.cpp DecodeKeyChain reads it:
+    (keys, {key: handler}) or None."""
+    keys, handlers, p = [], {}, va
+    for _ in range(48):
+        b = img.d[img.va2off(p):img.va2off(p) + 8]
+        if b[:3] in (b'\x48\x8b\xc2', b'\x48\x8b\xda'):
+            p += 3
+        elif b[:2] == b'\x40\x53':
+            p += 2
+        elif b[:3] == b'\x48\x83\xec':
+            p += 4
+        elif b[:3] == b'\x41\x81\xf8':
+            key = struct.unpack_from('<I', b, 3)[0]
+            p += 7
+            b = img.d[img.va2off(p):img.va2off(p) + 6]
+            if b[0] == 0x74:
+                handlers[key] = p + 2 + struct.unpack_from('<b', b, 1)[0]
+                p += 2
+            elif b[:2] == b'\x0f\x84':
+                handlers[key] = p + 6 + struct.unpack_from('<i', b, 2)[0]
+                p += 6
+            elif b[0] == 0x75:
+                handlers[key] = p + 2
+                p = p + 2 + struct.unpack_from('<b', b, 1)[0]
+            elif b[:2] == b'\x0f\x85':
+                handlers[key] = p + 6
+                p = p + 6 + struct.unpack_from('<i', b, 2)[0]
+            else:
+                return None
+            keys.append(key)
+        elif b[:2] == b'\x41\xb9':
+            if struct.unpack_from('<I', b, 2)[0] != 2:
+                return None
+            p += 6
+            b = img.d[img.va2off(p):img.va2off(p) + 8]
+            if b[:3] == b'\x48\x83\xc4':
+                p += 4
+                b = img.d[img.va2off(p):img.va2off(p) + 8]
+            if b[:1] == b'\x5b':
+                p += 1
+                b = img.d[img.va2off(p):img.va2off(p) + 8]
+            return (keys, handlers) if b[0] == 0xe9 and rel32(img, p) == factory and keys else None
+        else:
+            return None
+    return None
+
+
+def calls(img, va, length, target):
+    d, o = img.d, img.va2off(va)
+    return any(d[o + i] == 0xe8 and rel32(img, va + i) == target for i in range(length - 5))
+
+
+def check_region_scope(img, codes, text_va, text):
+    """region_scope (NOTES.md F5): the vanilla state iterators the region iterators are cloned from."""
+    results = []
+    trig, eff = img.vtable('.?AVCTrigger@@')[1], img.vtable('.?AVCEffect@@')[1]
+    any_vt = img.vtable('.?AVCAnyStateTrigger@@')
+    every_vt = img.vtable('.?AVCEveryStateEffect@@')
+    random_vt = img.vtable('.?AVCRandomStateEffect@@')
+    entries = [img.vtable('.?AV?$CTriggerEntry@VCAnyStateTrigger@@@@'), img.vtable('.?AV?$CEffectEntry@VCEveryStateEffect@@@@'),
+               img.vtable('.?AV?$CEffectEntry@VCRandomStateEffect@@@@'), img.vtable('.?AVCAndTrigger@@')]
+    if not (any_vt and every_vt and random_vt and all(entries)):
+        return [('region_scope rtti', False, 'an iterator class or entry vtable is missing')]
+    for name, vt, slot, factory, limit in (('any_state', any_vt, 6, trig[6], False), ('every_state', every_vt, 4, eff[4], True),
+                                           ('random_state', random_vt, 4, eff[4], True)):
+        chain = decode_key_chain(img, vt[1][slot], factory)
+        ok = chain is not None
+        where = 'keys ' + ','.join(hex(k) for k in chain[0]) if chain else hex(vt[1][slot])
+        if ok and limit:
+            lim = [k for k, h in chain[1].items() if img.match_at(h, codes['kCodeTargetEffectLimit'])]
+            ok = len(lim) == 1 and len(vt[1]) >= 29 and img.match_at(vt[1][13], codes['kCodeTargetEffectExecute'])
+            where += ' limit ' + (hex(lim[0]) if len(lim) == 1 else '?')
+        results.append(('%s item keys / limit / execute' % name, ok, where))
+    ev = any_vt[1][22]
+    ok = img.match_at(ev, codes['kCodeAnyStateEvaluate'])
+    copy = rel32(img, ev + 0x26) if ok else 0
+    ok = ok and img.match_at(copy, '48 89 4C 24 08 53 48 83 EC 20 48 8B D9 48 8D 05 ?? ?? ?? ?? 48 89 01 33 C9 89 4B 08 '
+                                   'C7 43 0C 01 00 00 00 C7 43 10 9E BA A6 5E')
+    # The scope destructor (player_scope's) and the script value evaluation (CIntTrigger's).
+    sigs, _ = cs.load_signatures(pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h')
+    ps = [m.start() for m in cs.compile_pattern(dict(sigs)['kSigPlayerScope']).finditer(text)]
+    dtor = rel32(img, text_va + ps[0] + 0x45) if len(ps) == 1 else 0
+    num = img.vtable('.?AVCNumOfFactoriesTrigger@@')[1][22]
+    sve = rel32(img, num + 0x30)
+    ok = bool(ok and dtor and calls(img, ev, 0x400, dtor) and calls(img, ev, 0x400, sve))
+    results.append(('kCodeAnyStateEvaluate (copy ctor, dtor, script value)', ok, hex(copy)))
+    dt = every_vt[1][0]
+    ok = img.match_at(dt, codes['kCodeScalarDeletingDtor'])
+    results.append(('kCodeScalarDeletingDtor (every_state slot 0)', ok, hex(rel32(img, dt + 0x21)) if ok else hex(dt)))
     return results
 
 

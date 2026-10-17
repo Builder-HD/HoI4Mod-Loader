@@ -391,6 +391,72 @@ Strategic region values can't be variables, because HOI4 has no region-scope var
 **Multiplayer:** all values are game state that every machine computes the same way (integer
 fixed point, no floats), so the triggers are as deterministic as vanilla's.
 
+## Strategic region scopes (`region_scope`)
+
+Vanilla script has no way to enter a strategic region scope; only the game's C++ code creates
+one (NOTES.md Part F). The `region_scope` feature adds it, plus three triggers about the region
+in scope:
+
+| Command | Kind | What it does |
+|---|---|---|
+| `strategic_region = { region = 42 ... }` | trigger | true if all triggers inside are true in region 42 |
+| `strategic_region = { region = 42 ... }` | effect | runs the effects inside in region 42 |
+| `any_strategic_region = { ... }` | trigger | as `any_state`: true if a region (or `count` regions) meets all triggers inside |
+| `every_strategic_region = { limit = { ... } ... }` | effect | as `every_state`: runs the effects in every region that meets `limit` |
+| `random_strategic_region = { limit = { ... } ... }` | effect | as `random_state`: runs the effects in one random region that meets `limit` |
+| `strategic_region_id = 42` | trigger, region scope | the region in scope is region 42 |
+| `is_sea_region = yes` | trigger, region scope | the region has sea provinces (`no`: a land region) |
+| `region_has_state = 16` | trigger, region scope | state 16 has a province in the region |
+
+```
+# Inside, the data triggers and set_strategic_region_name take the region from the scope:
+strategic_region = { region = 19 air_superiority > 0.5 divisions_count = { enemy_of = ROOT count < 10 } }
+16 = { strategic_region = { naval_dominance > 0.5 } }       # no region: the state's region
+any_strategic_region = { count = 3 is_sea_region = yes naval_dominance > 0.6 }
+every_strategic_region = {
+    limit = { is_sea_region = yes air_superiority > 0.5 }
+    display_individual_scopes = yes
+    add_to_variable = { global.my_air_regions = 1 }
+}
+random_strategic_region = {
+    limit = { OR = { strategic_region_id = 16 strategic_region_id = 18 } }
+    set_strategic_region_name = { name = MY_SEA_NAME }
+}
+```
+
+- **Which region:** `region = <id>` (a number). Without it: the strategic region scope, else the
+  state scope's region (the region of the state's first province). With no region the trigger is
+  false (true under `NOT`) and the effect does nothing.
+- **Inside the blocks:** only commands that work in any scope or in the strategic region scope.
+  That includes `global.` variables, flags, `if`, `NOT`, `OR`, the loader's data triggers and
+  `set_strategic_region_name`. The engine reports others with file and line, as it does for a
+  state trigger inside `GER = { }`. HOI4 has no region-scope variables, so use `global.` ones.
+- **Iterators:** the game's own `any_state` / `every_state` / `random_state` code, with regions
+  instead of states.
+  - `count`, `tooltip`, `limit`, `random_select_amount` and `display_individual_scopes` behave
+    as there.
+  - Regions are checked in id order (1, 2, 3, ...).
+  - `random_strategic_region` picks with the game's synced random numbers, so it is
+    multiplayer-safe.
+  - `prioritize` (a list of state ids) is not supported: it is a parse error, and the rest of
+    the block still works.
+- **Tooltips:**
+  - `strategic_region` shows "Bay of Biscay:" with the lines inside indented below it, each
+    marked in that region, like `GER = { }`.
+  - `any_strategic_region` shows "Any strategic region" ("At least 3 of ..." with `count`) and
+    the lines inside, as `any_state` does. A mod can translate the header with the localisation
+    key `HOI4_LOADER_ANY_STRATEGIC_REGION_STARTS`. Without that key the loader shows the English
+    text, so no loc file is needed. `tooltip = key` replaces the header as in vanilla.
+  - `every_` / `random_strategic_region` show the region names (for random: the one that will be
+    picked) and the effects, as vanilla does for states.
+- **Without the loader** the blocks are unknown commands, which the game logs and drops. A
+  dropped trigger block counts as **true**, so guard it with
+  `hoi4_loader_feature_region_scope = yes` in the same AND block (see "Checking for features in
+  script").
+- **Cost:** a block costs what its contents cost, plus building one scope. An iterator checks its
+  contents in each of the 304 regions, so `any_strategic_region` with a data trigger inside costs
+  up to 304 evaluations of that trigger. `trigger_timing` reports both.
+
 ## Writing a native effect or trigger (for plugin authors)
 
 Declare commands in your feature's init (see `src/plugin_region_names.cpp`); the API in
@@ -434,6 +500,10 @@ bool MyFeatureInit() {
     the trigger is also a game variable.
   - **Missing value:** return false when the value does not exist; the trigger is then false.
   - **`subject`:** optional, the start of the tooltip line.
+- **Scope blocks and iterators:** `register_native_scope_block` (a block whose other keys run in
+  the scope a `target` callback picks, e.g. `strategic_region`) and `register_native_iterator`
+  (any / every / random over every object of a scope type, cloned from the game's state
+  iterators). Only strategic region scopes are supported; see `src/plugin_region_scope.cpp`.
 - **When:** register from the feature's init only. Engine registration happens at lexer-ready,
   before any script is parsed; later calls are refused. The feature needs the engine tier and
   the `lifecycle` feature.
@@ -518,9 +588,13 @@ src/plugin_region_names.cpp   region_names feature (flags, GetNameKey hook, nati
 src/plugin_game_loaded.cpp    game_loaded feature (fires on_game_loaded after a save is loaded)
 src/plugin_region_control.cpp, plugin_military_counts.cpp, plugin_army_condition.cpp,
 src/plugin_production_data.cpp   data trigger features (numeric triggers)
+src/plugin_region_scope.cpp   region_scope feature (strategic region scope blocks, iterators)
 src/engine_data.cpp           engine access for the data triggers (read-only game state)
+src/engine_scope.cpp          engine access for scope blocks (vanilla iterator templates, child scopes)
 src/native_script.h, .cpp     native effect/trigger API: schemas, registration, parsing, docs
 src/native_script_engine.cpp  native API engine binding (vtable clones, registries, Scope)
+src/native_scope_engine.cpp   native API engine binding of scope blocks and iterators
+src/native_binding.h          binding internals shared by the two binding files
 src/engine.cpp, engine.h      engine access: all hoi4.exe functions/data the features use
 src/lifecycle.cpp, .h         lexer-ready / game-entered callbacks, main-thread queue (lifecycle feature)
 src/proxy.asm, version.def    version.dll export stubs
@@ -580,7 +654,7 @@ Optional diagnostics:
 
 ```
 [diagnostics]
-trigger_timing = 1   ; time every numeric trigger; loader.log summary every 10 in-game days
+trigger_timing = 1   ; time numeric triggers, scope blocks and iterators; loader.log summary every 10 in-game days
 ```
 
 ### Hash cache

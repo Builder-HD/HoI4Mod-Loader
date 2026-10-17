@@ -168,7 +168,24 @@ std::string ParamUsage(const ParamSpec& p) {
     return std::string("<") + TypeName(p.type) + ">";
 }
 
+const char* ChildrenWord(CommandKind k) { return k == CommandKind::Effect ? "<effects>" : "<triggers>"; }
+
 std::string Usage(const Command& c) {
+    if (c.iterator) {
+        switch (c.iteratorKind) {
+            case IteratorKind::Any: return "`" + c.name + " = { count = <int> tooltip = <key> <triggers> }`";
+            case IteratorKind::Every:
+                return "`" + c.name + " = { limit = { <triggers> } random_select_amount = <int> display_individual_scopes = yes "
+                       "tooltip = <key> <effects> }`";
+            default: return "`" + c.name + " = { limit = { <triggers> } tooltip = <key> <effects> }`";
+        }
+    }
+    if (c.scopeBlock) {
+        std::string s = "`" + c.name + " = {";
+        for (const ParamSpec& p : c.params)
+            if (!p.reserved) s += std::string(" ") + p.name + " = " + ParamUsage(p);
+        return s + " " + ChildrenWord(c.kind) + " }`";
+    }
     if (c.numeric) {
         const char* rhs = c.numericKind == NumericKind::Ratio ? "<0..1>" : "<int>";
         std::string s;
@@ -217,6 +234,17 @@ bool SafeEvaluate(bool (*fn)(const Args&, const Scope&), const Args* a, const Sc
 
 bool SafeValue(bool (*fn)(const Args&, const Scope&, int64_t*), const Args* a, const Scope* s, int64_t* out, bool* result,
                DWORD* code) {
+    __try {
+        *result = fn(*a, *s, out);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *code = GetExceptionCode();
+        return false;
+    }
+}
+
+bool SafeTarget(bool (*fn)(const Args&, const Scope&, ScopeTarget*), const Args* a, const Scope* s, ScopeTarget* out,
+                bool* result, DWORD* code) {
     __try {
         *result = fn(*a, *s, out);
         return true;
@@ -392,6 +420,51 @@ bool register_native_numeric_trigger(const NativeNumericTrigger& d, const char* 
     return true;
 }
 
+bool register_native_scope_block(const NativeScopeBlock& d, const char* feature) {
+    std::string why;
+    if (g_finalized) why = "registration window is closed (engine registration already ran)";
+    else if (!ValidIdentifier(d.name)) why = "name must be 1-64 characters of a-z 0-9 _";
+    else if (!d.help || !*d.help) why = "help text is required";
+    else if (!d.target) why = "target callback is required";
+    else if (d.childScope != ScopeMask::StrategicRegion) why = "only strategic region scope blocks are supported";
+    else why = CheckParams(d.params);
+    for (const Command* c : g_commands)
+        if (why.empty() && c->kind == d.kind && c->name == d.name)
+            why = std::string(AKind(d.kind)) + " with this name is already registered by the loader";
+    if (!why.empty()) return Refuse(d.kind, d.name, feature, why);
+    Command* c = NewCommand(d.kind, feature, d.name, d.help, Form::Block, d.params, d.scopes);
+    c->scopeBlock = true;
+    c->childScope = d.childScope;
+    c->target = d.target;
+    g_commands.push_back(c);
+    Log("Native scope block %s '%s' (feature %s) queued for engine registration", KindName(d.kind), d.name,
+        feature ? feature : "?");
+    return true;
+}
+
+bool register_native_iterator(const NativeIterator& d, const char* feature) {
+    CommandKind kind = d.kind == IteratorKind::Any ? CommandKind::Trigger : CommandKind::Effect;
+    std::string why;
+    if (g_finalized) why = "registration window is closed (engine registration already ran)";
+    else if (!ValidIdentifier(d.name)) why = "name must be 1-64 characters of a-z 0-9 _";
+    else if (!d.help || !*d.help) why = "help text is required";
+    else if (d.elements != ScopeMask::StrategicRegion) why = "only strategic region iterators are supported";
+    else if (d.kind == IteratorKind::Any && (!d.headerText || !*d.headerText)) why = "an any iterator needs a header text";
+    for (const Command* c : g_commands)
+        if (why.empty() && c->kind == kind && c->name == d.name)
+            why = std::string(AKind(kind)) + " with this name is already registered by the loader";
+    if (!why.empty()) return Refuse(kind, d.name, feature, why);
+    Command* c = NewCommand(kind, feature, d.name, d.help, Form::Block, {}, ScopeMask::Any);
+    c->iterator = true;
+    c->iteratorKind = d.kind;
+    c->childScope = d.elements;
+    c->headerKey = d.headerKey ? d.headerKey : "";
+    c->headerText = d.headerText ? d.headerText : "";
+    g_commands.push_back(c);
+    Log("Native iterator %s '%s' (feature %s) queued for engine registration", KindName(kind), d.name, feature ? feature : "?");
+    return true;
+}
+
 bool NativeScriptFinalized() { return g_finalized; }
 
 namespace {
@@ -484,6 +557,8 @@ std::string NativeScriptDocs() {
             }
             s += "- Scopes: " + ScopeNames(c->scopes) + "\n";
             s += "- Usage: " + Usage(*c) + "\n";
+            if (c->scopeBlock || c->iterator) s += "- Children run in: " + ScopeNames(c->childScope) + " scope\n";
+            if (c->iterator && !c->keysDoc.empty()) s += "- Keys (as the game's state iterator): " + c->keysDoc + "\n";
             if (!c->params.empty()) {
                 s += "- Parameters:\n";
                 for (const ParamSpec& p : c->params) {
@@ -716,10 +791,26 @@ bool NativeNumericValue(const ParsedCommand* pc, const void* engineScope, int64_
     if (g_timing) {
         LARGE_INTEGER t1;
         QueryPerformanceCounter(&t1);
-        InterlockedIncrement64(&const_cast<Command&>(c).evalCount);
-        InterlockedAdd64(&const_cast<Command&>(c).evalTicks, t1.QuadPart - t0.QuadPart);
+        NativeTimingAdd(c, t1.QuadPart - t0.QuadPart);
     }
     return ok;
+}
+
+bool NativeScopeTarget(const ParsedCommand* pc, const void* engineScope, ScopeTarget* out) {
+    *out = ScopeTarget{};
+    if (!pc || pc->parseError || !pc->cmd->target) return false;
+    const Command& c = *pc->cmd;
+    Scope scope(engineScope);
+    ArgValue resolved[kMaxParams];
+    if (!ResolveArgs(*pc, scope, resolved)) return false;
+    Args args(resolved, pc->args.size());
+    bool ok = false;
+    DWORD code = 0;
+    if (!SafeTarget(c.target, &args, &scope, out, &ok, &code)) {
+        LogException(c, "target", code);
+        return false;
+    }
+    return ok && out->type == c.childScope && out->id > 0;
 }
 
 bool NativeCompare(NumericKind kind, CompareOp op, int64_t value, int64_t rhs) {
@@ -804,6 +895,10 @@ std::string NativeTooltip(const ParsedCommand* pc, const void* engineScope, bool
 
 void NativeSetTiming(bool on) { g_timing = on; }
 bool NativeTimingEnabled() { return g_timing; }
+void NativeTimingAdd(const Command& c, long long ticks) {
+    InterlockedIncrement64(&const_cast<Command&>(c).evalCount);
+    InterlockedAdd64(&const_cast<Command&>(c).evalTicks, ticks);
+}
 
 void NativeScriptResetForTests() {
     for (Command* c : g_commands) delete c;

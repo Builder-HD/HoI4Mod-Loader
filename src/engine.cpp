@@ -443,6 +443,7 @@ bool Resolve() {
     ResolveNativeScript();
     ResolveOnActions();
     ResolveData();
+    ResolveScopeBlocks();
 
     Log("Engine: gamestate %s, flags +0x%x, regions +0x%x/+0x%x", g_ppGameState ? SigDescribe(g_ppGameState).c_str() : "-",
         g_flagsOffset, g_regionArrayOffset, g_regionCountOffset);
@@ -597,6 +598,8 @@ bool HaveOnActions() {
 }
 
 bool HaveSession() { return g_sessionGetterDisp && g_sessionServerOffset && g_sessionHotjoinOffset && g_serverVtables[0]; }
+
+void* EventScopeDestructor() { return (void*)g_scopeDtor; }
 
 SessionInfo QuerySession(void* idler) {
     SessionInfo info;

@@ -27,6 +27,7 @@ static Feature g_features[] = {
     {"military_counts", Tier::Engine, &MilitaryCountsInit, "lifecycle", false, 0},
     {"army_condition", Tier::Engine, &ArmyConditionInit, "lifecycle", false, 0},
     {"production_data", Tier::Engine, &ProductionDataInit, "lifecycle", false, 0},
+    {"region_scope", Tier::Engine, &RegionScopeInit, "lifecycle", false, 0},
 };
 static int g_presentToken = 0;
 
@@ -142,9 +143,11 @@ static void RefreshFlagsOnGameEntered(bool loadedFromSave) {
 }
 
 // --- Trigger timing diagnostics ([diagnostics] trigger_timing = 1) -----------------------------
-// Every numeric trigger evaluation is timed (QueryPerformanceCounter, two calls per evaluation).
-// On the main thread, every 10 in-game days, loader.log gets per trigger: evaluations, average
-// time per evaluation, and time per in-game day; then the counters restart.
+// Every evaluation of a numeric trigger, a scope block trigger or an any_ iterator is timed
+// (QueryPerformanceCounter, two calls per evaluation). On the main thread, every 10 in-game days,
+// loader.log gets per trigger: evaluations, average time per evaluation, and time per in-game day;
+// then the counters restart. Scope blocks and iterators include the triggers inside them, so the
+// total adds up the numeric triggers only.
 static int g_timingDay = -1, g_timingDays = 0;
 static LARGE_INTEGER g_qpcFreq;
 
@@ -169,12 +172,13 @@ static void TimingFrame() {
     if (g_timingDays < 10) return;
     double totalMs = 0;
     for (Command* c : NativeCommands()) {
-        if (!c->numeric || c->status != CommandStatus::Registered) continue;
+        bool timed = c->numeric || (c->kind == CommandKind::Trigger && (c->scopeBlock || c->iterator));
+        if (!timed || c->status != CommandStatus::Registered) continue;
         long long n = InterlockedExchange64(&c->evalCount, 0);
         long long ticks = InterlockedExchange64(&c->evalTicks, 0);
         if (n == 0) continue;
         double ms = ticks * 1000.0 / (double)g_qpcFreq.QuadPart;
-        totalMs += ms;
+        if (c->numeric) totalMs += ms;
         Log("Trigger timing (%d days): %s: %lld evaluations, %.0f ns each, %.3f ms per day", g_timingDays, c->name.c_str(), n,
             ms * 1e6 / (double)n, ms / g_timingDays);
     }
@@ -219,7 +223,7 @@ void FeaturesInit(bool engineAllowed, const wchar_t* iniPath) {
             QueryPerformanceFrequency(&g_qpcFreq);
             NativeSetTiming(true);
             OnMainThreadFrame(&TimingFrame);
-            Log("Diagnostics: numeric trigger timing ON (report every 10 in-game days)");
+            Log("Diagnostics: trigger timing ON for numeric triggers, scope blocks and iterators (report every 10 in-game days)");
         } else {
             Log("Diagnostics: trigger timing needs the main-thread queue; off");
         }

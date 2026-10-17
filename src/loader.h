@@ -104,3 +104,4 @@ bool RegionControlInit();     // plugin_region_control.cpp
 bool MilitaryCountsInit();    // plugin_military_counts.cpp
 bool ArmyConditionInit();     // plugin_army_condition.cpp
 bool ProductionDataInit();    // plugin_production_data.cpp
+bool RegionScopeInit();       // plugin_region_scope.cpp

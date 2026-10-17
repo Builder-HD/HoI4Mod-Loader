@@ -38,6 +38,7 @@ uint32_t g_gameDate = 0;           // CGameState -> current date (hours)
 uint32_t g_regionNavalOffset = 0;  // CStrategicRegion -> naval dominance object
 uint32_t g_diplomacyOffset = 0;    // CCountry -> diplomacy (relations at +8, indexed by tag index)
 uint32_t g_relationWarOffset = 0;  // relation -> CWar* (0 = no war)
+uint32_t g_regionSeaShare = 0;     // CStrategicRegion -> share of sea provinces (fixed point)
 
 // Layout constants inside matched signatures (a change breaks the match):
 const size_t kNavalEntries = 0x40, kNavalCount = 0x4c, kNavalEntrySize = 0x50, kNavalValue = 0x20;  // kSigNavalSums
@@ -165,6 +166,8 @@ void ResolveData() {
         Log("ERROR: data triggers: state and region loops disagree on the layout; military_counts disabled");
         g_provinces = 0;
     }
+    if ((p = SigFindUnique("region_sea_share", kSigRegionSeaShare)) != nullptr)
+        g_regionSeaShare = Rd<uint32_t>(p, kSigRegionSeaShareDisp);
     ResolveArmyCondition();
     ResolveProduction();
     if ((p = SigFindUnique("game_date", kSigGameDate)) != nullptr) g_gameDate = Rd<uint32_t>(p, kSigGameDateDisp);
@@ -629,6 +632,42 @@ std::string RegionName(int regionId) {
     void* region = RegionById(regionId);
     const EngineString* s = region && pRegionGetNameKey ? ((GetNameKey_t)pRegionGetNameKey)(region) : nullptr;
     return s && s->size > 0 && s->size < 4096 ? std::string(s->c_str(), (size_t)s->size) : "region " + std::to_string(regionId);
+}
+
+// --- Region data (region_scope) ----------------------------------------------------------------
+bool HaveRegionData() { return HaveRegions() && g_stateArray && g_stateCount && g_provinces && g_provinceCount && g_regionSeaShare; }
+
+bool RegionIsSea(int regionId, bool* sea) {
+    void* region = HaveRegionData() ? RegionById(regionId) : nullptr;
+    if (!region) return false;
+    *sea = Rd<int64_t>(region, g_regionSeaShare) > 0;
+    return true;
+}
+
+bool RegionHasState(int regionId, int stateId, bool* has) {
+    *has = false;
+    if (!HaveRegionData()) return false;
+    void* region = RegionById(regionId);
+    void* state = StateById(stateId);
+    if (!region || !state) return false;
+    PtrList inRegion = ListAt(region, g_provinces, g_provinceCount);
+    PtrList inState = ListAt(state, g_provinces, g_provinceCount);
+    for (int i = 0; i < inState.count && !*has; ++i)
+        for (int j = 0; j < inRegion.count && !*has; ++j) *has = inState.data[i] == inRegion.data[j];
+    return true;
+}
+
+int RegionOfState(int stateId) {
+    void* state = HaveRegionData() ? StateById(stateId) : nullptr;
+    PtrList inState = ListAt(state, g_provinces, g_provinceCount);
+    if (!inState.count) return 0;
+    int regions = RegionCount();
+    for (int id = 1; id < regions; ++id) {
+        PtrList inRegion = ListAt(RegionById(id), g_provinces, g_provinceCount);
+        for (int j = 0; j < inRegion.count; ++j)
+            if (inRegion.data[j] == inState.data[0]) return id;
+    }
+    return 0;
 }
 
 int GameDateHours() {

@@ -213,6 +213,16 @@ static const size_t kSigAssignFieldA = 4, kSigAssignFieldB = 7, kSigAssignFieldA
 ANCHOR(kAnchorProductionDaily, "production.daily_serial")
 static const size_t kProductionDailyCodeFromLea = 0x13, kProductionDailyLinesDisp = 0x1d, kProductionDailyCountDisp = 0x21;
 
+// --- Scope blocks and iterators (region_scope, NOTES.md F5) --------------------------------
+// CEventScope::SetStrategicRegion(scope, CStrategicRegion*, bool clear): clear the other scope
+// fields if asked, then mov [rbx+0x48],rdi (the region field Scope::types reads). (0x14053b670)
+SIG(kSigScopeSetRegion, "48 89 5C 24 08 57 48 83 EC 20 48 8B FA 48 8B D9 45 84 C0 74 ?? E8 ?? ?? ?? ?? 48 89 7B 48 48 8B 5C 24 30 48 83 C4 20 5F C3 48 8B 5C 24 30 48 89 79 48")
+// Console region command: cmp qword [rbx+<sea share>],0; jg; else "Selected region has no sea
+// province" (length 0x23). The share (fixed point) of the region's provinces that are sea; disp32
+// at +3. (0x140235c46)
+SIG(kSigRegionSeaShare, "48 83 BB ?? ?? ?? ?? 00 7F ?? 49 8D 4F 08 41 B8 23 00 00 00 48 8D 15")
+static const size_t kSigRegionSeaShareDisp = 3;
+
 // --- Code shapes at RTTI-found addresses (numeric triggers, NOTES.md E2) -------------------
 // CODE(name, "..."): checked with SigMatchAt at an address reached through an RTTI vtable, not
 // scanned (so not required to be unique). tools/check_code_shapes.py checks them on exe copies.
@@ -257,6 +267,22 @@ CODE(kCodeNavalLineEquipment, "48 8B 89 ?? ?? ?? ?? E9")
 // The divisions loop right after the "army.daily" profiler zone (kAnchorArmyDaily, lea+0x14):
 // mov rbx,[rdi+list]; movsxd rax,[rdi+count]; ...; call [rax+0x98] per division.
 CODE(kCodeArmyDailyLoop, "48 8B 9F ?? ?? ?? ?? 48 63 87 ?? ?? ?? ?? 48 8D 34 C3 48 3B DE 74 ?? 0F 1F 40 00 48 8B 0B 48 8B 01 FF 90 98 00 00 00")
+
+// --- Region scope templates (NOTES.md F5): the vanilla state iterators ----------------------
+// CAnyStateTrigger slot 22: child scope = CEventScope copy of the scope (rdx; E8 at +0x26), then
+// the parent's ROOT (mov rax,[rsi+0x18]) and FROM.
+CODE(kCodeAnyStateEvaluate, "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 41 56 41 57 48 81 EC ?? ?? ?? ?? 48 8B F2 48 8B F9 48 8D 4C 24 ?? E8 ?? ?? ?? ?? 90 48 8B 46 18")
+static const size_t kCodeAnyStateScopeCopyCall = 0x26;
+// CEveryStateEffect / CRandomStateEffect slot 13: candidates.count (+0xdc) = 0, then slot 25
+// (collect) via call [rax+0xc8]. The candidates are a CPdxArray at +0xd0 { T** data, int cap,
+// int count @+0xc, allocator* @+0x10 }.
+CODE(kCodeTargetEffectExecute, "48 89 5C 24 10 48 89 74 24 18 57 48 81 EC ?? ?? ?? ?? 48 8B ?? 48 8B ?? C7 81 DC 00 00 00 00 00 00 00 48 8B 01 FF 90 C8 00 00 00")
+// The `limit` key's handler in the every / random item handler: cmp dword [rcx+0x8c],0, else
+// "Multiple limits in target effect": the limit trigger is embedded at +0x78 (child count +0x14).
+CODE(kCodeTargetEffectLimit, "83 B9 8C 00 00 00 00 0F 84")
+// CEveryStateEffect scalar deleting destructor: operator delete(this, size), E8 at +0x21.
+CODE(kCodeScalarDeletingDtor, "48 89 5C 24 08 57 48 83 EC 20 8B DA 48 8B F9 E8 ?? ?? ?? ?? F6 C3 01 74 ?? BA ?? ?? ?? ?? 48 8B CF E8")
+static const size_t kCodeDtorDeleteCall = 0x21;
 
 #undef CODE
 #undef SIG

@@ -38,14 +38,18 @@ add_library(hoi4_loader SHARED
     src/plugin_military_counts.cpp
     src/plugin_army_condition.cpp
     src/plugin_production_data.cpp
+    src/plugin_region_scope.cpp
     src/engine.cpp
     src/engine_data.cpp
+    src/engine_scope.cpp
     src/engine.h
     src/lifecycle.cpp
     src/lifecycle.h
     src/native_script.cpp
     src/native_script_engine.cpp
+    src/native_scope_engine.cpp
     src/native_script.h
+    src/native_binding.h
     src/loader.h
     src/signatures.h
     src/sha256.h
