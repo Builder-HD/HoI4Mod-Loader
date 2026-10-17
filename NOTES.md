@@ -2548,3 +2548,11 @@ Install the DLL and sync the test mod, start a 1939 game as France, and keep
      (listed in the docs; the any_strategic_region header key is listed too).
    - **Layout:** the effect's own line (slot 7) needs no indent or newline. CEffect slot 8
      (FUN_14053f090) prefixes 3 spaces per level and puts a newline between lines.
+2. **Hidden guards.**
+   - The served `hoi4_loader_feature_<name>` and `hoi4_loader_present` are now
+     `hidden_trigger = { always = yes|no }`. `hidden_trigger` is valid in every scope, the
+     results are unchanged, and there is no "Always true" line any more.
+   - The README shows `custom_trigger_tooltip` around the guard for mods that want a visible
+     "Requires hoi4_loader" line.
+   - Stubs keep `always = no`. Inside the `custom_trigger_tooltip` the stub's line is not shown
+     either.

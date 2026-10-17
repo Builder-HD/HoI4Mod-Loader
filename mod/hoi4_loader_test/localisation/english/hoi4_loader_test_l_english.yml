@@ -143,3 +143,4 @@
  hoi4_loader_rs_reset_names_desc:0 "every_strategic_region = ( limit = ( strategic_region_has_custom_name = ( ) ) reset_strategic_region_name = ( ) )."
  hoi4_loader_ai_cost_region_probe:0 "AI cost probe: any_strategic_region (never taken)"
  hoi4_loader_ai_cost_region_probe_desc:0 "Every country evaluates any_strategic_region = ( is_sea_region = yes air_superiority > 0.5 ) for this decision's AI weight."
+ hoi4_loader_rs_requires_tt:0 "Requires hoi4_loader (strategic region scopes)"

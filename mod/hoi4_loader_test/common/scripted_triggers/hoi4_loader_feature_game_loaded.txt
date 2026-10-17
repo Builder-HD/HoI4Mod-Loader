@@ -1,4 +1,4 @@
 # Stub, used when hoi4_loader is absent or its game_loaded feature is not available.
-# The loader serves "always = yes" when the feature is active. That means on_game_loaded is
+# The loader serves "hidden_trigger = { always = yes }" when the feature is active. That means on_game_loaded is
 # SUPPORTED, not that it fired: in multiplayer it never fires. Never use it to skip a fallback.
 hoi4_loader_feature_game_loaded = { always = no }

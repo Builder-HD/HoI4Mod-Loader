@@ -72,9 +72,11 @@ std::string FeatureNames(Tier tier) {
 // ---------------------------------------------------------------------------
 // Core detection files (file tier, always served)
 // ---------------------------------------------------------------------------
+// Guards are wrapped in hidden_trigger: they add no "Always true" line to tooltips (a mod that
+// wants a visible reason wraps its guard in custom_trigger_tooltip; README).
 static std::string DetectTrigger() {
     return "# Served by hoi4_loader (version.dll)\r\n"
-           "hoi4_loader_present = { always = yes }\r\n";
+           "hoi4_loader_present = { hidden_trigger = { always = yes } }\r\n";
 }
 
 // Sets one flag per active feature and clears the flag of every other known feature, so a
@@ -109,7 +111,7 @@ static std::string GuardTrigger(const Feature& f) {
     char buf[256];
     sprintf_s(buf,
               "# Served by hoi4_loader (version.dll): %s\r\n"
-              "hoi4_loader_feature_%s = { always = %s }\r\n",
+              "hoi4_loader_feature_%s = { hidden_trigger = { always = %s } }\r\n",
               why, f.name, yes ? "yes" : "no");
     return buf;
 }

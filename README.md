@@ -67,9 +67,28 @@ uses one ships a stub, one file per feature:
 hoi4_loader_feature_region_names = { always = no }
 ```
 
-The loader serves `always = yes` instead, but only if that feature is active **and** every native
-command it declares was registered this session. Otherwise it serves `always = no`, with the
-reason as a comment.
+The loader serves `hidden_trigger = { always = yes }` instead, but only if that feature is active
+**and** every native command it declares was registered this session. Otherwise it serves
+`hidden_trigger = { always = no }`, with the reason as a comment. `hoi4_loader_present` is served
+the same way.
+- **No tooltip line:** the served guards are hidden, so they add no "Always true" line to
+  tooltips. A failed guard is hidden too, which leaves the player without a visible reason; to
+  show one, wrap the guard in `custom_trigger_tooltip`:
+  ```
+  available = {
+      custom_trigger_tooltip = {
+          tooltip = my_mod_requires_hoi4_loader_tt
+          hoi4_loader_feature_region_scope = yes
+      }
+      strategic_region = { region = 42 naval_dominance > 0.5 }
+  }
+  ```
+  ```yaml
+   my_mod_requires_hoi4_loader_tt:0 "Requires hoi4_loader (strategic region scopes)"
+  ```
+  The line shows ticked when the feature is there and crossed when it isn't, including when the
+  loader is missing. Your stub's `always = no` stays inside the `custom_trigger_tooltip`, so
+  its "Always false" line doesn't show either.
 - **Generated late:** the content is generated on the first read of the file. Native commands
   are registered when the lexer becomes ready, before any script file is read (about 2.5 s into
   startup, against about 6 s for the first script file in the tests). If the file were ever read

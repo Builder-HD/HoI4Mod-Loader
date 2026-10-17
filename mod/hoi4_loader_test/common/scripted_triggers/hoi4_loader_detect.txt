@@ -1,2 +1,2 @@
-# Stub. When hoi4_loader (version.dll) is active it serves "always = yes" instead.
+# Stub. When hoi4_loader (version.dll) is active it serves "hidden_trigger = { always = yes }" instead.
 hoi4_loader_present = { always = no }

@@ -100,16 +100,17 @@ int main(int argc, char** argv) {
     Write(guardRegions, "hoi4_loader_feature_region_names = { always = no }\n");
     std::string gp = ReadW(guardProbe.c_str()), gr = ReadW(guardRegions.c_str());
     if (expectEngine)
-        CHECK(has(gp, "hoi4_loader_feature_engine_probe = { always = yes }"), "guard engine_probe = yes (active, no native commands)");
+        CHECK(has(gp, "hoi4_loader_feature_engine_probe = { hidden_trigger = { always = yes } }"),
+              "guard engine_probe = yes (active, no native commands)");
     else
-        CHECK(has(gp, "hoi4_loader_feature_engine_probe = { always = no }") && has(gp, "Served by hoi4_loader"),
+        CHECK(has(gp, "hoi4_loader_feature_engine_probe = { hidden_trigger = { always = no } }") && has(gp, "Served by hoi4_loader"),
               "guard engine_probe = no (served, feature inactive)");
-    CHECK(has(gr, "hoi4_loader_feature_region_names = { always = no }") && has(gr, "Served by hoi4_loader"),
+    CHECK(has(gr, "hoi4_loader_feature_region_names = { hidden_trigger = { always = no } }") && has(gr, "Served by hoi4_loader"),
           "guard region_names = no (served; feature cannot start without the game)");
     std::wstring guardLoaded = m + L"\\common\\scripted_triggers\\hoi4_loader_feature_game_loaded.txt";
     Write(guardLoaded, "hoi4_loader_feature_game_loaded = { always = no }\n");
     std::string gl = ReadW(guardLoaded.c_str());
-    CHECK(has(gl, "hoi4_loader_feature_game_loaded = { always = no }") && has(gl, "Served by hoi4_loader"),
+    CHECK(has(gl, "hoi4_loader_feature_game_loaded = { hidden_trigger = { always = no } }") && has(gl, "Served by hoi4_loader"),
           "guard game_loaded = no (served; feature cannot start without the game)");
 
     // 3. Writes to the stub path must go to the real file, never the generated one.

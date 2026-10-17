@@ -1,3 +1,3 @@
 # Stub, used when hoi4_loader is absent or its region_scope feature is not available.
-# The loader serves "always = yes" when the feature is active and all its commands registered.
+# The loader serves "hidden_trigger = { always = yes }" when the feature is active and all its commands registered.
 hoi4_loader_feature_region_scope = { always = no }

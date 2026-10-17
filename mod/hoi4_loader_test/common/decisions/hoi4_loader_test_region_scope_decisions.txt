@@ -10,14 +10,18 @@
 hoi4_loader_data_category = {
 
 	# --- strategic_region (trigger) and the region identity triggers --------------------------
-	# Hover: "Northern France:" with three lines under it, "Bay of Biscay:" with two, and the
+	# Hover: "Requires hoi4_loader (strategic region scopes)" (the README's visible guard line),
+	# "Northern France:" with three lines under it, "Bay of Biscay:" with two, and the
 	# state-scope form. Every line ticked.
 	hoi4_loader_rs_identity = {
 		icon = generic_research
 		cost = 0
 		visible = { hoi4_loader_feature_region_scope = yes }
 		available = {
-			hoi4_loader_feature_region_scope = yes
+			custom_trigger_tooltip = {
+				tooltip = hoi4_loader_rs_requires_tt
+				hoi4_loader_feature_region_scope = yes
+			}
 			strategic_region = {
 				region = 19
 				strategic_region_id = 19
