@@ -2093,6 +2093,56 @@ whose attackers stand in Western Germany did not count for Western Germany.
 7. **Parse-error decisions:** "Planes with a reserved parameter" and "Planes with owner = any" are
    never available.
 
+**In-game results (2026-10-17, vanilla 1.19.3, DLL `42a6c3f6`, 1939 France): all steps pass.**
+- **Startup:**
+  - 12 of 12 commands registered.
+  - `loader.log` has exactly the two planes_count parse errors.
+  - `error.log` has only the two matching InitPostRead lines (test data decisions, lines 141 and
+    201).
+  - No error for GER / ENG.
+- **Game entry:** every self-check passed: "tag text FRA -> same country"; FRA 115 divisions at
+  63.1% average strength; 16 factories/dockyards on lines.
+- **Peacetime values:**
+  - air/naval 0% (no missions);
+  - 4 divisions in Ile de France, 76 French divisions in Northern France;
+  - 537 French planes in Northern France, 868 German planes in Western Germany;
+  - 16 lines, 2 on infantry_equipment (archetype = type 1);
+  - 6 dockyards on ship_hull_light, 0 small airframes;
+  - no_such_equipment unavailable.
+- **At war: France attacks from Northern France into Western Germany (the mirror of step 3).**
+  - **Battles:**
+    - Western Germany 1 (default) / 1 (located);
+    - Northern France 1 (default, fought from) / 0 (located);
+    - FRA involved 1, GER involved 20 (Poland).
+  - **Unit filters:**
+    - GER = at war with FRA = both = 18 in Western Germany;
+    - allied with FRA in Northern France 0 (no BEF yet);
+    - all divisions in Northern France 90 = French 90;
+    - ENG ships in the North Sea 17;
+    - allied ships in the Channel 153, FRA's own 0, so the country itself is excluded as
+      documented.
+  - **State scope form:** greyed once the 4 divisions left Ile de France, as predicted.
+- **Timing (one 10-day window, includes hovering, so not a gameplay figure):**
+
+  | Trigger | ns per evaluation |
+  |---|---|
+  | air_superiority | 600 |
+  | naval_dominance | 370 |
+  | battles_count | 1402 |
+  | divisions_count | 1000 |
+  | ships_count | 390 |
+  | planes_count | 2184 |
+  | avg_division_strength | 5206 |
+  | avg_division_organisation | 1489 |
+  | factories_assigned | 1344 |
+
+  - All numeric triggers: 14.4 ms per in-game day.
+- **Not covered by this report:**
+  - the threshold switch (LOW / HIGH) flipping the variable decisions;
+  - the "Data triggers as variables" event values.
+
+  Both are unchanged code paths from E2.
+
 ## Part F: strategic region scope (investigation)
 
 Investigation only, nothing implemented. Addresses are from vanilla 1.19.3 (`hoi4_copy.exe`). The
