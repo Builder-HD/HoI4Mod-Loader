@@ -2501,4 +2501,27 @@ Install the DLL and sync the test mod, start a 1939 game as France, and keep
     - The "all numeric triggers" total excludes scope blocks and iterators, as designed.
   - **Not related to the loader:** the AI's "invalid command: unlock_trait_command" spam (851
     lines in the run before part 3 too) and the AI's order_* commands at war.
-  - **Pending, steps 3–8:** the hover and effect checks of the region scope decisions.
+  - **Steps 3–8 pass (user report):**
+    - **Identity:** "Northern France:" (id 19, land, holds state 16); "Bay of Biscay:" (sea,
+      not state 16); "Ile de France: Northern France:" (the game puts a single child on its
+      parent's line); NOT Western Germany is sea, shown as "Is a land region".
+    - **Data inside:** "Northern France (19)" with current values, no region parameter.
+    - **any_strategic_region:** the header "Any strategic region", "At least 98 of", and the
+      custom tooltip. All results are right.
+    - **Effects:**
+      - "Bay of Biscay:" and the random pick's "(North Sea):" headers;
+      - random_select_amount 3 lists 3 sea regions, Last count 3;
+      - prioritize Ran: 1;
+      - every_ with the air limit: Last count 0 in peacetime.
+      - Renames A, B and C show on the map, and the reset restores every name.
+  - **Tooltip findings:**
+    - **NOT around `any_strategic_region = { count = 99 ... }`** reads "At least 99 of Any
+      strategic region: Is a land region". That is vanilla's any_state rendering (slots 11/12
+      kept): the localisation has no "none of" text.
+    - **Guards:** each guard shows an "Always true" line (the generated `always = yes`).
+    - **Empty effect headers:** set/reset_strategic_region_name have no tooltip line (Part B),
+      and global variable effects show nothing, so a block holding only those prints an empty
+      header.
+    - **Data trigger under an iterator's header:** it has no region, so it shows its raw name
+      and "(currently unavailable)", e.g. "air_superiority above 50% (currently
+      unavailable)".
