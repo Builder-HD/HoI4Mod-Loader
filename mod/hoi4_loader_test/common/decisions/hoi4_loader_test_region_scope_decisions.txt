@@ -66,6 +66,10 @@ hoi4_loader_data_category = {
 			any_strategic_region = { is_sea_region = yes }
 			any_strategic_region = { count = 98 is_sea_region = yes }
 			NOT = { any_strategic_region = { count = 99 is_sea_region = yes } }
+			# README "Under NOT": the same with its own header, and vanilla's any_state for comparison
+			# (reads "At least 2000 of Any state: Is not coastal" the same way).
+			NOT = { any_strategic_region = { tooltip = hoi4_loader_rs_not_99_sea_tt count = 99 is_sea_region = yes } }
+			NOT = { any_state = { count = 2000 is_coastal = yes } }
 			any_strategic_region = { tooltip = hoi4_loader_rs_any_tt strategic_region_id = 42 }
 			any_strategic_region = { region_has_state = 16 strategic_region_id = 19 }
 		}

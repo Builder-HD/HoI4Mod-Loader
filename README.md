@@ -478,6 +478,17 @@ random_strategic_region = {
     the lines inside, as `any_state` does. A mod can translate the header with the localisation
     key `HOI4_LOADER_ANY_STRATEGIC_REGION_STARTS`. Without that key the loader shows the English
     text, so no loc file is needed. `tooltip = key` replaces the header as in vanilla.
+  - **Under `NOT`** the header keeps its wording and the lines inside are negated, exactly as
+    the game does for `any_state`; its localisation has no "none of" text. So
+    `NOT = { any_strategic_region = { count = 99 is_sea_region = yes } }` (fewer than 99 sea
+    regions) reads "At least 99 of Any strategic region: Is a land region", which says
+    something else. Give such a block its own header:
+    ```
+    NOT = { any_strategic_region = { tooltip = my_fewer_than_99_sea_regions_tt count = 99 is_sea_region = yes } }
+    ```
+    ```yaml
+     my_fewer_than_99_sea_regions_tt:0 "Fewer than 99 sea regions"
+    ```
   - `every_` / `random_strategic_region` show the region names (for random: the one that will be
     picked) and the effects, as vanilla does for states.
 - **Without the loader** the blocks are unknown commands, which the game logs and drops. A

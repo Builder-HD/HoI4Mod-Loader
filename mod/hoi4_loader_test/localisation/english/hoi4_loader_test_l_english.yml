@@ -123,7 +123,7 @@
  hoi4_loader_rs_data_inside:0 "Region scope: data triggers inside (hover)"
  hoi4_loader_rs_data_inside_desc:0 "Inside strategic_region = ( region = 19 ... ): air_superiority > 0, divisions_count > 0 and battles_count = ( count = 0 ), all without a region parameter."
  hoi4_loader_rs_any:0 "Region scope: any_strategic_region (hover)"
- hoi4_loader_rs_any_desc:0 "Some sea region; at least 98 sea regions but not 99; the Bay of Biscay with a custom tooltip; the region holding state 16 is 19."
+ hoi4_loader_rs_any_desc:0 "Some sea region; at least 98 sea regions but not 99 (vanilla wording, then with its own header); vanilla NOT any_state with a count for comparison; the Bay of Biscay with a custom tooltip; the region holding state 16 is 19."
  hoi4_loader_rs_any_tt:0 "The Bay of Biscay is one of them (custom tooltip)"
  hoi4_loader_rs_any_air:0 "Region scope: a sea region with our air superiority above 50 percent"
  hoi4_loader_rs_any_air_desc:0 "any_strategic_region = ( is_sea_region = yes air_superiority > 0.5 ). The cost case: trigger_timing logs any_strategic_region and air_superiority."
@@ -144,3 +144,4 @@
  hoi4_loader_ai_cost_region_probe:0 "AI cost probe: any_strategic_region (never taken)"
  hoi4_loader_ai_cost_region_probe_desc:0 "Every country evaluates any_strategic_region = ( is_sea_region = yes air_superiority > 0.5 ) for this decision's AI weight."
  hoi4_loader_rs_requires_tt:0 "Requires hoi4_loader (strategic region scopes)"
+ hoi4_loader_rs_not_99_sea_tt:0 "Fewer than 99 sea regions"

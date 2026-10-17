@@ -2570,3 +2570,31 @@ Install the DLL and sync the test mod, start a 1939 game as France, and keep
      "NOT: Air superiority of FRA above 0%".
    - **Unchanged:** "(currently unavailable)" remains for values that do not exist (unknown
      region id etc.).
+4. **README note on NOT around a counted any_.**
+   - The README explains vanilla's wording and recommends `tooltip = <key>`.
+   - The test decision "any_strategic_region" adds that form and vanilla's
+     `NOT = { any_state = { count = 2000 is_coastal = yes } }` for comparison.
+
+**In-game test plan (F7):**
+1. **Startup:**
+   - 20 of 20 registered;
+   - `loader_script_docs.md` lists "Tooltip texts" for set/reset_strategic_region_name and
+     any_strategic_region;
+   - the guard files under `%TEMP%\hoi4_loader` read `hidden_trigger = { always = yes }`.
+2. **Decisions hover:**
+   - **No "Always true" lines** anywhere.
+   - **"strategic_region and identity triggers"** starts with "Requires hoi4_loader (strategic
+     region scopes)", ticked.
+   - **"a sea region with our air superiority above 50 percent":** the line under the header
+     reads "Air superiority of FRA above 50%" (no "currently").
+   - **"any_strategic_region":**
+     - "Fewer than 99 sea regions", ticked;
+     - vanilla's "At least 2000 of Any state:" with "Is not coastal" (the same wording as ours).
+   - **Data test "NOT air superiority without a region":** "NOT: Air superiority of FRA above
+     0%".
+3. **Effects:**
+   - "rename the Bay of Biscay to A": "Bay of Biscay is renamed to Loader Test Sea A." with
+     both names highlighted;
+   - the random C rename names the picked region the same way;
+   - "reset all renamed regions": "... gets its original name back." per renamed region;
+   - `loader.log` has no "localisation with arguments failed its self-test" line.
