@@ -67,7 +67,10 @@ SIG(kSigMapManagerDirty, "48 8B 05 ?? ?? ?? ?? C3 CC CC CC CC CC CC CC CC 66 C7 
 static const size_t kSigMapManagerPtrRel = 3;
 
 // --- Localisation --------------------------------------------------------------------------
-// std::string* Localize(std::string* out, const char* key, void* = 0, int = 0). (0x142245e60)
+// std::string* Localize(std::string* out, const char* key, CPdxLocalizeKeyValuePair* args, int n).
+// (0x142245e60) Arguments fill $NAME$ (FUN_142248c20 matches the name, FUN_1422479f0 formats):
+// pair stride 0x68 = { int type @0 (1 = std::string value), const char* key @8, std::string key
+// @0x10, std::string value @0x30, union @0x60 }; an unmatched $NAME$ is localised as a key.
 SIG(kSigLocalize, "48 89 6C 24 18 48 89 74 24 20 57 41 56 41 57 48 83 EC 50 45 33 FF 41 8B E9 44 38 3D ?? ?? ?? ?? 4D 8B F0 48 8B F2 48 8B F9 74")
 
 // --- Script parsing / engine strings (native effect and trigger API) -----------------------

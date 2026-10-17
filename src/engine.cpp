@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <vector>
+
 #include "loader.h"
 #include "signatures.h"
 
@@ -569,6 +571,63 @@ const EngineString* LocalizeKey(const char* key) {
     // test (2026-10-13) detected a missing key this way.
     if (out->size == 0 || strcmp(out->c_str(), key) == 0) return nullptr;
     return out;
+}
+
+// CPdxLocalizeKeyValuePair with a std::string value (type 1); layout in signatures.h (kSigLocalize).
+struct LocalizePair {
+    int type;
+    int pad;
+    const char* name;
+    EngineString key;    // unused (name given as pointer); empty
+    EngineString value;
+    uint8_t rest[0x18];  // other value types (union @0x60)
+};
+static_assert(sizeof(LocalizePair) == 0x68, "CPdxLocalizeKeyValuePair stride");
+
+bool SafeLocalize(EngineString* out, const char* key, LocalizePair* pairs, int count) {
+    __try {
+        g_localize(out, key, pairs, count);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool LocalizeWithArgsRaw(const char* key, const LocalizeArg* args, int count, std::string* out) {
+    std::vector<LocalizePair> pairs(count);
+    for (int i = 0; i < count; ++i) {
+        LocalizePair& p = pairs[i];
+        memset(&p, 0, sizeof p);
+        p.type = 1;
+        p.name = args[i].name;
+        p.key.cap = 15;
+        const char* v = args[i].value ? args[i].value : "";
+        ConstructEngineString(&p.value, v, strlen(v));
+    }
+    EngineString res{};
+    res.cap = 15;
+    if (!SafeLocalize(&res, key, count ? pairs.data() : nullptr, count)) return false;  // engine strings leaked
+    // A missing entry localises to the key itself or to nothing (see LocalizeKey).
+    bool ok = res.size > 0 && strcmp(res.c_str(), key) != 0;
+    if (ok) out->assign(res.c_str(), (size_t)res.size);
+    FreeEngineString(&res);
+    for (LocalizePair& p : pairs) FreeEngineString(&p.value);
+    return ok;
+}
+
+bool LocalizeWithArgs(const char* key, const LocalizeArg* args, int count, std::string* out) {
+    // Self-test on first use: a vanilla key with $NAME|Y$ must show our value.
+    static int state = 0;  // 0 untested, 1 works, 2 off
+    if (!g_localize || !g_construct || !key || !*key || count < 0) return false;
+    if (state == 0) {
+        const char* probe = "hoi4_loader_probe";
+        LocalizeArg a{"NAME", probe};
+        std::string text;
+        state = LocalizeWithArgsRaw("EFFECT_RESET_PROVINCE_NAME", &a, 1, &text) && text.find(probe) != std::string::npos
+                    ? 1 : 2;
+        if (state == 2) Log("ERROR: localisation with arguments failed its self-test (\"%s\"); loader texts stay English", text.c_str());
+    }
+    return state == 1 && LocalizeWithArgsRaw(key, args, count, out);
 }
 
 void MarkMapNamesDirty() {

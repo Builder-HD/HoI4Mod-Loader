@@ -277,6 +277,12 @@ int main() {
                                                    "Any"},
                                     "feat_s"),
           "duplicate iterator refused");
+    NativeEffect texted = Effect("texted_effect", kRegionName);
+    texted.texts = {{"TEXTED_KEY", "$OLD|Y$ becomes $NEW$."}};
+    CHECK(register_native_effect(texted, "feat_s"), "effect with a tooltip text queued");
+    NativeEffect untexted = Effect("untexted_effect", kRegionName);
+    untexted.texts = {{"NO_ENGLISH", ""}};
+    CHECK(!register_native_effect(untexted, "feat_s"), "tooltip text without English refused");
     CHECK(!NativeFeatureComplete("feat_a"), "feature incomplete before engine registration");
     CHECK(NativeFeatureComplete("no_commands"), "feature without native commands counts as complete");
 
@@ -285,7 +291,7 @@ int main() {
     be.failBind.insert("bind_fails");
     document_on_action("on_test_loaded", "feat_d", "Fires in tests.");
     int n = NativeScriptFinalize(be, L"");
-    CHECK(n == 15, "15 commands registered (got %d)", n);
+    CHECK(n == 16, "16 commands registered (got %d)", n);
     CHECK(NativeScriptFinalized(), "window closed after finalize");
     CHECK(NativeFeatureComplete("feat_a"), "feat_a complete (all registered)");
     CHECK(!NativeFeatureComplete("feat_b"), "feat_b incomplete (vanilla name refused)");
@@ -579,6 +585,19 @@ int main() {
     };
     for (const char* e : expected10)
         CHECK(docs.find(e) != std::string::npos, "docs contain: %.70s", e);
+
+    // 11. Translatable tooltip texts (the fake backend has no localisation: English fallback).
+    const char* expected11[] = {
+        "- Tooltip texts (localisation keys a mod may define; English otherwise):\n  - `KEY`: \"Any region\"\n",
+        "  - `TEXTED_KEY`: \"$OLD|Y$ becomes $NEW$.\"\n",
+    };
+    for (const char* e : expected11)
+        CHECK(docs.find(e) != std::string::npos, "docs contain: %.70s", e);
+    std::string loc = native_localize({"TEXTED_KEY", "$OLD|Y$ becomes $NEW$."}, {{"OLD", "A"}, {"NEW", "B"}});
+    CHECK(loc == "\x11YA\x11! becomes B.", "English fallback filled and highlighted");
+    loc = native_localize({"K", "$H|H$, $MISSING$ and a lone $ sign"}, {{"H", "x"}});
+    CHECK(loc == "\x11Yx\x11!, $MISSING$ and a lone $ sign", "highlight, unknown placeholder and lone $ kept");
+    CHECK(native_localize_key("SOME_KEY") == "SOME_KEY", "missing key localises to itself");
 
     printf("%s (%d failure(s))\n", g_fail ? "FAILED" : "PASSED", g_fail);
     return g_fail;

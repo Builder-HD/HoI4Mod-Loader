@@ -374,10 +374,13 @@ bool Command::ValueFormAllowed() const {
 // ============================================================================================
 bool register_native_effect(const NativeEffect& d, const char* feature) {
     std::string why = CheckSchema(CommandKind::Effect, d.name, d.help, d.form, d.params, d.execute != nullptr);
+    for (const LocText& t : d.texts)
+        if (why.empty() && (!t.key || !*t.key || !t.english || !*t.english)) why = "a tooltip text needs a key and an English text";
     if (!why.empty()) return Refuse(CommandKind::Effect, d.name, feature, why);
     Command* c = NewCommand(CommandKind::Effect, feature, d.name, d.help, d.form, d.params, d.scopes);
     c->execute = d.execute;
     c->effectTooltip = d.tooltip;
+    c->texts = d.texts;
     g_commands.push_back(c);
     Log("Native effect '%s' (feature %s) queued for engine registration", d.name, feature ? feature : "?");
     return true;
@@ -460,6 +463,7 @@ bool register_native_iterator(const NativeIterator& d, const char* feature) {
     c->childScope = d.elements;
     c->headerKey = d.headerKey ? d.headerKey : "";
     c->headerText = d.headerText ? d.headerText : "";
+    if (d.headerKey && *d.headerKey && d.headerText) c->texts.push_back({d.headerKey, d.headerText});
     g_commands.push_back(c);
     Log("Native iterator %s '%s' (feature %s) queued for engine registration", KindName(kind), d.name, feature ? feature : "?");
     return true;
@@ -559,6 +563,10 @@ std::string NativeScriptDocs() {
             s += "- Usage: " + Usage(*c) + "\n";
             if (c->scopeBlock || c->iterator) s += "- Children run in: " + ScopeNames(c->childScope) + " scope\n";
             if (c->iterator && !c->keysDoc.empty()) s += "- Keys (as the game's state iterator): " + c->keysDoc + "\n";
+            if (!c->texts.empty()) {
+                s += "- Tooltip texts (localisation keys a mod may define; English otherwise):\n";
+                for (const LocText& t : c->texts) s += std::string("  - `") + t.key + "`: \"" + t.english + "\"\n";
+            }
             if (!c->params.empty()) {
                 s += "- Parameters:\n";
                 for (const ParamSpec& p : c->params) {
@@ -855,6 +863,53 @@ std::string NativeNumericTooltip(const ParsedCommand* pc, const void* engineScop
     else
         s += " (currently unavailable)";
     return s;
+}
+
+// --- Translatable tooltip texts ---------------------------------------------------------------
+namespace {
+// The English fallback: $NAME$ and $NAME|<format>$ replaced by the argument. A colour letter in
+// the format (H = highlight, shown yellow as by the game) wraps the value in the game's colour
+// codes (0x11 = the parsed form of the localisation's colour sign).
+std::string FillPlaceholders(const char* text, const std::vector<LocArg>& args) {
+    std::string out;
+    for (const char* p = text; *p;) {
+        const char* end = *p == '$' ? strchr(p + 1, '$') : nullptr;
+        if (!end) {
+            out += *p++;
+            continue;
+        }
+        std::string spec(p + 1, end);
+        std::string name = spec.substr(0, spec.find('|'));
+        std::string format = spec.size() > name.size() ? spec.substr(name.size() + 1) : "";
+        const LocArg* arg = nullptr;
+        for (const LocArg& a : args)
+            if (a.name && name == a.name) arg = &a;
+        if (!arg) {
+            out.append(p, end + 1);
+        } else {
+            char colour = 0;
+            for (char ch : format)
+                if (!colour && ch >= 'A' && ch <= 'Z') colour = ch == 'H' ? 'Y' : ch;
+            if (colour) out += std::string("\x11") + colour;
+            out += arg->value;
+            if (colour) out += "\x11!";
+        }
+        p = end + 1;
+    }
+    return out;
+}
+}  // namespace
+
+std::string native_localize(const LocText& text, const std::vector<LocArg>& args) {
+    std::string out;
+    if (g_backend && text.key && *text.key && g_backend->Localize(text.key, args, &out)) return out;
+    return FillPlaceholders(text.english ? text.english : "", args);
+}
+
+std::string native_localize_key(const char* key) {
+    std::string out;
+    if (g_backend && key && *key && g_backend->Localize(key, {}, &out)) return out;
+    return key ? key : "";
 }
 
 std::string NativeTooltip(const ParsedCommand* pc, const void* engineScope, bool negated) {

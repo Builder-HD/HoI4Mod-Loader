@@ -2525,3 +2525,26 @@ Install the DLL and sync the test mod, start a 1939 game as France, and keep
     - **Data trigger under an iterator's header:** it has no region, so it shows its raw name
       and "(currently unavailable)", e.g. "air_superiority above 50% (currently
       unavailable)".
+
+### F7. Tooltip fixes (2026-10-17, approved: all four)
+
+1. **Rename effect lines.**
+   - **Text:** set/reset_strategic_region_name now show "$OLDNAME|Y$ is renamed to $NAME|Y$." /
+     "$NAME|Y$ gets its original name back." (vanilla's province wording).
+   - **Keys:** `HOI4_LOADER_SET_STRATEGIC_REGION_NAME` and
+     `HOI4_LOADER_RESET_STRATEGIC_REGION_NAME`, with English used when no mod defines them.
+   - **Placeholders through the engine.** A text written as `$X$` cannot be filled in after
+     `Localize()`, because the localiser resolves `$X$` itself and localises an unknown name as
+     a key. So the loader passes real arguments:
+     - `Localize(out, key, CPdxLocalizeKeyValuePair*, n)`;
+     - the pair stride is 0x68: type @0 (1 = std::string value), `const char*` name @8,
+       std::string name @0x10, std::string value @0x30;
+     - the matching is in FUN_142248c20 and the formatting (`|Y`) in FUN_1422479f0.
+   - **Self-test on first use:** `EFFECT_RESET_PROVINCE_NAME` with NAME = a probe string must
+     contain the probe. Otherwise the loader logs once and uses English only.
+   - **English fallback:** the loader fills the placeholders itself and wraps `|Y`/`|H` values
+     in the game's colour codes (0x11).
+   - **API:** `LocText`, `native_localize`, `native_localize_key`, and `NativeEffect::texts`
+     (listed in the docs; the any_strategic_region header key is listed too).
+   - **Layout:** the effect's own line (slot 7) needs no indent or newline. CEffect slot 8
+     (FUN_14053f090) prefixes 3 spaces per level and puts a newline between lines.

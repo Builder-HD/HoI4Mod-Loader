@@ -151,8 +151,17 @@ If several `hoi4_srn` flags exist for one region, the most recently set one wins
     names are.
 - Invalid region ids, malformed or missing keys are ignored with a line in `loader.log`; the
   region keeps its name.
-- The effects add no tooltip line; use `custom_effect_tooltip` if a decision needs one.
-  Avoid `{` in localisation text: HOI4 treats it as markup.
+- **Tooltips:** worded like vanilla's province renames, e.g. "**Bay of Biscay** is renamed to
+  **Loader Test Sea A**." / "**Bay of Biscay** gets its original name back." The loader shows
+  English unless a loaded mod defines the keys, so no loc file is needed. To translate them, add
+  to your mod's localisation for each language:
+  ```yaml
+   HOI4_LOADER_SET_STRATEGIC_REGION_NAME:0 "$OLDNAME|Y$ wird zu $NAME|Y$ umbenannt."
+   HOI4_LOADER_RESET_STRATEGIC_REGION_NAME:0 "$NAME|Y$ erhält seinen ursprünglichen Namen zurück."
+  ```
+  `$OLDNAME$` is the name shown now, `$NAME$` the new one; the game formats them (`|Y`). The keys
+  are also listed in `loader_script_docs.md`.
+- Avoid `{` in localisation text: HOI4 treats it as markup.
 
 **Where the name shows:** everything that asks the engine for the region's name. That includes
 map-mode and region tooltips, the region panel, air and naval mission screens, task forces,
@@ -526,7 +535,13 @@ bool MyFeatureInit() {
 - **Tooltips:**
   - effects without a tooltip callback show no line;
   - triggers without one show `name: param=value ...`;
-  - tooltip text is plain UTF-8 (colour codes allowed, no `{`).
+  - tooltip text is plain UTF-8 (colour codes allowed, no `{`);
+  - **translatable text:** declare `LocText{key, english}` (placeholders as in the game:
+    `$NAME$`, `$NAME|Y$`) and build the line with `native_localize(text, {{"NAME", value}})`.
+    It uses the mod's localisation of `key` when one is loaded (the game fills the placeholders
+    and formats them), else the English text. List the texts in `NativeEffect::texts` so
+    `loader_script_docs.md` names the keys. `native_localize_key(key)` localises a plain key
+    (for example a name key written in script).
 - **Trigger performance:** `evaluate` (and a numeric `value`) runs for AI and UI, often,
   possibly on several threads at once.
   - It **may read game state**: all game-state writes are serial on the main thread, and

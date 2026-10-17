@@ -121,6 +121,22 @@ private:
     std::string text_;
 };
 
+// A tooltip text a mod may translate: its localisation key and the English text used when no
+// loaded localisation defines the key. Placeholders use the game's syntax: $NAME$, $NAME|Y$.
+struct LocText {
+    const char* key;
+    const char* english;
+};
+struct LocArg {
+    const char* name;   // placeholder name without $
+    std::string value;  // text put in its place
+};
+// `text` with its placeholders filled in: the game's localisation of text.key if one exists
+// (formatted by the game), else text.english. UI code only (tooltips): it allocates.
+std::string native_localize(const LocText& text, const std::vector<LocArg>& args = {});
+// The localisation of a plain key (e.g. a name key written in script), or the key itself.
+std::string native_localize_key(const char* key);
+
 struct NativeEffect {
     const char* name;
     const char* help;
@@ -129,6 +145,7 @@ struct NativeEffect {
     uint32_t scopes;  // ScopeMask bits, 0 = any
     void (*execute)(const Args&, const Scope&);
     void (*tooltip)(const Args&, const Scope&, TooltipText&);  // optional; none = no tooltip line
+    std::vector<LocText> texts = {};  // the tooltip texts it uses (listed in the docs)
 };
 
 struct NativeTrigger {
@@ -260,6 +277,7 @@ struct Command {
     IteratorKind iteratorKind = IteratorKind::Any;
     std::string headerKey, headerText;
     std::string keysDoc;  // iterators: the block keys the engine's template reads (set when bound)
+    std::vector<LocText> texts;  // translatable tooltip texts (docs)
 
     CommandStatus status = CommandStatus::Pending;
     std::string reason;               // why refused
@@ -297,6 +315,11 @@ public:
     virtual bool EngineHas(CommandKind kind, int token) = 0;     // vanilla (or any) registration
     virtual bool Bind(Command& cmd, std::string* reason) = 0;    // add to the engine
     virtual int CountryTag(const char* text) { (void)text; return 0; }  // "GER" -> tag, 0 if unknown
+    // The game's localisation of key with $NAME$ arguments; false if it has no entry.
+    virtual bool Localize(const char* key, const std::vector<LocArg>& args, std::string* out) {
+        (void)key, (void)args, (void)out;
+        return false;
+    }
 };
 
 // Engine registration for all pending commands; closes the window; writes the docs file

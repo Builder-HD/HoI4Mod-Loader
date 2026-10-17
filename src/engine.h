@@ -72,6 +72,14 @@ int RegionTemplateId(void* region);  // id stored in the region's template, -1 i
 // The localised text for key (engine Localize()), or null if the localisation has no entry.
 // The returned string is never freed: callers cache it and may hand it to the engine.
 const EngineString* LocalizeKey(const char* key);
+// Localize() with $NAME$ arguments (the engine's CPdxLocalizeKeyValuePair, string values), so the
+// localisation's own formatting ($NAME|Y$) applies. False if the key has no entry, the call
+// faulted, or the self-test on first use failed (then always false). Main thread (UI) only.
+struct LocalizeArg {
+    const char* name;
+    const char* value;
+};
+bool LocalizeWithArgs(const char* key, const LocalizeArg* args, int count, std::string* out);
 void MarkMapNamesDirty();  // the refresh set_state_name triggers
 
 // --- Effect registry -------------------------------------------------------------------------

@@ -380,6 +380,21 @@ void TooltipHasCustomName(const Args& a, const Scope&, bool negated, TooltipText
     out.add(negated ? " does NOT have a custom name" : " has a custom name");
 }
 
+// Effect lines, worded like vanilla's set_province_name / reset_province_name.
+const LocText kSetText{"HOI4_LOADER_SET_STRATEGIC_REGION_NAME", "$OLDNAME|Y$ is renamed to $NAME|Y$."};
+const LocText kResetText{"HOI4_LOADER_RESET_STRATEGIC_REGION_NAME", "$NAME|Y$ gets its original name back."};
+
+std::string ShownName(int id) {
+    void* region = Engine::RegionById(id);
+    const EngineString* name = region ? GetNameKeyDetour(region) : nullptr;  // what the UI shows now
+    return name ? name->c_str() : "strategic region " + std::to_string(id);
+}
+void TooltipSet(const Args& a, const Scope&, TooltipText& out) {
+    out.add(native_localize(kSetText, {{"OLDNAME", ShownName(a.i(0))}, {"NAME", native_localize_key(a.key(1))}}).c_str());
+}
+void TooltipReset(const Args& a, const Scope&, TooltipText& out) {
+    out.add(native_localize(kResetText, {{"NAME", ShownName(a.i(0))}}).c_str());
+}
 
 void OnEntered(bool loaded) {
     {
@@ -430,13 +445,13 @@ bool RegionNamesInit() {
                             "Inside a strategic region scope `region` may be left out.",
                             Form::Block,
                             {{"region", ParamType::Int, false, ScopeDefault::StrategicRegion}, {"name", ParamType::Key, true}},
-                            ScopeMask::Any, &ExecSet, nullptr},
+                            ScopeMask::Any, &ExecSet, &TooltipSet, {kSetText}},
                            kFeature);
     register_native_effect({"reset_strategic_region_name",
                             "Restore a strategic region's original name (hoi4_loader): clears its hoi4_srn flags. "
                             "Inside a strategic region scope `region` may be left out.",
                             Form::Block, {{"region", ParamType::Int, false, ScopeDefault::StrategicRegion}}, ScopeMask::Any,
-                            &ExecReset, nullptr},
+                            &ExecReset, &TooltipReset, {kResetText}},
                            kFeature);
     register_native_trigger({"strategic_region_has_custom_name",
                              "True if the strategic region currently shows a name provided by hoi4_loader. A rename "

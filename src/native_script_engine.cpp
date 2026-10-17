@@ -378,6 +378,11 @@ class EngineBackend : public NativeBackend {
 public:
     int Intern(const char* s) override { return Engine::Intern(s); }
     int CountryTag(const char* text) override { return SafeTagFromText(text); }
+    bool Localize(const char* key, const std::vector<LocArg>& args, std::string* out) override {
+        std::vector<Engine::LocalizeArg> raw;
+        for (const LocArg& a : args) raw.push_back({a.name, a.value.c_str()});
+        return Engine::LocalizeWithArgs(key, raw.data(), (int)raw.size(), out);
+    }
     bool EngineHas(CommandKind kind, int token) override {
         return kind == CommandKind::Effect ? Engine::EffectRegistered(token) : Engine::TriggerRegistered(token);
     }
