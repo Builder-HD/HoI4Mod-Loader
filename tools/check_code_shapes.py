@@ -141,7 +141,20 @@ def check(path, codes):
     ok = bool(refs) and len(refs) == 1 and img.match_at(refs[0] + 0x14, codes['kCodeArmyDailyLoop'])
     results.append(('kCodeArmyDailyLoop (army.daily lea + 0x14)', ok, hex(refs[0]) if refs else '-'))
     results += check_region_scope(img, codes, text_va, text)
+    results.append(check_trigger_registry(img, codes, text_va, text))
     return results
+
+
+def check_trigger_registry(img, codes, text_va, text):
+    """The trigger registry's map offset, read from the trigger Register (has_global_flag stub's jmp)."""
+    _, anchors = cs.load_signatures(pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h')
+    refs, _ = cs.anchor_refs(img.d, text_va, text, dict(anchors)['kAnchorGlobalFlagTriggerHelp'])
+    if not refs or len(refs) != 1 or img.d[img.va2off(refs[0] + 0x29)] != 0xE9:
+        return ('kCodeTriggerRegisterMap (trigger Register + 0x1f)', False, 'has_global_flag stub not found')
+    reg = rel32(img, refs[0] + 0x29)
+    ok = img.match_at(reg + 0x1f, codes['kCodeTriggerRegisterMap'])
+    disp = img.d[img.va2off(reg + 0x22)] if ok else -1
+    return ('kCodeTriggerRegisterMap (trigger Register + 0x1f)', ok and disp == 0x18, '%s map +0x%x' % (hex(reg), disp))
 
 
 def rel32(img, insn):

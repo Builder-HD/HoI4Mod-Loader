@@ -284,6 +284,14 @@ CODE(kCodeTargetEffectLimit, "83 B9 8C 00 00 00 00 0F 84")
 CODE(kCodeScalarDeletingDtor, "48 89 5C 24 08 57 48 83 EC 20 8B DA 48 8B F9 E8 ?? ?? ?? ?? F6 C3 01 74 ?? BA ?? ?? ?? ?? 48 8B CF E8")
 static const size_t kCodeDtorDeleteCall = 0x21;
 
+// --- Registry layouts ------------------------------------------------------------------------
+// The trigger Register (reached through the has_global_flag stub's jmp): the trigger registry
+// object keeps its std::map<int, entry*> at +disp8 (0x18 on the checked builds; an array and its
+// allocator come first). lea rdi,[rcx+disp8] at +0x1f, disp8 at +0x22. The effect registry is the
+// map itself (effect Register reads head = *registry).
+CODE(kCodeTriggerRegisterMap, "48 8D 79 ?? 48 8B 37 48 8B 46 08")
+static const size_t kCodeTriggerRegisterMapAt = 0x1f, kCodeTriggerRegisterMapDisp = 3;
+
 #undef CODE
 #undef SIG
 #undef ANCHOR

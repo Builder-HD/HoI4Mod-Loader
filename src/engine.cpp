@@ -59,6 +59,7 @@ Unexpected_t g_unexpected = nullptr;
 Construct_t g_construct = nullptr;
 CountryTagName_t g_countryTagName = nullptr;
 void** g_ppTriggerRegistry = nullptr;
+int g_triggerMapOffset = -1;      // trigger registry object -> its std::map (kCodeTriggerRegisterMap)
 
 void** g_ppGameState = nullptr;   // address of the engine's CGameState* global
 uint32_t g_flagsOffset = 0;       // CGameState -> global flags container
@@ -130,8 +131,11 @@ void ResolveTriggerRegistry() {
     }
     g_ppTriggerRegistry = (void**)SigRipTarget(movReg, 3, 7);
     g_registerTrigger = (RegisterTrigger_t)SigFollowRel32(jmpReg);
-    Log("Trigger registry at %s, register %s, has_global_flag token 0x%x", SigDescribe(g_ppTriggerRegistry).c_str(),
-        SigDescribe((void*)g_registerTrigger).c_str(), Read<uint32_t>(movTok, 1));
+    uint8_t* mapLea = (uint8_t*)g_registerTrigger + kCodeTriggerRegisterMapAt;
+    if (SigMatchAt(mapLea, kCodeTriggerRegisterMap)) g_triggerMapOffset = mapLea[kCodeTriggerRegisterMapDisp];
+    else Log("ERROR: trigger registry: Register has an unexpected layout (map offset unknown)");
+    Log("Trigger registry at %s, register %s, map +0x%x, has_global_flag token 0x%x", SigDescribe(g_ppTriggerRegistry).c_str(),
+        SigDescribe((void*)g_registerTrigger).c_str(), g_triggerMapOffset, Read<uint32_t>(movTok, 1));
 }
 
 Vtable RttiVtable(const char* name) {
@@ -217,18 +221,37 @@ void ResolveNativeScript() {
 
 // MSVC std::map<int, T*> lookup, read-only: map object { head*, size }; node { left, parent,
 // right, color, isnil @+0x19, key @+0x20, value @+0x28 } (as walked by the engine's Register).
-bool MapHasKey(void* mapObj, int key) {
-    if (!mapObj) return false;
+// Returns 1 if the key is present, 0 if not, -1 if the map does not look like one (the head must
+// be marked nil and the root's parent must be the head) or reading it faults.
+int MapHasKeyUnsafe(void* mapObj, int key) {
     uint8_t* head = Read<uint8_t*>(mapObj, 0);
-    if (!head) return false;
+    if (!head || Read<uint8_t>(head, 0x19) != 1) return -1;
     uint8_t* node = Read<uint8_t*>(head, 8);  // root
+    if (!node || (Read<uint8_t>(node, 0x19) == 0 && Read<uint8_t*>(node, 8) != head)) return -1;
     for (int guard = 0; node && Read<uint8_t>(node, 0x19) == 0 && guard < 64; ++guard) {
         int k = Read<int>(node, 0x20);
         if (key < k) node = Read<uint8_t*>(node, 0);
         else if (k < key) node = Read<uint8_t*>(node, 0x10);
-        else return true;
+        else return 1;
     }
-    return false;
+    return node ? 0 : -1;
+}
+
+int MapHasKey(void* mapObj, int key) {
+    if (!mapObj) return -1;
+    __try {
+        return MapHasKeyUnsafe(mapObj, key);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return -1;
+    }
+}
+
+// A lookup that cannot be done counts as "present": the caller then refuses the name instead of
+// risking a clash with a game command.
+bool RegistryHas(const char* what, void* mapObj, int token) {
+    int r = MapHasKey(mapObj, token);
+    if (r < 0) Log("ERROR: %s registry: lookup of token 0x%x failed (unexpected layout); name refused", what, token);
+    return r != 0;
 }
 
 // --- On actions and the game session (Part D) --------------------------------------------------
@@ -567,15 +590,19 @@ bool HaveNumeric() {
 bool HaveNativeScript() {
     // Slots the binding relies on (NOTES.md C1): effect value reader slot 3 and trigger value
     // reader slot 5 must be real overrides of the base implementations.
-    return HaveRegistry() && g_ppTriggerRegistry && g_registerTrigger && g_readString && g_unexpected && g_construct &&
+    return HaveRegistry() && g_ppTriggerRegistry && g_registerTrigger && g_triggerMapOffset >= 0 && g_readString &&
+           g_unexpected && g_construct &&
            effectBase.slots >= 25 && triggerBase.slots >= 23 && effectTemplate.slots >= 25 &&
            effectValueReader.slots >= 25 && triggerTemplate.slots >= 23 && effectTemplateEntryVtable &&
            triggerTemplateEntryVtable && effectValueReader.vt[3] != effectBase.vt[3] &&
            triggerTemplate.vt[5] != triggerBase.vt[5];
 }
 
-bool EffectRegistered(int token) { return g_ppRegistry && MapHasKey(*g_ppRegistry, token); }
-bool TriggerRegistered(int token) { return g_ppTriggerRegistry && MapHasKey(*g_ppTriggerRegistry, token); }
+bool EffectRegistered(int token) { return RegistryHas("effect", g_ppRegistry ? *g_ppRegistry : nullptr, token); }
+bool TriggerRegistered(int token) {
+    uint8_t* obj = g_ppTriggerRegistry ? (uint8_t*)*g_ppTriggerRegistry : nullptr;
+    return RegistryHas("trigger", obj && g_triggerMapOffset >= 0 ? obj + g_triggerMapOffset : nullptr, token);
+}
 
 bool RegisterTrigger(int token, void* entry) {
     void* registry = g_ppTriggerRegistry ? *g_ppTriggerRegistry : nullptr;
