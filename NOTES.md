@@ -2598,3 +2598,40 @@ Install the DLL and sync the test mod, start a 1939 game as France, and keep
    - the random C rename names the picked region the same way;
    - "reset all renamed regions": "... gets its original name back." per renamed region;
    - `loader.log` has no "localisation with arguments failed its self-test" line.
+
+**In-game results (F7, 2026-10-18; decisions 23, 27, 31, 33 reported):**
+- **loader.log:** 20 of 20 registered; no self-test failure line.
+- **23 (identity):** "Requires hoi4_loader (strategic region scopes)" ticked first; no "Always
+  true" line.
+- **27 (rename to A):** "Bay of Biscay: Bay of Biscay is renamed to Loader Test Sea A."
+- **31 (random C):** "(North Sea): North Sea is renamed to Loader Test Sea C (flag protocol)."
+- **33 (reset all):** "(Loader Test Sea C (flag protocol), Loader Test Sea A): Loader Test Sea C
+  (flag protocol) gets its original name back."
+  - Only one line, naming only the first region. An every_ block builds its child lines once,
+    for its first matching scope (vanilla every_state does the same).
+  - My test plan expected one line per region. That was wrong.
+- **Not reported yet:** the air decision, any_strategic_region (vanilla `NOT any_state` wording),
+  data test 8.
+
+### F8. Rename lines inside a region scope (2026-10-18)
+
+- **Problem:**
+  - Inside a region scope the header names the region already, so 27 names it twice.
+  - Under every_strategic_region, 33 names only the first region.
+- **Vanilla's model:**
+  - States: `EFFECT_SET_STATE_NAME` "Changes name to $NAME|Y$." and `EFFECT_RESET_STATE_NAME`
+    "Gets its original name back." These do not name the state (the scope header does).
+  - Provinces (given by id): `EFFECT_SET_PROVINCE_NAME` / `EFFECT_RESET_PROVINCE_NAME`, which
+    name it.
+- **Fix:**
+  - `ArgValue::fromScope` / `Args::fromScope(i)` are set when ResolveArgs fills a parameter from
+    the scope.
+  - With `region` from the scope, set/reset use the state wording, under the new keys
+    `HOI4_LOADER_SET_STRATEGIC_REGION_NAME_IN_SCOPE` and
+    `HOI4_LOADER_RESET_STRATEGIC_REGION_NAME_IN_SCOPE`.
+  - With `region` written, they keep the province wording.
+- **Expected:**
+  - 27: "Bay of Biscay: Changes name to Loader Test Sea A.";
+  - 31: "(North Sea): Changes name to Loader Test Sea C (flag protocol).";
+  - 33: "(Loader Test Sea C (flag protocol), Loader Test Sea A): Gets its original name back.";
+  - the every_ rename (B): the header, then "Changes name to Loader Test Sea B.".

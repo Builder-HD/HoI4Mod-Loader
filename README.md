@@ -170,16 +170,24 @@ If several `hoi4_srn` flags exist for one region, the most recently set one wins
     names are.
 - Invalid region ids, malformed or missing keys are ignored with a line in `loader.log`; the
   region keeps its name.
-- **Tooltips:** worded like vanilla's province renames, e.g. "**Bay of Biscay** is renamed to
-  **Loader Test Sea A**." / "**Bay of Biscay** gets its original name back." The loader shows
-  English unless a loaded mod defines the keys, so no loc file is needed. To translate them, add
-  to your mod's localisation for each language:
-  ```yaml
-   HOI4_LOADER_SET_STRATEGIC_REGION_NAME:0 "$OLDNAME|Y$ wird zu $NAME|Y$ umbenannt."
-   HOI4_LOADER_RESET_STRATEGIC_REGION_NAME:0 "$NAME|Y$ erhält seinen ursprünglichen Namen zurück."
-  ```
-  `$OLDNAME$` is the name shown now, `$NAME$` the new one; the game formats them (`|Y`). The keys
-  are also listed in `loader_script_docs.md`.
+- **Tooltips:**
+  - With `region` written, they are worded like vanilla's province renames, e.g. "**Bay of
+    Biscay** is renamed to **Loader Test Sea A**." / "**Bay of Biscay** gets its original name
+    back."
+  - Inside a strategic region scope (`region` left out), they are worded like vanilla's state
+    renames: "Changes name to **Loader Test Sea A**." / "Gets its original name back." The
+    scope's header already names the region. An `every_strategic_region` block also builds its
+    lines only once, for its first region, so a named line would mention only that one.
+  - The loader shows English unless a loaded mod defines the keys, so no loc file is needed. To
+    translate them, add to your mod's localisation for each language:
+    ```yaml
+     HOI4_LOADER_SET_STRATEGIC_REGION_NAME:0 "$OLDNAME|Y$ wird zu $NAME|Y$ umbenannt."
+     HOI4_LOADER_RESET_STRATEGIC_REGION_NAME:0 "$NAME|Y$ erhält seinen ursprünglichen Namen zurück."
+     HOI4_LOADER_SET_STRATEGIC_REGION_NAME_IN_SCOPE:0 "Ändert den Namen zu $NAME|Y$."
+     HOI4_LOADER_RESET_STRATEGIC_REGION_NAME_IN_SCOPE:0 "Erhält seinen ursprünglichen Namen zurück."
+    ```
+  - `$OLDNAME$` is the name shown now, `$NAME$` the new one; the game formats them (`|Y`). The
+    keys are also listed in `loader_script_docs.md`.
 - Avoid `{` in localisation text: HOI4 treats it as markup.
 
 **Where the name shows:** everything that asks the engine for the region's name. That includes
@@ -537,6 +545,8 @@ bool MyFeatureInit() {
   - `ParamSpec::fromScope` (`StrategicRegion`, `State`, `Country`, `RootCountry`): the parameter
     may be left out and then comes from the scope. Such a parameter is not `required`. Missing
     in the scope: effects do nothing, triggers are false (see "Parameters from scope").
+    `Args::fromScope(i)` tells whether the value came from the scope, e.g. for a tooltip that
+    leaves out what the scope's header already names.
   - Unknown keys, type errors and missing required parameters are reported by the engine (with
     file and line) and logged once per command; that use then does nothing.
 - **Numeric triggers:** `register_native_numeric_trigger` with

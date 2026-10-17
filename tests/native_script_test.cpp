@@ -100,10 +100,12 @@ static void TipCustom(const Args& a, const Scope&, bool neg, TooltipText& out) {
 }
 
 static int g_echo[3] = {};
+static int g_echoFromScope = 0;  // bit i: parameter i came from the scope
 static bool EvalEcho(const Args& a, const Scope&) {
     g_echo[0] = a.i(0);
     g_echo[1] = a.i(1);
     g_echo[2] = a.has(2) ? a.i(2) : -1;
+    g_echoFromScope = (a.fromScope(0) ? 1 : 0) | (a.fromScope(1) ? 2 : 0) | (a.fromScope(2) ? 4 : 0);
     return true;
 }
 static bool ValueRatio(const Args& a, const Scope&, int64_t* out) {
@@ -443,10 +445,12 @@ int main() {
     CHECK(NativeValidate(*e2), "use without the scope-default parameters validates");
     CHECK(NativeEvaluate(e2, &regionScope) && g_echo[0] == 42 && g_echo[1] == 5 && g_echo[2] == -1,
           "region from the region scope, country from ROOT, optional choice absent (%d %d %d)", g_echo[0], g_echo[1], g_echo[2]);
+    CHECK(g_echoFromScope == 3, "scope defaults marked as from the scope (%d)", g_echoFromScope);
     ParsedCommand* e3 = NativeNewParsed(*echo);
     NativeSetArg(*e3, 0, "7", &err);
     NativeSetArg(*e3, 1, "FROM", &err);
     CHECK(NativeEvaluate(e3, &regionScope) && g_echo[0] == 7 && g_echo[1] == 9, "explicit region, FROM resolved per use");
+    CHECK(g_echoFromScope == 0, "written values (FROM included) not marked as from the scope (%d)", g_echoFromScope);
     FakeScope noRegion;
     noRegion.country = 3;
     size_t scopeLogs = LogCount("not available from the scope");

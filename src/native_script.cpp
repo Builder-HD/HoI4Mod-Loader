@@ -334,6 +334,7 @@ bool ResolveArgs(const ParsedCommand& pc, const Scope& s, ArgValue* out, bool pa
             }
             out[i].i = v;
             out[i].present = true;
+            out[i].fromScope = true;
             continue;
         }
         if (out[i].present && p.type == ParamType::Country && out[i].i != kCountryAny) {

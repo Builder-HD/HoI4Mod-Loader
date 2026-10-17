@@ -74,6 +74,7 @@ struct ArgValue {
     int i = 0;
     bool b = false;
     const char* s = "";  // Key text (owned by the parsed command), "" if absent
+    bool fromScope = false;  // filled in from the scope (ParamSpec::fromScope), not written in script
 };
 
 // Typed arguments in schema order. Plain reads: safe in trigger evaluate (no allocation).
@@ -85,6 +86,9 @@ public:
     int i(size_t i) const { return i < n_ ? v_[i].i : 0; }
     bool b(size_t i) const { return i < n_ && v_[i].b; }
     const char* key(size_t i) const { return i < n_ ? v_[i].s : ""; }
+    // True when the value came from the scope, e.g. a region inside a strategic region block.
+    // Tooltips use it to leave out what the scope's header already names.
+    bool fromScope(size_t i) const { return i < n_ && v_[i].fromScope; }
 
 private:
     const ArgValue* v_;

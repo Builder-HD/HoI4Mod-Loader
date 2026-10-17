@@ -385,8 +385,13 @@ void TooltipHasCustomName(const Args& a, const Scope&, bool negated, TooltipText
 }
 
 // Effect lines, worded like vanilla's set_province_name / reset_province_name.
+// With `region` written: vanilla's province wording, which names the region. Inside a region
+// scope the header names it already (and an every_ block builds the line once, for its first
+// region), so vanilla's state wording: EFFECT_SET_STATE_NAME / EFFECT_RESET_STATE_NAME.
 const LocText kSetText{"HOI4_LOADER_SET_STRATEGIC_REGION_NAME", "$OLDNAME|Y$ is renamed to $NAME|Y$."};
 const LocText kResetText{"HOI4_LOADER_RESET_STRATEGIC_REGION_NAME", "$NAME|Y$ gets its original name back."};
+const LocText kSetScopeText{"HOI4_LOADER_SET_STRATEGIC_REGION_NAME_IN_SCOPE", "Changes name to $NAME|Y$."};
+const LocText kResetScopeText{"HOI4_LOADER_RESET_STRATEGIC_REGION_NAME_IN_SCOPE", "Gets its original name back."};
 
 std::string ShownName(int id) {
     void* region = Engine::RegionById(id);
@@ -394,9 +399,17 @@ std::string ShownName(int id) {
     return name ? name->c_str() : "strategic region " + std::to_string(id);
 }
 void TooltipSet(const Args& a, const Scope&, TooltipText& out) {
+    if (a.fromScope(0)) {
+        out.add(native_localize(kSetScopeText, {{"NAME", native_localize_key(a.key(1))}}).c_str());
+        return;
+    }
     out.add(native_localize(kSetText, {{"OLDNAME", ShownName(a.i(0))}, {"NAME", native_localize_key(a.key(1))}}).c_str());
 }
 void TooltipReset(const Args& a, const Scope&, TooltipText& out) {
+    if (a.fromScope(0)) {
+        out.add(native_localize(kResetScopeText).c_str());
+        return;
+    }
     out.add(native_localize(kResetText, {{"NAME", ShownName(a.i(0))}}).c_str());
 }
 
@@ -449,13 +462,13 @@ bool RegionNamesInit() {
                             "Inside a strategic region scope `region` may be left out.",
                             Form::Block,
                             {{"region", ParamType::Int, false, ScopeDefault::StrategicRegion}, {"name", ParamType::Key, true}},
-                            ScopeMask::Any, &ExecSet, &TooltipSet, {kSetText}},
+                            ScopeMask::Any, &ExecSet, &TooltipSet, {kSetText, kSetScopeText}},
                            kFeature);
     register_native_effect({"reset_strategic_region_name",
                             "Restore a strategic region's original name (hoi4_loader): clears its hoi4_srn flags. "
                             "Inside a strategic region scope `region` may be left out.",
                             Form::Block, {{"region", ParamType::Int, false, ScopeDefault::StrategicRegion}}, ScopeMask::Any,
-                            &ExecReset, &TooltipReset, {kResetText}},
+                            &ExecReset, &TooltipReset, {kResetText, kResetScopeText}},
                            kFeature);
     register_native_trigger({"strategic_region_has_custom_name",
                              "True if the strategic region currently shows a name provided by hoi4_loader. A rename "
