@@ -35,6 +35,7 @@ Current features:
 | `military_counts` | engine (needs `lifecycle`) | `hoi4_loader_plugin_military_counts` | `battles_count`, `divisions_count`, `ships_count`, `planes_count` |
 | `army_condition` | engine (needs `lifecycle`) | `hoi4_loader_plugin_army_condition` | `avg_division_strength`, `avg_division_organisation` |
 | `production_data` | engine (needs `lifecycle`) | `hoi4_loader_plugin_production_data` | `factories_assigned` |
+| `region_scope` | engine (needs `lifecycle`) | `hoi4_loader_plugin_region_scope` | `strategic_region`, `any_`/`every_`/`random_strategic_region` and the region identity triggers, see below |
 
 On an unknown build the file tier stays on, the engine tier is off, and `loader.log` lists the
 disabled features and prints the exact line to add to `loader_config.ini`. A feature whose init
@@ -106,8 +107,9 @@ When to call `hoi4_loader_init` (the test mod's `common/on_actions` file shows b
   when a save is loaded, so flags in a loaded save stay as they were saved. The weekly call
   corrects them within 7 in-game days.
 
-Have your stub `hoi4_loader_init` clear the flags too, so a save loaded without the loader loses
-them at the next weekly refresh. `hoi4_loader_present = yes` is always current. With the
+Have your stub `hoi4_loader_init` clear the flags too, one `clr_global_flag` per feature in the
+table above (the test mod's stub lists them all), so a save loaded without the loader loses them
+at the next weekly refresh. `hoi4_loader_present = yes` is always current. With the
 `lifecycle` feature the loader refreshes the plugin flags itself right after a save is loaded, in
 single player. In multiplayer (and after a hot join) it doesn't, because a change made on one
 machine only would desync the game; there the weekly refresh does it. On builds without

@@ -9,4 +9,9 @@ hoi4_loader_init = {
 	clr_global_flag = hoi4_loader_plugin_lifecycle
 	clr_global_flag = hoi4_loader_plugin_region_names
 	clr_global_flag = hoi4_loader_plugin_game_loaded
+	clr_global_flag = hoi4_loader_plugin_region_control
+	clr_global_flag = hoi4_loader_plugin_military_counts
+	clr_global_flag = hoi4_loader_plugin_army_condition
+	clr_global_flag = hoi4_loader_plugin_production_data
+	clr_global_flag = hoi4_loader_plugin_region_scope
 }

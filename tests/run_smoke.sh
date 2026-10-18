@@ -22,6 +22,16 @@ out=$("$BUILD/tests/native_script_test.exe"); trc=$?
 echo "$out" | grep -E 'FAIL|PASSED|FAILED'
 [ "$trc" = 0 ] || rc=1
 
+echo "===== 0b) test mod stub clears every feature flag; README lists every feature"
+SRC="$(cd "$(dirname "$0")/.." && pwd)"
+STUB="$SRC/mod/hoi4_loader_test/common/scripted_effects/hoi4_loader_detect.txt"
+for f in $(sed -n 's/^    {"\([a-z_]*\)", Tier::.*/\1/p' "$SRC/src/features.cpp"); do
+    if grep -q "clr_global_flag = hoi4_loader_plugin_$f\b" "$STUB"; then echo "  ok   stub clears hoi4_loader_plugin_$f"
+    else echo "  FAIL stub does not clear hoi4_loader_plugin_$f"; rc=1; fi
+    if grep -q "^| \`$f\` |" "$SRC/README.md"; then echo "  ok   README lists $f"
+    else echo "  FAIL README feature table lacks $f"; rc=1; fi
+done
+
 for d in "$SIG" "$NOSIG"; do
     [ -f "$d/hoi4.exe" ] && [ -f "$d/version.dll" ] || { echo "missing $d/hoi4.exe or version.dll; build first"; exit 2; }
 done
