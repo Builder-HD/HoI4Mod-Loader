@@ -2834,3 +2834,168 @@ zip's: `version.dll` sha256 `f5485f06…`, and the ini is identical to the relea
   - **`error.log`:** only the known lobby `remotefile.cpp` lines.
 - **Session 5 (the release ini again):** the log is as in session 1.
 - **Still open:** multiplayer (D3 step 10).
+
+## Part G: create an army under a chosen general (investigation, G1)
+
+Investigation only, nothing implemented. Branch `feature/create-army`. Addresses are from vanilla
+1.19.3 (`hoi4_copy.exe`) and only for orientation; an implementation finds everything through
+RTTI and code shapes and is checked on all three builds first.
+
+### G1.1 What vanilla covers
+
+`documentation/effects_documentation.md` and `triggers_documentation.md`, 1.19.3:
+
+| Need | Vanilla | Notes |
+|---|---|---|
+| Spawn divisions | `create_unit = { division = "<OOB text>" owner = TAG prioritize_location = <prov> allow_spawning_on_enemy_provs = no country_score = { … } count = N id = N divisional_commander_xp = N }` | `division` holds `division_template`, `start_experience_factor`, `start_equipment_factor`, `name`; no army, no general |
+| Spawn from an OOB file | `load_oob = "ENG_1936"` (country) | OOB files have no army or general keys: `officer = { … }` in a division is its divisional commander, `army = { … }` only appears inside `portraits` |
+| Create or recruit generals | `create_corps_commander`, `create_field_marshal`, `recruit_character`, `promote_leader`, `add_corps_commander_role`, `add_field_marshal_role` | |
+| Move armies | `teleport_armies` (state scope) | moves existing units, no regrouping |
+| Iterate divisions / leaders | `every_country_division`, `random_country_division`, `every_state_division`, `every_army_leader`, … | division scope exists (scope bit 0x100, NOTES "Scopes") |
+| Read leader state | `is_corps_commander`, `is_field_marshal`, `is_leading_army`, `is_leading_army_group`, `is_army_leader`, `is_general_captured` | |
+| Army from divisions + general | **none for script.** `start_border_war` does it internally (G1.2) but only for the units already in the border state and a leader it picks by `leader_score` | |
+
+So vanilla cannot put given divisions under a given general. That part is missing.
+
+### G1.2 Engine structures
+
+**Naming.** The UI's "army" is a `COrdersGroup` (source `ordersgroup.cpp`). An army group is the
+same base class with the `IsArmyGroup` flag. A division is a `CArmy` (the `CUnit` handle
+sub-object sits at `+0x10`). The general is a `CUnitLeader` role of a `CCharacter`.
+
+**Reference handles.** Game objects are addressed by 8-byte handles `{type, index}`; the object's
+own handle is at `obj+8`. `FUN_14221f310(&handle)` resolves one (per-type hash tables;
+`DAT_14333d528` is the null handle). New armies take type `0x35` and the next index from the
+global counter `DAT_143087260`.
+
+**Per-country army manager (called X below):**
+- From a country: `X = **(country+0x168)` (as `start_border_war` does). From a division:
+  `X = unit+0x2a0` (`FUN_140bf9660`, as the UI does). From an army: `army+0x40`.
+- `X+0x48` tag; `+0x68` divisions (count `+0x74`); `+0x80` armies; `+0x98` army groups;
+  `+0xb0` all groups; `+0xc8` theatres (count `+0xd4`).
+
+**Army (`COrdersGroup`, 0x230 bytes; army group 0x250):**
+
+| Offset | Meaning |
+|---|---|
+| `+0x39` | is army group |
+| `+0x3c` | country tag |
+| `+0x40` | X |
+| `+0x50` / `+0x5c` | member list (division member sub-objects) / count |
+| `+0x68` | deployed army HQ (non-null while deployed) |
+| `+0x88` | leader (`CUnitLeader*`) |
+| `+0x160` | name string |
+| `+0x180` | theatre (`FUN_140befc20`, asserts it is set) |
+| `+0x199` / `+0x19a` / `+0x19b` | HQ deploying / … / withdrawing (leader change refused) |
+| `+0x1b8` | parent army group |
+| `+0x230` / `+0x23c` | child armies (army groups only) |
+
+**Division:** army at `unit+0xc0`, member sub-object at `unit+0xb8`, tag at `unit+0x1d8`,
+handle at `unit+0x18`, X at `unit+0x2a0`. The country's division list is `country+0x290`
+(Part E).
+
+**Leader:** role type at `leader+0xe7c` (0 field marshal, 1 corps commander, ≥ 2 navy; "army
+leader" is `< 2`); tag at `leader+0x120`; name at `leader+0x40`; handle of the army or army group
+it leads at `leader+0x1048`; vtable `+0xe8` is "captured" (`is_general_captured`).
+**Character:** `FUN_1406b4eb0(gamestate+0x6a8, token)` finds it by token (`recruit_character`,
+"Unknown character %s"); owner tag at `character+0x68` (< 1 = not recruited); army leader role
+`FUN_140f9f9c0(character)` (`+0xa8`, else handle `+0xc8`). A character scope holds the handle at
+`scope+0x50`; `FUN_140535e00(scope)` gives its army leader role.
+
+**UI commands (lockstep `CCommand`s).** Slot 9 = can execute, slot 10 = execute, slot 11 = type
+id, slot 13 = clone. The game-state work in each execute:
+
+| UI action | Command | Inner function (what the loader would call) |
+|---|---|---|
+| Create army from selected divisions | `COrderGroupCommand` | `FUN_140bebf30(&theatre, &X, &unitHandles, keepEmpty)` → new army; then `FUN_140beab30(parent, army, -1)` if a parent army group was given |
+| Assign general | `CSetArmyLeaderCommand` (id 0x3051) | `FUN_140bf5a20(army, leader, 1)`; before it `FUN_140bebaa0(army, 0)` = can change leader |
+| Create army group | `CArmyGroupCommand` | `FUN_140ef0fc0(X, armies, 0, 0)` |
+| Add army to army group | `CAssignToArmyGroupCommand` | `FUN_140beab30(group, army, index)` (owner check first) |
+| Delete army | `CDeleteOrderGroupCommand` | `FUN_140f009e0(X, army, 1)` |
+
+- **`FUN_140bebf30` (create army)** does all the bookkeeping:
+  - creates the army with `FUN_140ef1180(X, …)`, which puts it into X's lists and, with no
+    theatre given, into X's last theatre (or a new one; `FUN_140eecf20`);
+  - for each handle: skips units of another tag, asserts against railway guns, and moves the unit
+    in (`FUN_140befcb0`: out of its old army, into the member list, `unit+0xc0` = army);
+  - deletes the new army again if it stayed empty (unless `keepEmpty`);
+  - deletes each old army the units left if that one is now empty (`FUN_140ef16f0`).
+- **`FUN_140bf5a20` (set leader)** stores `army+0x88` and, with the last argument 1, calls
+  `FUN_140c267a0(leader, army, 1)`. That detaches the leader from the army it led before (which
+  keeps its divisions and has no general) and sets `leader+0x1048`.
+- **`CSetArmyLeaderCommand` execute adds, around that call:**
+  - the command power charge: `FUN_140c15140(leader)` computes the assignment cost (country
+    modifier 0x249 for army leaders, "UNIT_LEADER_ASSIGNMENT_COST_HEADER") and `FUN_1406cfe60`
+    applies it to `country+0x1f0`;
+  - an AI bookkeeping reset (`FUN_141950d70` on `country+0xf88` → `+0x290` → `+0x9f8`);
+  - HQ handling;
+  - UI refreshes through `DAT_14332f698`, which an effect must not call.
+- **Vanilla precedent: `start_border_war` (`FUN_140335500`) does the same from an effect:**
+  1. `FUN_140bebf30(null theatre, &X, &units, 0)`;
+  2. `FUN_140bf5a20(army, leader, 1)`;
+  3. the leader's vtable slot 25.
+
+  It does no command power charge and no UI call. The loader would follow exactly this sequence.
+
+**`create_unit` (`CCreateUnitEffect`, execute = slot 13, `FUN_140352140`):**
+- **Location:** chosen per division by `FUN_14036aa00`, honouring `prioritize_location`,
+  `allow_spawning_on_enemy_provs` and `country_score`. The choice uses the scope's synced random
+  numbers (the same hash as NOTES F9). On failure it logs "pBestLocation was not found
+  [reason] %s".
+- **Creation:** a new `CArmy` (0x688 bytes); the `division` string is parsed into it at execute
+  time ("error reading army data"); then it is registered (`FUN_1406d2ca0`, `FUN_140bb9220`).
+- **Return value:** none. The new units are not returned. A before/after comparison of the
+  country's division list (or X's) identifies them; whether they are appended at the end is still
+  to be confirmed.
+
+### G1.3 Rules the game enforces
+
+- **Division caps are soft:**
+  - `NMilitary.CORPS_COMMANDER_DIVISIONS_CAP = 24`, `FIELD_MARSHAL_DIVISIONS_CAP = 24` and
+    `FIELD_MARSHAL_ARMIES_CAP = 5` (0 = unlimited, < 0 = blocked);
+  - going over is allowed. "Commanding too many divisions will reduce all positive Commander
+    Trait and Skill modifiers" (`LEADING_TOO_MANY_DIVISIONS_DESC`; armies:
+    `ARMY_AMOUNT_PENALTY`);
+  - `GARRISON_ORDER_ARMY_CAP_FACTOR = 3.0` raises the cap for garrison orders.
+- **Leader change refused** (`FUN_140bebaa0`) while the army's HQ is deploying
+  (`CANNOT_CHANGE_LEADER_DEPLOYING`) or withdrawing (`…_WITHDRAWING`), and with `CANNOT_CHANGE_LEADER_WAR` when `army+0x1b0` is set (that field is
+  not identified yet).
+- **Leader eligibility:** the UI lists the country's army leaders. The engine checks for:
+  - an army leader: `leader+0xe7c < 2`; a field marshal can lead a single army (the AI avoids
+    it, `ARMY_LEADER_ASSIGN_FIELD_MARSHAL_TO_ARMY = -500`);
+  - the same country;
+  - not captured.
+
+  A general who already leads an army is moved, and his old army keeps its divisions without a
+  general.
+- **Command power:** recruiting costs `NPolitics.ARMY_LEADER_COST = 5` × leaders of that type
+  (max 80). Assigning through the UI costs the 0x249 modifier value; `start_border_war` charges
+  nothing.
+- **Units:** same tag as the army (asserted), no railway guns (asserted). `create_army` would add
+  only divisions it spawned for the leader's country.
+- **Location:** everything `create_unit` does: own provinces first, then friendly ones, enemy
+  only with `allow_spawning_on_enemy_provs`.
+
+### G1.4 Behaviour
+
+- **AI countries reorganise armies.**
+  - `ai_front.cpp` (`FUN_14106c700`, `FUN_14106cdf0`) reassigns divisions to armies per front
+    ("Front %s: reassigned %i units to army %i") and creates and edits army groups.
+  - AI leader assignment (`ARMY_LEADER_ASSIGN_*` defines) can swap generals.
+  - No per-army lock flag was found. For an AI country a spawned army is a starting arrangement
+    the AI may reshape.
+- **Player armies** are not touched by that code. To check in game.
+- **Multiplayer.**
+  - Every call is game-state code that vanilla's own `start_border_war` effect already runs on
+    all machines. Spawning uses the scope's synced random numbers. New army ids come from the
+    shared counter, so they stay identical when every machine executes the same effects in the
+    same order (lockstep).
+  - The loader must skip the UI refreshes that `CSetArmyLeaderCommand` makes.
+- **Saves:** armies, their members and their leader are the same objects the UI creates, so the
+  game saves them. To check in game (save, reload, army and general still there).
+
+### G1.5 Proposal (awaiting approval)
+
+See the report in the conversation of 2026-10-18: options A (block with vanilla `create_unit`
+children), B (`division = { template count }` sugar), C (`add_to_army` in division scope),
+D (army group / field marshal), feature and guard `create_army`.
