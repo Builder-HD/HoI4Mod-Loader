@@ -129,8 +129,10 @@ static void LoadRealVersionDll() {
 }
 
 // True if engine-tier features may run: hoi4.exe's hash is listed in loader_config.ini.
-static bool CheckSupportedBuild(const wchar_t* exePath, const wchar_t* iniPath) {
+// *unlisted: the hash is known but not listed (or the ini is missing): worth a signature report.
+static bool CheckSupportedBuild(const wchar_t* exePath, const wchar_t* iniPath, bool* unlisted) {
     char hash[65];
+    *unlisted = false;
     if (!GetExeHash(exePath, hash)) {
         Log("Engine-tier features disabled (hoi4.exe hash unavailable): %s", FeatureNames(Tier::Engine).c_str());
         return false;
@@ -139,6 +141,7 @@ static bool CheckSupportedBuild(const wchar_t* exePath, const wchar_t* iniPath) 
         Log("ERROR: cannot get own module path");
         return false;
     }
+    *unlisted = true;
 
     wchar_t label[128];
     int entries = 0;
@@ -146,6 +149,7 @@ static bool CheckSupportedBuild(const wchar_t* exePath, const wchar_t* iniPath) 
         Log("WARNING: %ls not found", iniPath);
     } else if (IsHashSupported(iniPath, hash, label, ARRAYSIZE(label), &entries)) {
         Log("Supported hoi4.exe build: %ls", label[0] ? label : L"(unnamed entry)");
+        *unlisted = false;
         return true;
     }
     Log("Unknown hoi4.exe build (checked %d hash(es) in loader_config.ini).", entries);
@@ -180,14 +184,20 @@ static void Init(HMODULE self) {
         size_t dirLen = BaseName(iniBuf) - iniBuf;
         if (wcscpy_s(iniBuf + dirLen, ARRAYSIZE(iniBuf) - dirLen, L"loader_config.ini") == 0) iniPath = iniBuf;
     }
-    bool engineAllowed = CheckSupportedBuild(exePath, iniPath);
+    bool unlisted = false;
+    bool engineAllowed = CheckSupportedBuild(exePath, iniPath, &unlisted);
+    // Signature report (read-only): always on an unlisted build, on request on a listed one.
+    bool report = unlisted || (iniPath && GetPrivateProfileIntW(L"diagnostics", L"signature_scan", 0, iniPath) == 1);
 
     MH_STATUS s = MH_Initialize();
     if (s != MH_OK) {
         Log("ERROR: MH_Initialize failed: %s; loader inactive", MH_StatusToString(s));
         return;
     }
+    if (report) SigReportBegin(unlisted);
     if (engineAllowed && !Engine::Resolve()) Log("WARNING: no engine functions resolved; engine features will fail");
+    if (report && !engineAllowed) SigReportResolve();
+    if (report) SigReportEnd(unlisted);
     FeaturesInit(engineAllowed, iniPath);
     if (!VfsStart()) {
         Log("ERROR: virtual files unavailable; script cannot detect the loader");

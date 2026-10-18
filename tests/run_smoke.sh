@@ -46,6 +46,9 @@ newest_log() { ls -t "$DOCS"/loader.log "$DOCS"/loader.*.log 2>/dev/null | head 
 expect_log() {  # expect_log <description> <fixed string>
     if grep -qF -- "$2" "$(newest_log)"; then echo "  ok   log: $1"; else echo "  FAIL log: $1 (missing: $2)"; rc=1; fi
 }
+expect_no_log() {  # expect_no_log <description> <fixed string>
+    if grep -qF -- "$2" "$(newest_log)"; then echo "  FAIL log: $1 (unexpected: $2)"; rc=1; else echo "  ok   log: $1"; fi
+}
 run() {  # run <dir> <engine|file> <title>
     echo "===== $3"
     (cd "$1" && LOCALAPPDATA="$(cygpath -w "$LA")" ./hoi4.exe "$2") || rc=1
@@ -63,9 +66,20 @@ expect_log "signature resolved" "Signature 'physfs_platformOpenRead' -> hoi4.exe
 expect_log "lifecycle fails safe without its signatures" "Feature lifecycle (engine tier): FAILED, left inactive"
 expect_log "region_names skipped without lifecycle" "Feature region_names (engine tier): DISABLED, requires lifecycle"
 expect_log "game_loaded skipped without lifecycle" "Feature game_loaded (engine tier): DISABLED, requires lifecycle"
+expect_no_log "no signature report on a listed build" "Signature report"
 
 run "$SIG" engine "2) same exe again -> hash from cache"
 expect_log "cache hit" "(from hash cache,"
+
+printf '[diagnostics]\nsignature_scan = 1\n' >> "$SIG/loader_config.ini"
+run "$SIG" engine "2b) listed build with [diagnostics] signature_scan = 1 -> read-only report, engine tier still on"
+expect_log "report requested" "Signature report ([diagnostics] signature_scan = 1): read-only"
+expect_log "signature count" "signatures and anchors match exactly once"
+expect_log "physfs signature counted" "FAILS kSigGameEntered: matches 0 times"
+expect_log "code shape count" "code shapes match where the resolver checks them"
+expect_no_log "no reporting instructions on a listed build" "To report this game version"
+expect_log "engine tier still on" "Feature engine_probe (engine tier): active"
+ini_listed "$SIG"
 
 touch "$SIG/hoi4.exe"
 run "$SIG" engine "3) exe last-write time changed -> rehash"
@@ -81,6 +95,13 @@ expect_log "engine feature disabled" "Feature engine_probe (engine tier): DISABL
 expect_log "summary of disabled features" "Engine-tier features disabled: engine_probe"
 expect_log "file tier summary" "File-tier features stay active: core detection"
 expect_log "ini line printed" "my_build = $(hash_of "$SIG")"
+expect_log "unlisted: read-only report" "Signature report (unlisted hoi4.exe build): read-only, nothing is hooked or patched"
+expect_log "unlisted: present signatures counted" "Signature report: 2/44 signatures and anchors match exactly once"
+expect_log "unlisted: failing signature named" "FAILS kSigGameEntered: matches 0 times"
+expect_log "unlisted: code shapes summarised" "code shapes match where the resolver checks them"
+expect_log "unlisted: unreachable shape named" "NOT CHECKED kCodeTriggerFactory"
+expect_log "unlisted: reporting instructions" "To report this game version, send these files"
+expect_no_log "unlisted: resolver did not fault" "the resolver faulted"
 
 rm -f "$SIG/loader_config.ini"
 run "$SIG" file "6) no loader_config.ini -> file tier only"

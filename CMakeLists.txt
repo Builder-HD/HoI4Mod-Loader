@@ -30,6 +30,7 @@ add_library(hoi4_loader SHARED
     src/hash.cpp
     src/vfs.cpp
     src/sigscan.cpp
+    src/sigreport.cpp
     src/features.cpp
     src/plugin_engine_probe.cpp
     src/plugin_region_names.cpp

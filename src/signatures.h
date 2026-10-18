@@ -10,8 +10,14 @@
 // the start of the match. Addresses are 1.19.3 for orientation only.
 #pragma once
 
+// sigreport.cpp defines these three macros itself before including this file, to list every
+// entry for the read-only scan of unlisted builds.
+#ifndef SIG
 #define SIG(name, pattern) static const char name[] = pattern;
+#endif
+#ifndef ANCHOR
 #define ANCHOR(name, text) static const char name[] = text;
+#endif
 
 // --- PhysFS (engine_probe) -----------------------------------------------------------------
 // doOpen(): UTF-8 path -> CreateFileW. Function start. (0x142513a20)
@@ -229,7 +235,9 @@ static const size_t kSigRegionSeaShareDisp = 3;
 // --- Code shapes at RTTI-found addresses (numeric triggers, NOTES.md E2) -------------------
 // CODE(name, "..."): checked with SigMatchAt at an address reached through an RTTI vtable, not
 // scanned (so not required to be unique). tools/check_code_shapes.py checks them on exe copies.
+#ifndef CODE
 #define CODE(name, pattern) static const char name[] = pattern;
+#endif
 // CTriggerEntry<T>::Create (entry vtable slot 1): new(size) T. Size imm32 at +7, operator new
 // E8 at +0xb, constructor E8 at +0x20, lea of T's vtable at +0x25 (rel32 at +0x28, length 7).
 CODE(kCodeTriggerFactory, "40 53 48 83 EC 20 B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B D8 48 89 44 24 38 48 85 C0 74 ?? 48 8B C8 E8 ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? 48 89 03")

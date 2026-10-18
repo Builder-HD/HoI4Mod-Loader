@@ -230,7 +230,10 @@ void FeaturesInit(bool engineAllowed, const wchar_t* iniPath) {
             Log("Diagnostics: trigger timing needs the main-thread queue; off");
         }
     }
-    if (iniPath && GetPrivateProfileIntW(L"diagnostics", L"production_lines", 0, iniPath) == 1 && Engine::HaveProduction()) {
+    // engineAllowed: on an unlisted build the signature report's resolver run fills the engine
+    // pointers too, but nothing may use them there.
+    if (engineAllowed && iniPath && GetPrivateProfileIntW(L"diagnostics", L"production_lines", 0, iniPath) == 1 &&
+        Engine::HaveProduction()) {
         OnGameEntered([](bool) { Engine::LogProductionLines(Engine::PlayerCountryTag()); });
         Log("Diagnostics: production line dump ON (on game entry, player country)");
     }

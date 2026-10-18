@@ -79,6 +79,25 @@ bool ImageSection(const char* name, uint8_t** begin, size_t* size);
 std::string SigDescribe(const void* p);
 // "<module>+0x1234" for any address (crash reports).
 std::string DescribeAddress(const void* p);
+// Read-only counts for the signature report: matches of `pattern` in .text (-1 if it cannot be
+// scanned); for an anchor, its string's occurrences in .rdata (*strHits) and, if that is 1, the
+// lea references to it.
+int SigCount(const char* pattern);
+int AnchorCount(const char* text, int* strHits);
+// While on, SigMatchAt records per pattern whether it matched wherever it was checked.
+void SigRecordShapes(bool on);
+// 1 matched, 0 checked but never matched, -1 not checked since the last SigRecordShapes(true).
+int SigShapeResult(const char* pattern);
+
+// ---------------------------------------------------------------------------
+// sigreport.cpp: read-only signature report (unlisted builds, [diagnostics] signature_scan)
+// ---------------------------------------------------------------------------
+// Begin: counts every SIG and ANCHOR of signatures.h and logs the result; starts recording code
+// shapes. Resolve: runs Engine::Resolve with faults contained (for builds the engine tier does
+// not run on). End: logs the code shapes and, for an unlisted build, what to send in a report.
+void SigReportBegin(bool unlisted);
+bool SigReportResolve();
+void SigReportEnd(bool unlisted);
 
 // ---------------------------------------------------------------------------
 // features.cpp

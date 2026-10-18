@@ -59,6 +59,25 @@ static size_t PickAnchor(const std::vector<uint8_t>& bytes, const std::vector<bo
     return firstFixed;
 }
 
+// Matches of a parsed pattern in [text, text + size); the first one goes to *first.
+static int CountMatches(const std::vector<uint8_t>& bytes, const std::vector<bool>& mask, uint8_t* text, size_t size,
+                        uint8_t** first) {
+    size_t anchor = PickAnchor(bytes, mask);
+    int hits = 0;
+    // Candidate starts are [text, last]; the anchor byte sits at start + anchor.
+    uint8_t* last = text + size - bytes.size();
+    for (uint8_t* a = text + anchor; a <= last + anchor;) {
+        a = (uint8_t*)memchr(a, bytes[anchor], last + anchor + 1 - a);
+        if (!a) break;
+        uint8_t* p = a - anchor;
+        size_t i = 0;
+        while (i < bytes.size() && (!mask[i] || p[i] == bytes[i])) ++i;
+        if (i == bytes.size() && ++hits == 1) *first = p;
+        ++a;
+    }
+    return hits;
+}
+
 uint8_t* SigFindUnique(const char* name, const char* pattern) {
     std::vector<uint8_t> bytes;
     std::vector<bool> mask;
@@ -73,20 +92,8 @@ uint8_t* SigFindUnique(const char* name, const char* pattern) {
         return nullptr;
     }
     ULONGLONG t0 = GetTickCount64();
-    size_t anchor = PickAnchor(bytes, mask);
     uint8_t* found = nullptr;
-    int hits = 0;
-    // Candidate starts are [text, last]; the anchor byte sits at start + anchor.
-    uint8_t* last = text + size - bytes.size();
-    for (uint8_t* a = text + anchor; a <= last + anchor;) {
-        a = (uint8_t*)memchr(a, bytes[anchor], last + anchor + 1 - a);
-        if (!a) break;
-        uint8_t* p = a - anchor;
-        size_t i = 0;
-        while (i < bytes.size() && (!mask[i] || p[i] == bytes[i])) ++i;
-        if (i == bytes.size() && ++hits == 1) found = p;
-        ++a;
-    }
+    int hits = CountMatches(bytes, mask, text, size, &found);
     ULONGLONG ms = GetTickCount64() - t0;
     if (hits != 1) {
         Log("ERROR: signature '%s' matched %d time(s), expected exactly 1 (%llu ms)", name, hits, ms);
@@ -96,7 +103,33 @@ uint8_t* SigFindUnique(const char* name, const char* pattern) {
     return found;
 }
 
-bool SigMatchAt(const uint8_t* p, const char* pattern) {
+int SigCount(const char* pattern) {
+    std::vector<uint8_t> bytes;
+    std::vector<bool> mask;
+    uint8_t* text;
+    size_t size;
+    if (!ParsePattern(pattern, &bytes, &mask) || !GetTextSection(&text, &size) || size < bytes.size()) return -1;
+    uint8_t* first = nullptr;
+    return CountMatches(bytes, mask, text, size, &first);
+}
+
+// Code shape results while recording (sigreport.cpp): pattern text -> matched at least once.
+// Recording runs only during the startup scan, on the loader's thread.
+static bool g_recordShapes = false;
+static std::vector<std::pair<std::string, bool>> g_shapes;
+
+void SigRecordShapes(bool on) {
+    if (on) g_shapes.clear();
+    g_recordShapes = on;
+}
+
+int SigShapeResult(const char* pattern) {
+    for (const auto& s : g_shapes)
+        if (s.first == pattern) return s.second ? 1 : 0;
+    return -1;
+}
+
+static bool MatchAt(const uint8_t* p, const char* pattern) {
     std::vector<uint8_t> bytes;
     std::vector<bool> mask;
     uint8_t* text;
@@ -108,6 +141,17 @@ bool SigMatchAt(const uint8_t* p, const char* pattern) {
     return true;
 }
 
+bool SigMatchAt(const uint8_t* p, const char* pattern) {
+    bool ok = MatchAt(p, pattern);
+    if (g_recordShapes) {
+        auto it = g_shapes.begin();
+        while (it != g_shapes.end() && it->first != pattern) ++it;
+        if (it == g_shapes.end()) g_shapes.emplace_back(pattern, ok);
+        else it->second = it->second || ok;
+    }
+    return ok;
+}
+
 uint8_t* SigFollowRel32(uint8_t* insn) { return SigRipTarget(insn, 1, 5); }
 
 uint8_t* SigRipTarget(uint8_t* insn, size_t relOffset, size_t insnLen) {
@@ -116,31 +160,25 @@ uint8_t* SigRipTarget(uint8_t* insn, size_t relOffset, size_t insnLen) {
     return insn + insnLen + rel;
 }
 
-uint8_t* AnchorFindLea(const char* name, const char* text) {
-    // The string: exactly one NUL-delimited occurrence in .rdata.
+// The anchor's string occurrences in .rdata (*strHits) and, if exactly one, the number of
+// `lea r64,[rip+rel32]` (REX.W 48/4C, 8D, modrm 00 rrr 101) in .text targeting it (the first in
+// *found). Returns -1 if the sections are missing.
+static int AnchorRefs(const char* text, int* strHits, uint8_t** found) {
     uint8_t* rdata;
     size_t rsize;
     uint8_t* code;
     size_t csize;
-    if (!ImageSection(".rdata", &rdata, &rsize) || !GetTextSection(&code, &csize)) {
-        Log("ERROR: anchor '%s': cannot locate hoi4.exe sections", name);
-        return nullptr;
-    }
+    *strHits = 0;
+    if (!ImageSection(".rdata", &rdata, &rsize) || !GetTextSection(&code, &csize)) return -1;
     size_t len = strlen(text);
     uint8_t* str = nullptr;
-    int strHits = 0;
     for (uint8_t* p = rdata + 1; p + len < rdata + rsize;) {
         p = (uint8_t*)memchr(p, text[0], rdata + rsize - len - p);
         if (!p) break;
-        if (p[-1] == 0 && p[len] == 0 && memcmp(p, text, len) == 0 && ++strHits == 1) str = p;
+        if (p[-1] == 0 && p[len] == 0 && memcmp(p, text, len) == 0 && ++*strHits == 1) str = p;
         ++p;
     }
-    if (strHits != 1) {
-        Log("ERROR: anchor '%s': string found %d time(s), expected 1", name, strHits);
-        return nullptr;
-    }
-    // The code: exactly one `lea r64,[rip+rel32]` (REX.W 48/4C, 8D, modrm 00 rrr 101) targeting it.
-    uint8_t* found = nullptr;
+    if (*strHits != 1) return 0;
     int refs = 0;
     for (uint8_t* p = code; p + 7 <= code + csize;) {
         p = (uint8_t*)memchr(p, 0x8D, code + csize - 6 - p);
@@ -148,8 +186,29 @@ uint8_t* AnchorFindLea(const char* name, const char* text) {
         uint8_t* insn = p - 1;
         if (insn >= code && (insn[0] == 0x48 || insn[0] == 0x4C) && (p[1] & 0xC7) == 0x05 &&
             SigRipTarget(insn, 3, 7) == str && ++refs == 1)
-            found = insn;
+            *found = insn;
         ++p;
+    }
+    return refs;
+}
+
+int AnchorCount(const char* text, int* strHits) {
+    uint8_t* found = nullptr;
+    return AnchorRefs(text, strHits, &found);
+}
+
+uint8_t* AnchorFindLea(const char* name, const char* text) {
+    // The string: exactly one NUL-delimited occurrence in .rdata; the code: exactly one lea of it.
+    int strHits = 0;
+    uint8_t* found = nullptr;
+    int refs = AnchorRefs(text, &strHits, &found);
+    if (refs < 0) {
+        Log("ERROR: anchor '%s': cannot locate hoi4.exe sections", name);
+        return nullptr;
+    }
+    if (strHits != 1) {
+        Log("ERROR: anchor '%s': string found %d time(s), expected 1", name, strHits);
+        return nullptr;
     }
     if (refs != 1) {
         Log("ERROR: anchor '%s': %d lea reference(s), expected 1", name, refs);

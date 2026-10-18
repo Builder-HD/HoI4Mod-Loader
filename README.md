@@ -888,7 +888,28 @@ Optional diagnostics:
 ```
 [diagnostics]
 trigger_timing = 1   ; time numeric triggers, scope blocks and iterators; loader.log summary every 10 in-game days
+production_lines = 1 ; log the player's production lines on game entry
+signature_scan = 1   ; write the signature report (below) on a listed build too
 ```
+
+### Unknown game builds
+
+On a hoi4.exe whose hash is not listed, the engine tier stays off and the loader writes a
+**signature report** to `loader.log`. It only reads hoi4.exe's code; nothing is hooked or
+patched.
+- **Signatures and anchors:** `Signature report: N/44 signatures and anchors match exactly
+  once`, then one `FAILS` line per signature or anchor that does not, with its match count.
+- **Code shapes:** the resolver runs with faults contained (an exception is logged, never
+  raised), and `Signature report: N/17 code shapes match where the resolver checks them`
+  follows.
+  - `FAILS` means the code was found but looks different.
+  - `NOT CHECKED` means the code it belongs to was not found, usually because a signature or
+    RTTI class before it failed.
+- **What to send:** the log ends with the list: `loader.log`, `logs\error.log` and the game
+  version from the main menu. The `my_build = <sha256>` line above it identifies the exe.
+- **All matching** (44/44 and 17/17) is necessary for listing a build, not sufficient. Offsets
+  read out of the code can still differ, so a build is listed only after the in-game checks.
+- `[diagnostics] signature_scan = 1` writes the same report on a listed build, for comparison.
 
 ### Hash cache
 
