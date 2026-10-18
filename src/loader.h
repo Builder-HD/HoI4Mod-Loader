@@ -66,6 +66,10 @@ uint8_t* SigFindUnique(const char* name, const char* pattern);
 // True if `pattern` matches at `p` (inside .text). For code reached through RTTI vtables: a
 // known address whose bytes must still look as analysed.
 bool SigMatchAt(const uint8_t* p, const char* pattern);
+// The first match of `pattern` in [start, start + len) (clipped to .text), or nullptr. For code
+// shapes inside a function reached through RTTI whose exact offset may move between builds.
+// Recorded for the signature report like SigMatchAt.
+uint8_t* SigFindIn(const uint8_t* start, size_t len, const char* pattern);
 // Follows a rel32 call/jmp: `insn` points at the E8/E9 opcode.
 uint8_t* SigFollowRel32(uint8_t* insn);
 // Target of a RIP-relative operand: rel32 at insn+relOffset, instruction length insnLen.
