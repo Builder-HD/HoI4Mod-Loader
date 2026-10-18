@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Installing, uninstalling, after a game patch
-    url: https://github.com/Builder-HD/HoI4Mod-Loader/blob/main/PLAYERS.md
+    url: https://github.com/Builder-HD/HoI4Mod-Loader/blob/main/README.md
     about: The player guide answers most install questions.
   - name: Writing mods that use the loader
-    url: https://github.com/Builder-HD/HoI4Mod-Loader/blob/main/README.md
+    url: https://github.com/Builder-HD/HoI4Mod-Loader/blob/main/MODDING.md
     about: Every script command, guard, stub and the version policy.

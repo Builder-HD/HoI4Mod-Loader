@@ -5,7 +5,7 @@
 //
 // Call from the feature's init (DllMain). Commands are added to the engine once the lexer is
 // ready (lifecycle feature), before any script is parsed; later calls are refused. A name the
-// game already has is refused too. See README "Writing a native effect or trigger" for the rules
+// game already has is refused too. See DEVELOPING.md "Writing a native effect or trigger" for the rules
 // (determinism, trigger performance, guard triggers).
 #pragma once
 #include <stddef.h>

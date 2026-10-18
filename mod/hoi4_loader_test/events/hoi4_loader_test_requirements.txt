@@ -1,4 +1,4 @@
-# README "Warning players when a required feature is off": the warning event.
+# MODDING.md "Warning players when a required feature is off": the warning event.
 add_namespace = hoi4_loader_req
 
 country_event = {

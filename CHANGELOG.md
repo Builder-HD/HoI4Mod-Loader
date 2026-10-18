@@ -1,16 +1,28 @@
 # Changelog
 
 Release versions name the DLL package. The script version is the number script reads as
-`global.hoi4_loader_version` (README "Versions and compatibility"). Development went in parts
+`global.hoi4_loader_version` (MODDING.md "Versions and compatibility"). Development went in parts
 A–F; NOTES.md has the findings and test results behind each.
 
 ## Unreleased
 
-- **Disclaimer** at the top of README.md and PLAYERS.md: unofficial, not affiliated with or
-  endorsed by Paradox Interactive, runtime only, use at your own risk. The 0.5.0-beta zip's
-  PLAYERS.md does not have it yet.
+- **Disclaimer** at the top of the player guide: unofficial, not affiliated with or endorsed by
+  Paradox Interactive, runtime only, use at your own risk. The 0.5.0-beta zip's PLAYERS.md does
+  not have it yet.
 - **Issue forms** on GitHub: a bug report asking for the loader release, game version and build,
   logs, mod list and steps, plus a form for questions and requests.
+- **Docs for three audiences.**
+  - README.md is the player guide: the disclaimer, a link to the latest release, install,
+    uninstall, game patches, reporting problems (GitHub issues or Builder_HD on Discord), and
+    the supported game version. It absorbs PLAYERS.md, which now only points there.
+  - MODDING.md has everything script-facing: guards, the stub pack, the warning snippet, the
+    version policy and every command.
+  - DEVELOPING.md covers the build, the plugin API, threads and hooks, the layout, configuration
+    and diagnostics, the signature report, the smoke test and the release process.
+  - The release zip ships README.md, MODDING.md and DEVELOPING.md instead of PLAYERS.md, and
+    `tools/make_release.py` also writes the GitHub release notes.
+  - Help texts the DLL writes into `loader_script_docs.md` point to MODDING.md instead of the
+    README.
 
 ## 0.5.0-beta (2026-10-18), script version 3
 
@@ -31,11 +43,11 @@ after the universal checksum patcher.
   50%" under an iterator's header) instead of showing the raw trigger name.
 
 **For mod authors:**
-- **Stub pack:** `stubs/` holds every stub file. README "Stub pack" lists which one each command
+- **Stub pack:** `stubs/` holds every stub file. MODDING.md "Stub pack" lists which one each command
   needs.
-- **Warning snippet:** README "Warning players when a required feature is off" shows an event
+- **Warning snippet:** MODDING.md "Warning players when a required feature is off" shows an event
   at game start or on load when a needed feature is missing. The test mod uses it.
-- **Policy:** README "Versions and compatibility" covers the version policy, guards that work
+- **Policy:** MODDING.md "Versions and compatibility" covers the version policy, guards that work
   forever, and deprecation before removal.
 - **Documented:** `random_strategic_region`'s tooltip names the region that is then picked
   (NOTES F9).

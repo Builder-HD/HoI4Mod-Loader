@@ -114,7 +114,7 @@ bool ArmyConditionInit() {
     const char* kWhere =
         " In a country scope (or with only `country`): all of the country's divisions. In a state scope (or with "
         "`state`): the divisions in that state, owned by `country` if given, else all. No divisions: false. "
-        "Loops over every division it counts: avoid it in often-evaluated AI blocks (see README costs).";
+        "Loops over every division it counts: avoid it in often-evaluated AI blocks (see MODDING.md, \"Data triggers\", Cost).";
     static const std::string kStrengthHelp =
         std::string("Average strength of divisions, 0 to 1: the fighting strength the division UI shows (manpower ratio times equipment ratio).") + kWhere;
     static const std::string kOrgHelp =

@@ -1,4 +1,4 @@
-# Save migration demo for hoi4_loader's on_game_loaded (README "on_game_loaded").
+# Save migration demo for hoi4_loader's on_game_loaded (MODDING.md "on_game_loaded").
 #
 # Data version 1 kept the demo setting in the flag hoi4_loader_test_old_flag; data version 2
 # keeps it in hoi4_loader_test_new_flag. global.hoi4_loader_test_mod_version records the data

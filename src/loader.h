@@ -1,4 +1,4 @@
-// Shared declarations for hoi4_loader. See README.md / NOTES.md for the big picture.
+// Shared declarations for hoi4_loader. See DEVELOPING.md / NOTES.md for the big picture.
 #pragma once
 #include <windows.h>
 #include <stdint.h>
@@ -6,7 +6,7 @@
 #include <string>
 
 // Script contract version, exposed to script as global variable hoi4_loader_version. It goes up
-// only when something script-visible that already existed changes or goes away (README
+// only when something script-visible that already existed changes or goes away (MODDING.md
 // "Versions and compatibility"); new features are announced by their guard triggers instead.
 // 1: presence detection. 2: per-feature flags, file/engine tiers.
 // 3: set_strategic_region_name no longer accepts the `id` alias (only `region`).

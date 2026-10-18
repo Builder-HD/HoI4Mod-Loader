@@ -5,8 +5,8 @@ Usage: python -I tools/make_stubs.py [--check]
   (no option)  write every stub file (existing files are overwritten with the same content)
   --check      write nothing; exit 1 if a stub is missing or differs from what would be written
 
-A mod copies the stubs it needs into its own folder (README "Stub pack"). Stubs of features
-that are no longer in features.cpp are kept: guards stay usable forever (README "Versions and
+A mod copies the stubs it needs into its own folder (MODDING.md "Stub pack"). Stubs of features
+that are no longer in features.cpp are kept: guards stay usable forever (MODDING.md "Versions and
 compatibility").
 """
 import pathlib

@@ -1,4 +1,4 @@
-# README "Warning players when a required feature is off" (see the scripted effect).
+# MODDING.md "Warning players when a required feature is off" (see the scripted effect).
 on_actions = {
 	# New game. on_startup effects have no scope, so enter the human countries.
 	on_startup = {

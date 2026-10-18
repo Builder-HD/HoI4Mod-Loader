@@ -1,5 +1,5 @@
 // game_loaded feature: fires the script on_action `on_game_loaded` when a save is loaded, after
-// the loader's own refresh (plugin flags, region names). NOTES.md Part D, README.
+// the loader's own refresh (plugin flags, region names). NOTES.md Part D, MODDING.md.
 //
 // Permanent semantics:
 //   - only for a loaded save, never for a new game (on_startup covers that);
@@ -22,7 +22,7 @@ const char* const kHelp =
     "ROOT = that country; with no human-controlled country (observer) once without scope.\n\n"
     "This version fires in single player only; in multiplayer it does not fire. Write migrations "
     "so they can run more than once, and run them from here AND from a fallback such as on_weekly "
-    "(see README).";
+    "(see MODDING.md).";
 
 void FireGameLoaded(bool loadedFromSave) {
     if (!loadedFromSave) {

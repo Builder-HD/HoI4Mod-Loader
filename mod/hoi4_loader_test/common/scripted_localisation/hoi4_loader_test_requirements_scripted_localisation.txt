@@ -1,4 +1,4 @@
-# README "Warning players when a required feature is off": one line per required feature.
+# MODDING.md "Warning players when a required feature is off": one line per required feature.
 defined_text = {
 	name = GetHoi4LoaderReqRegionScope
 	text = {

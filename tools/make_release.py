@@ -5,9 +5,11 @@ Usage: python -I tools/make_release.py
 Writes release/hoi4_loader-v<version>.zip (one top folder of the same name) with:
   game/version.dll, game/loader_config.ini   -> the game folder
   mod/hoi4_loader_test.mod, mod/hoi4_loader_test/ -> Documents\\...\\Hearts of Iron IV\\mod\\
-  stubs/                                      -> for mod authors (README "Stub pack")
-  PLAYERS.md, CHANGELOG.md, LICENSE.txt, SHA256SUMS.txt
-and release/SHA256SUMS.txt (the zip contents) plus release/<zip>.sha256 (the zip itself).
+  stubs/                                      -> for mod authors (MODDING.md "Stub pack")
+  README.md (players), MODDING.md, DEVELOPING.md, CHANGELOG.md, LICENSE.txt, SHA256SUMS.txt
+and release/SHA256SUMS.txt (the zip contents), release/<zip>.sha256 (the zip itself) and
+release/RELEASE_NOTES.md (the GitHub release text: the CHANGELOG entry, the builds listed in
+loader_config.ini, the zip's hash).
 
 Checks first: the DLL carries LOADER_RELEASE from src/loader.h and is newer than every source
 file, the stub pack is current, and CHANGELOG.md has an entry for the release. Text files are
@@ -50,6 +52,56 @@ def release_date(version):
     return tuple(int(x) for x in m.groups()) + (0, 0, 0)
 
 
+def changelog_entry(version):
+    """The body of the CHANGELOG entry for version, up to the next entry."""
+    text = (ROOT / 'CHANGELOG.md').read_text(encoding='utf-8')
+    m = re.search(r'^## ' + re.escape(version) + r' \(.*?\n(.*?)(?=^## |\Z)', text, re.M | re.S)
+    return m.group(1).strip()
+
+
+def supported_builds():
+    """The labels of [supported_hashes] in loader_config.ini."""
+    labels, section = [], None
+    for line in (ROOT / 'loader_config.ini').read_text(encoding='utf-8').splitlines():
+        line = line.strip()
+        if line.startswith('['):
+            section = line
+        elif section == '[supported_hashes]' and '=' in line and not line.startswith(';'):
+            labels.append(line.split('=', 1)[0].strip())
+    if not labels:
+        fail('loader_config.ini lists no supported hashes')
+    return labels
+
+
+def disclaimer():
+    m = re.search(r'^\*\*Disclaimer:\*\*.*?(?=\n\s*\n)', (ROOT / 'README.md').read_text(encoding='utf-8'), re.M | re.S)
+    if not m:
+        fail('README.md has no disclaimer paragraph')
+    return m.group(0)
+
+
+def release_notes(version, name, zip_hash):
+    builds = ', '.join(f'`{b}`' for b in supported_builds())
+    return f'''**Players: download `{name}.zip` below** (not "Source code"). Unzip it and follow README.md
+inside: copy `game\\version.dll` and `game\\loader_config.ini` into the game folder.
+
+{disclaimer()}
+
+**Supported game builds:** {builds} (labels from `loader_config.ini`). On any other build the
+engine tier switches itself off, mods see its features as missing, and `loader.log` writes a
+read-only signature report.
+
+**Mod authors:** MODDING.md (also in the zip) documents every command; `stubs/` holds the stub
+pack.
+
+## Changes in {version}
+
+{changelog_entry(version)}
+
+zip SHA-256: `{zip_hash}`
+'''
+
+
 def check_dll(dll, version):
     if not dll.exists():
         fail(f'{dll} missing; build Release first')
@@ -64,7 +116,9 @@ def files():
     """(path in the zip, source path) in a fixed order."""
     out = [('game/version.dll', ROOT / 'build' / 'Release' / 'version.dll'),
            ('game/loader_config.ini', ROOT / 'loader_config.ini'),
-           ('PLAYERS.md', ROOT / 'PLAYERS.md'),
+           ('README.md', ROOT / 'README.md'),
+           ('MODDING.md', ROOT / 'MODDING.md'),
+           ('DEVELOPING.md', ROOT / 'DEVELOPING.md'),
            ('LICENSE.txt', ROOT / 'LICENSE'),
            ('CHANGELOG.md', ROOT / 'CHANGELOG.md'),
            ('mod/hoi4_loader_test.mod', ROOT / 'mod' / 'hoi4_loader_test.mod')]
@@ -107,6 +161,7 @@ def main():
     (out_dir / 'SHA256SUMS.txt').write_bytes(sums.replace('\n', '\r\n').encode())
     zip_hash = hashlib.sha256(zip_path.read_bytes()).hexdigest()
     (out_dir / f'{name}.zip.sha256').write_text(f'{zip_hash}  {name}.zip\n', encoding='ascii')
+    (out_dir / 'RELEASE_NOTES.md').write_text(release_notes(version, name, zip_hash), encoding='utf-8')
     print(f'{zip_path.relative_to(ROOT)}: {len(entries)} files, {zip_path.stat().st_size} bytes, sha256 {zip_hash}')
     for arc, data in entries[:4]:
         print(f'  {hashlib.sha256(data).hexdigest()[:16]}  {arc}')

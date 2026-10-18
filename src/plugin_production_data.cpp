@@ -6,7 +6,7 @@
 //
 // Sums the factories of the country's military production lines (and the dockyards of its naval
 // lines) that produce the equipment: an equipment type, or any type of an archetype. Without
-// `equipment`: all lines. Resource deficits are not here: vanilla has them (README).
+// `equipment`: all lines. Resource deficits are not here: vanilla has them (MODDING.md).
 #include <atomic>
 #include <stdint.h>
 #include <string>

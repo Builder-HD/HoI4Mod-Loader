@@ -1,4 +1,4 @@
-# Test decisions for hoi4_loader's numeric data triggers (README "Data triggers", NOTES.md Part E).
+# Test decisions for hoi4_loader's numeric data triggers (MODDING.md "Data triggers", NOTES.md Part E).
 # Test country: France (FRA). Places: state 16 = Ile de France, region 19 = Northern France,
 # region 18 = Channel, region 42 = Bay of Biscay.
 #

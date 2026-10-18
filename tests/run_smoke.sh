@@ -22,21 +22,27 @@ out=$("$BUILD/tests/native_script_test.exe"); trc=$?
 echo "$out" | grep -E 'FAIL|PASSED|FAILED'
 [ "$trc" = 0 ] || rc=1
 
-echo "===== 0b) test mod stub clears every feature flag; README lists every feature; same disclaimer in README and PLAYERS.md"
+echo "===== 0b) test mod stub clears every feature flag; MODDING.md lists every feature; docs links"
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 STUB="$SRC/mod/hoi4_loader_test/common/scripted_effects/hoi4_loader_detect.txt"
 for f in $(sed -n 's/^    {"\([a-z_]*\)", Tier::.*/\1/p' "$SRC/src/features.cpp"); do
     if grep -q "clr_global_flag = hoi4_loader_plugin_$f\b" "$STUB"; then echo "  ok   stub clears hoi4_loader_plugin_$f"
     else echo "  FAIL stub does not clear hoi4_loader_plugin_$f"; rc=1; fi
-    if grep -q "^| \`$f\` |" "$SRC/README.md"; then echo "  ok   README lists $f"
-    else echo "  FAIL README feature table lacks $f"; rc=1; fi
-    if grep -q "hoi4_loader_feature_$f\.txt" "$SRC/README.md"; then echo "  ok   README stub table lists $f"
-    else echo "  FAIL README stub table lacks hoi4_loader_feature_$f.txt"; rc=1; fi
+    if grep -q "^| \`$f\` |" "$SRC/MODDING.md"; then echo "  ok   MODDING.md lists $f"
+    else echo "  FAIL MODDING.md feature table lacks $f"; rc=1; fi
+    if grep -q "hoi4_loader_feature_$f\.txt" "$SRC/MODDING.md"; then echo "  ok   MODDING.md stub table lists $f"
+    else echo "  FAIL MODDING.md stub table lacks hoi4_loader_feature_$f.txt"; rc=1; fi
 done
-disclaimer() { sed -n '/^\*\*Disclaimer:\*\*/,/^\r\{0,1\}$/p' "$1" | tr -d '\r'; }
-if [ -n "$(disclaimer "$SRC/README.md")" ] && [ "$(disclaimer "$SRC/README.md")" = "$(disclaimer "$SRC/PLAYERS.md")" ]
-then echo "  ok   README and PLAYERS.md have the same disclaimer"
-else echo "  FAIL disclaimer missing or different in README.md / PLAYERS.md"; rc=1; fi
+if grep -q '^\*\*Disclaimer:\*\* hoi4_loader is an unofficial tool' "$SRC/README.md"; then echo "  ok   README.md starts with the disclaimer"
+else echo "  FAIL README.md lacks the disclaimer"; rc=1; fi
+if [ "$(grep -c . "$SRC/PLAYERS.md")" = 1 ] && grep -q '(README.md)' "$SRC/PLAYERS.md"; then echo "  ok   PLAYERS.md only points to README.md"
+else echo "  FAIL PLAYERS.md should be a one-line pointer to README.md"; rc=1; fi
+for doc in README.md MODDING.md DEVELOPING.md; do
+    for target in $(grep -o '](\([^)#:]*\))' "$SRC/$doc" | sed 's/^](\(.*\))$/\1/' | sort -u); do
+        if [ -e "$SRC/$target" ]; then echo "  ok   $doc links $target"
+        else echo "  FAIL $doc links missing file $target"; rc=1; fi
+    done
+done
 echo "===== 0c) stub pack (stubs/) matches src/features.cpp"
 if stubout=$(python -I "$SRC/tools/make_stubs.py" --check); then echo "  ok   every stub present and current"
 else echo "$stubout" | grep FAIL; rc=1; fi

@@ -79,7 +79,7 @@ from the scope; with the region scopes of part F, `set_strategic_region_name = {
 works inside a strategic region scope. Tooltips can tell scope values apart
 (`Args::fromScope`, F8).
 
-**6. Version bump vs guard triggers (done in 0.5).** README "Versions and compatibility": the
+**6. Version bump vs guard triggers (done in 0.5).** MODDING.md "Versions and compatibility": the
 script version goes up only when something script-visible that already existed changes or goes
 away; new features are announced by their guards.
 - Applied: `hoi4_loader_version` is 3, because the `id` alias was dropped in Part C without a
@@ -101,7 +101,7 @@ group" property. What's missing is gating by something finer than the exe hash. 
 matters together with 7a.
 
 **7c. Public signature checker (done in 0.5).** On an unlisted build the loader writes a
-signature report (README "Unknown game builds", `src/sigreport.cpp`).
+signature report (DEVELOPING.md "Unknown game builds", `src/sigreport.cpp`).
 - It counts every SIG/ANCHOR, runs the resolver with faults contained to check every CODE
   shape, and lists what to send.
 - `[diagnostics] signature_scan = 1` writes it on a listed build too.
@@ -127,24 +127,24 @@ signature report (README "Unknown game builds", `src/sigreport.cpp`).
   reads through the VFS observer.
 - Needs a GUI or localisation key the main menu shows reliably (to be found).
 
-**9b. In-game guard warning (done in 0.5).** README "Warning players when a required feature
+**9b. In-game guard warning (done in 0.5).** MODDING.md "Warning players when a required feature
 is off" is a copy-paste snippet (scripted effect, on_actions, event, loc). It warns at game start,
 right after loading (with the loader), or within 7 days (without it, or in multiplayer), once
 per country. The test mod uses it.
 
 **10a. Published hashes / code signing (hashes done in 0.5).** `tools/make_release.py`
-writes `SHA256SUMS.txt` (in the zip and next to it) and the zip's own hash; PLAYERS.md shows how
+writes `SHA256SUMS.txt` (in the zip and next to it) and the zip's own hash; README.md shows how
 to check with `certutil`. Authenticode signing needs a certificate (cost, identity), so it's the
 user's decision.
 
 **10b. Stub pack (done in 0.5).** `stubs/` (written by `tools/make_stubs.py`, checked by
-`run_smoke.sh`) and the README "Stub pack" table; the pack is in the release zip.
+`run_smoke.sh`) and the MODDING.md "Stub pack" table; the pack is in the release zip.
 
 **10c. Proton notes (open, S, untested).** `WINEDLLOVERRIDES="version=n,b" %command%` in Steam
 launch options should make Wine load the game-folder `version.dll`. Untested; it needs a Linux
 tester. The SEH, MinHook and CreateFileW paths should work under Wine, but that's unverified.
 
-**10d. Compatibility and deprecation policy (done in 0.5).** README "Versions and
+**10d. Compatibility and deprecation policy (done in 0.5).** MODDING.md "Versions and
 compatibility": guards forever, deprecation for at least one release before removal (one major
 version from 1.0), saves loadable with and without the loader, game patches switch the engine
 tier off.

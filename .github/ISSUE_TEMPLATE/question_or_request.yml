@@ -4,8 +4,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        Players: [PLAYERS.md](https://github.com/Builder-HD/HoI4Mod-Loader/blob/main/PLAYERS.md) covers install, uninstall and game patches.
-        Mod authors: the [README](https://github.com/Builder-HD/HoI4Mod-Loader/blob/main/README.md) documents every script command.
+        Players: the [README](https://github.com/Builder-HD/HoI4Mod-Loader/blob/main/README.md) covers install, uninstall and game patches.
+        Mod authors: [MODDING.md](https://github.com/Builder-HD/HoI4Mod-Loader/blob/main/MODDING.md) documents every script command.
         If something is broken, use the bug report form instead: it asks for the logs needed to look into it.
   - type: textarea
     id: question

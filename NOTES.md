@@ -838,7 +838,7 @@ bool register_native_trigger(const NativeTrigger&);
   - Every callback runs under SEH; an exception logs once per command (atomic flag).
   - Effects do nothing on an invalid record or an exception. Triggers return `false`, and the
     engine applies `NOT` itself. So a failing trigger inside `NOT = { ... }` counts as true;
-    the README will say so.
+    the docs (now MODDING.md) say so.
   - `evaluate` gets lock-free, allocation-free access to `Args` and `Scope` (plain reads).
 - **Tooltips.**
   - `TooltipText` assembles UTF-8 text and hands it to the engine through `std::string::assign`
@@ -1144,7 +1144,7 @@ OnAction_Fire(db, list, &scope, 0)                       // FUN_140a79ba0
   says `no`.
 - **Guard:** `hoi4_loader_feature_game_loaded`. Mods normally don't need it (an unfired
   on_action is harmless); it's useful for UI ("migrations supported"). In MP it still says
-  `yes`, because it is served before the session type is known; README documents that the
+  `yes`, because it is served before the session type is known; MODDING.md documents that the
   on_action never fires in MP in v1.
 - **Docs:** `loader_script_docs.md` gets an "On actions" section.
 
@@ -1193,7 +1193,7 @@ Apply the same hot-join guard to `lifecycle`'s flag refresh: skip it on a hot-jo
      machines (the OOS checksum covers game state), so running it on one machine cannot
      desync.
 4. **Guard semantics:** documenting is enough. `hoi4_loader_feature_game_loaded` means
-   "supported", not "fired". README recommends idempotent migrations run from `on_game_loaded`
+   "supported", not "fired". MODDING.md recommends idempotent migrations run from `on_game_loaded`
    AND a fallback (`on_weekly`), and warns against using the guard to skip the fallback.
 
 ## D3: implementation
@@ -1536,8 +1536,8 @@ calls them.
     refresh → `on_game_loaded`.
   - **It now requires the main-thread queue.**
   - **`strategic_region_has_custom_name`** reflects the display, so right after a rename in the
-    same effect block it answers for the old name. Its help text and the README say so.
-- **README:** a new section, "Threads and hooks (for plugin authors)".
+    same effect block it answers for the old name. Its help text and MODDING.md say so.
+- **Docs:** a new section, "Threads and hooks (for plugin authors)", now in DEVELOPING.md.
 
 ## In-game results (2026-10-14, vanilla 1.19.3, DLL `de1d0118…`)
 
@@ -1584,7 +1584,7 @@ calls them.
   commands (the test mod's decisions and scripted localisation) are the documented cost of
   native commands without the loader.
   - The user's verdict: acceptable. A mod that uses native commands requires the loader.
-  - Mods that must run without it use the flag protocol (README).
+  - Mods that must run without it use the flag protocol (MODDING.md).
 - **Remaining `error.log` lines:** they are unrelated (mod descriptors, vanilla graphics, the
   lobby `remotefile.cpp` exception) and appear with the loader too.
 - **Afterwards:** `version.dll` was restored, and the kill switch stays commented out.
@@ -1769,7 +1769,7 @@ Nothing below has been checked on 1.19.2 or the patched build yet; E2 does that 
    - Built in the tooltip callback (allocation is fine there). The current value comes from
      the same evaluator.
 
-### Thread rule (refining README "Threads and hooks")
+### Thread rule (refining DEVELOPING.md "Threads and hooks")
 
 The current rule is "native triggers may only read atomics". Data triggers must read game state.
 
@@ -1816,7 +1816,7 @@ counts, values in range.
 
 1. **Ratios are 0..1** like vanilla; tooltips show percent.
 2. **Operators copy vanilla:** for ratios `=` behaves like `>`; for counts `=` is equality. This
-   is documented in the README and the generated docs.
+   is documented in MODDING.md and the generated docs.
 3. **The country-wide averages ship anyway.** Their cost is measured (time per evaluation and per
    in-game day at speed 5, with the test mod using them in `ai_will_do`), then documented from
    the numbers. No caching across calls.
@@ -1825,7 +1825,7 @@ counts, values in range.
    later without a syntax change.
 5. **API, thread rule and feature split:** approved.
 6. **Two documentation additions:** "missing scope value is false, true under NOT", both next to
-   the guard rules and in each docs entry. Resource deficits stay with vanilla (README).
+   the guard rules and in each docs entry. Resource deficits stay with vanilla (MODDING.md).
 
 ## E2: implementation (2026-10-15)
 
@@ -2026,7 +2026,7 @@ counts, values in range.
     - About 580 evaluations per day of each probe trigger.
     - The first window (9.9 ms/day, 56k air_superiority evaluations) was the paused testing phase:
       hovered tooltips re-evaluate every frame. That is not a gameplay cost.
-    - **Decision: no caching.** README "Cost" now gives these numbers.
+    - **Decision: no caching.** MODDING.md "Cost" now gives these numbers.
   - **Open:**
     - step 5 (at war: enemy counts, battles, air/naval below 100%);
     - step 10 (without the loader);
@@ -2552,7 +2552,7 @@ Install the DLL and sync the test mod, start a 1939 game as France, and keep
    - The served `hoi4_loader_feature_<name>` and `hoi4_loader_present` are now
      `hidden_trigger = { always = yes|no }`. `hidden_trigger` is valid in every scope, the
      results are unchanged, and there is no "Always true" line any more.
-   - The README shows `custom_trigger_tooltip` around the guard for mods that want a visible
+   - MODDING.md shows `custom_trigger_tooltip` around the guard for mods that want a visible
      "Requires hoi4_loader" line.
    - Stubs keep `always = no`. Inside the `custom_trigger_tooltip` the stub's line is not shown
      either.
@@ -2570,8 +2570,8 @@ Install the DLL and sync the test mod, start a 1939 game as France, and keep
      "NOT: Air superiority of FRA above 0%".
    - **Unchanged:** "(currently unavailable)" remains for values that do not exist (unknown
      region id etc.).
-4. **README note on NOT around a counted any_.**
-   - The README explains vanilla's wording and recommends `tooltip = <key>`.
+4. **Docs note on NOT around a counted any_.**
+   - MODDING.md explains vanilla's wording and recommends `tooltip = <key>`.
    - The test decision "any_strategic_region" adds that form and vanilla's
      `NOT = { any_state = { count = 2000 is_coastal = yes } }` for comparison.
 
@@ -2615,7 +2615,7 @@ Install the DLL and sync the test mod, start a 1939 game as France, and keep
   - Under NOT the game negates the children, so "At least 99 of Any strategic region:" and the
     custom header "Fewer than 99 sea regions:" both list "Is a land region".
   - Vanilla shows "At least 2000 of Any state:" with "Is not coastal." the same way, which
-    confirms the README note: the wording comes from the engine, and `tooltip = <key>` is the
+    confirms the MODDING.md note: the wording comes from the engine, and `tooltip = <key>` is the
     fix for the header.
 - **26 (air superiority above 50%, peace, not available):** "Any strategic region:", "Is a sea
   region", "Air superiority of FRA above 50%". No "(currently ...)".
@@ -2747,7 +2747,7 @@ hover and execution. Both paths make the same draw from a scope seeded the same 
 - **Found while preparing (`ec2621e`):**
   - The test mod's stub `hoi4_loader_init` cleared only 4 of the 9 plugin flags. Now it clears
     all of them.
-  - `run_smoke.sh` checks the stub and the README feature table against `src/features.cpp`.
+  - `run_smoke.sh` checks the stub and the feature table (now in MODDING.md) against `src/features.cpp`.
 - **Afterwards:** `version.dll` was restored (`2e0bb12b`).
 - **Open:** D3 step 10, multiplayer and hot join. It needs a second player.
 
