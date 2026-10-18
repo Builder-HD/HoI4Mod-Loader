@@ -263,15 +263,16 @@ hoi4_loader_army_category = {
 	}
 
 	# --- AI ------------------------------------------------------------------------------------
-	# Italy gets a test general, the template and an army of 10 divisions under that general, in
-	# its capital state (country = ITA: the decision's ROOT is Germany). Watch whether the AI keeps
-	# it as it is (test plan).
-	hoi4_loader_army_ai = {
+	# Two steps, so the second decision's preview sees General AI already recruited by Italy:
+	# prepare Italy (general and template), then give it an army of 10 divisions under that general
+	# in its capital state (country = ITA: the decision's ROOT is Germany). Watch whether the AI
+	# keeps the army as it is (test plan).
+	hoi4_loader_army_ai_prepare = {
 		icon = generic_research
 		cost = 0
-		visible = { hoi4_loader_feature_create_army = yes NOT = { has_global_flag = hoi4_loader_army_ai_done } }
+		visible = { hoi4_loader_feature_create_army = yes NOT = { has_global_flag = hoi4_loader_army_ai_prepared } }
 		complete_effect = {
-			set_global_flag = hoi4_loader_army_ai_done
+			set_global_flag = hoi4_loader_army_ai_prepared
 			ITA = {
 				recruit_character = HLT_general_ai
 				division_template = {
@@ -285,6 +286,21 @@ hoi4_loader_army_category = {
 						infantry = { x = 1 y = 2 }
 					}
 				}
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_army_ai = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_create_army = yes
+			has_global_flag = hoi4_loader_army_ai_prepared
+			NOT = { has_global_flag = hoi4_loader_army_ai_done }
+		}
+		complete_effect = {
+			set_global_flag = hoi4_loader_army_ai_done
+			ITA = {
 				capital_scope = {
 					create_army = {
 						leader = HLT_general_ai

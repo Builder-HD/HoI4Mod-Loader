@@ -791,8 +791,12 @@ my_mod_raise_panzer_army = {
 
 **Tooltip.**
 - "Creates a new army led by **Erwin Rommel**." With `name`: "Creates the army
-  **1. Panzerarmee** led by **Erwin Rommel**." `create_unit` itself shows no line (as in
-  vanilla, mods usually add a `custom_effect_tooltip` for the divisions).
+  **1. Panzerarmee** led by **Erwin Rommel**." Below it each `create_unit` adds its own vanilla
+  line, e.g. "Create 10 Italian unit in Lazio".
+- **The preview shows the general as things are when the player hovers.** If the same effect
+  block makes the general available first, the line is red although taking it works. For
+  example, `recruit_character` or freeing the general earlier in the block. Recruit the general
+  in an earlier decision, event or focus for an accurate preview.
 - All texts can be translated with the keys listed in `loader_script_docs.md`:
   - `HOI4_LOADER_CREATE_ARMY`, `_NAMED`, `_LEAVES` and `_UNAVAILABLE`;
   - one key per reason, e.g. `HOI4_LOADER_CREATE_ARMY_LEADS_ARMY`.
