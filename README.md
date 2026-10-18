@@ -7,8 +7,8 @@ Game script can detect it:
 
 - scripted trigger `hoi4_loader_present` evaluates to `yes`
 - scripted effect `hoi4_loader_init` sets global flag `hoi4_loader_present`, global variable
-  `hoi4_loader_version` (currently **2**), and one flag `hoi4_loader_plugin_<name>` per active
-  feature. It clears the flag of every inactive feature.
+  `hoi4_loader_version` (currently **3**, see "Versions and compatibility"), and one flag
+  `hoi4_loader_plugin_<name>` per active feature. It clears the flag of every inactive feature.
 
 Mods ship stub versions of the trigger and effect (see the test mod). The loader serves its own
 content in their place, so mods work, and stay error-free, with or without the loader.
@@ -114,6 +114,55 @@ at the next weekly refresh. `hoi4_loader_present = yes` is always current. With 
 single player. In multiplayer (and after a hot join) it doesn't, because a change made on one
 machine only would desync the game; there the weekly refresh does it. On builds without
 `lifecycle`, a `hoi4_loader_plugin_*` flag can lag up to a week after loading a save.
+
+## Versions and compatibility
+
+There are two version numbers:
+
+| Number | Where | Changes when |
+|---|---|---|
+| **Release** (`0.5.0-beta`) | zip name, `CHANGELOG.md`, first line of `loader.log` | every published build |
+| **Script version** (`global.hoi4_loader_version`, now **3**) | script, `loader.log` | something script-visible that already existed changes or goes away |
+
+**What raises the script version:** removing or renaming a command, a parameter, a guard
+trigger, a flag or a variable, or changing what an existing one means (its result, its scope,
+when it fires).
+- History:
+  - **1:** presence detection.
+  - **2:** per-feature flags and the file/engine tiers.
+  - **3:** `set_strategic_region_name` no longer accepts the `id` alias, only `region`. The alias
+    was dropped in Part C without a bump. Version 3 records that.
+
+**What does not raise it:**
+- **New features, commands or optional parameters.** Script finds them through their guard
+  trigger (`hoi4_loader_feature_<name> = yes`), which is the recommended check anyway.
+- **Tooltip and log wording.** Serving the guards as `hidden_trigger` (so they print no "Always
+  true" line) is an example: their results are unchanged.
+- **Bug fixes** that restore the documented behaviour.
+
+So check features with guards, and check the version only to detect a change listed above,
+e.g. `check_variable = { global.hoi4_loader_version > 2 }`.
+
+**Compatibility rules:**
+- **Guards are forever.** `hoi4_loader_feature_<name>` keeps working for every feature ever
+  released. If a feature is removed, the loader stops serving its file, so your stub (`always =
+  no`) answers: the feature reads as missing, never as an unknown trigger. Stubs never need to
+  be deleted.
+- **Deprecation before removal.** A command or parameter that is to go away first keeps working
+  for at least one more release.
+  - While it is deprecated, `loader.log` says so once per session and names the replacement,
+    and this README and `CHANGELOG.md` mark it. Nothing is deprecated in 0.5.
+  - It is removed in a later release, and that release raises the script version.
+  - During 0.x the window is one release; from 1.0 on it is one major version.
+- **Saves.** The loader stores nothing outside vanilla flags and variables (e.g. `hoi4_srn_*`),
+  so saves load with and without it, and with any later loader release.
+- **Game versions.**
+  - The engine tier runs only on hoi4.exe builds listed in `loader_config.ini`.
+  - After a game patch it switches itself off until a release (or you) lists the new hash. A
+    list entry is a SHA-256 of hoi4.exe, and only builds that were checked are listed.
+  - The file tier (detection, guards, virtual files) keeps working on any build, so mods see
+    the features as missing rather than broken.
+  - `loader.log` then reports which signatures still match (see "Unknown game builds" below).
 
 ## Strategic region names (`region_names`)
 

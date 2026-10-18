@@ -81,8 +81,8 @@ int main(int argc, char** argv) {
     CHECK(has(a, "always = yes"), "CreateFileW trigger replaced");
     CHECK(has(b, "always = yes"), "CreateFileA (forward slashes) trigger replaced");
     CHECK(has(c, "always = yes"), "CRT _wfopen (mixed case) trigger replaced");
-    CHECK(has(d, "set_global_flag = hoi4_loader_present") && has(d, "set_variable = { global.hoi4_loader_version = 2 }"),
-          "effect replaced (presence flag + version 2)");
+    CHECK(has(d, "set_global_flag = hoi4_loader_present") && has(d, "set_variable = { global.hoi4_loader_version = 3 }"),
+          "effect replaced (presence flag + version 3)");
     if (expectEngine)
         CHECK(has(d, "\tset_global_flag = hoi4_loader_plugin_engine_probe"), "effect SETS hoi4_loader_plugin_engine_probe");
     else

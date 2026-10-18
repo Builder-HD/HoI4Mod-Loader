@@ -165,7 +165,8 @@ static void Init(HMODULE self) {
     if (inGame) {
         InitializeCriticalSection(&g_logLock);
         OpenLog();
-        Log("hoi4_loader v%d starting in %ls (pid %lu)", LOADER_VERSION, exePath, GetCurrentProcessId());
+        Log("hoi4_loader %s (script version %d) starting in %ls (pid %lu)", LOADER_RELEASE, LOADER_VERSION, exePath,
+            GetCurrentProcessId());
     }
     LoadRealVersionDll();
     if (!inGame) return;

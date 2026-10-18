@@ -5,9 +5,14 @@
 #include <functional>
 #include <string>
 
-// Exposed to script as global variable hoi4_loader_version.
+// Script contract version, exposed to script as global variable hoi4_loader_version. It goes up
+// only when something script-visible that already existed changes or goes away (README
+// "Versions and compatibility"); new features are announced by their guard triggers instead.
 // 1: presence detection. 2: per-feature flags, file/engine tiers.
-#define LOADER_VERSION 2
+// 3: set_strategic_region_name no longer accepts the `id` alias (only `region`).
+#define LOADER_VERSION 3
+// Release version of the DLL package (CHANGELOG.md). Independent of LOADER_VERSION.
+#define LOADER_RELEASE "0.5.0-beta"
 
 // ---------------------------------------------------------------------------
 // main.cpp
