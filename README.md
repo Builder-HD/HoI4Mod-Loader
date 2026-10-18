@@ -115,6 +115,34 @@ single player. In multiplayer (and after a hot join) it doesn't, because a chang
 machine only would desync the game; there the weekly refresh does it. On builds without
 `lifecycle`, a `hoi4_loader_plugin_*` flag can lag up to a week after loading a save.
 
+### Stub pack
+
+`stubs/` (also in the release zip) holds every stub file a mod may need, in the folder layout
+of a mod. Copy the ones you use into your mod, keeping the paths. Stubs are what the game reads
+when the loader is missing or a feature is off. Without them, using a loader trigger is an
+"unknown trigger" error.
+
+| You use in script | Copy from `stubs/common/` |
+|---|---|
+| `hoi4_loader_present` | `scripted_triggers/hoi4_loader_detect.txt` |
+| `hoi4_loader_init` (version variable, `hoi4_loader_plugin_*` flags) | `scripted_effects/hoi4_loader_detect.txt` |
+| anything from `engine_probe` | `scripted_triggers/hoi4_loader_feature_engine_probe.txt` |
+| anything from `lifecycle` | `scripted_triggers/hoi4_loader_feature_lifecycle.txt` |
+| `set_`/`reset_strategic_region_name`, `strategic_region_has_custom_name` | `scripted_triggers/hoi4_loader_feature_region_names.txt` |
+| the `on_game_loaded` on_action | `scripted_triggers/hoi4_loader_feature_game_loaded.txt` |
+| `air_superiority`, `naval_dominance` | `scripted_triggers/hoi4_loader_feature_region_control.txt` |
+| `battles_count`, `divisions_count`, `ships_count`, `planes_count` | `scripted_triggers/hoi4_loader_feature_military_counts.txt` |
+| `avg_division_strength`, `avg_division_organisation` | `scripted_triggers/hoi4_loader_feature_army_condition.txt` |
+| `factories_assigned` | `scripted_triggers/hoi4_loader_feature_production_data.txt` |
+| `strategic_region`, `any_`/`every_`/`random_strategic_region`, `strategic_region_id`, `is_sea_region`, `region_has_state` | `scripted_triggers/hoi4_loader_feature_region_scope.txt` |
+
+- **Combinations:** a block that combines features needs each feature's stub and guard, e.g.
+  `air_superiority` inside `strategic_region` needs both `region_control` and `region_scope`.
+- **The `hoi4_loader_init` stub** clears every `hoi4_loader_plugin_*` flag. Keep it complete
+  when you update: a newer stub pack may clear more flags.
+- **Updating:** `tools/make_stubs.py` writes the pack from the feature list. `run_smoke.sh`
+  fails when `stubs/` or this table misses a feature.
+
 ## Versions and compatibility
 
 There are two version numbers:

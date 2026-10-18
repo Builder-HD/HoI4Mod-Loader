@@ -1,0 +1,3 @@
+# hoi4_loader stub. When hoi4_loader (version.dll) is active it serves
+# "hoi4_loader_present = { hidden_trigger = { always = yes } }" instead.
+hoi4_loader_present = { always = no }

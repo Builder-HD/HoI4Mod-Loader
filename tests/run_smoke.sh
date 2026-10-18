@@ -30,7 +30,12 @@ for f in $(sed -n 's/^    {"\([a-z_]*\)", Tier::.*/\1/p' "$SRC/src/features.cpp"
     else echo "  FAIL stub does not clear hoi4_loader_plugin_$f"; rc=1; fi
     if grep -q "^| \`$f\` |" "$SRC/README.md"; then echo "  ok   README lists $f"
     else echo "  FAIL README feature table lacks $f"; rc=1; fi
+    if grep -q "hoi4_loader_feature_$f\.txt" "$SRC/README.md"; then echo "  ok   README stub table lists $f"
+    else echo "  FAIL README stub table lacks hoi4_loader_feature_$f.txt"; rc=1; fi
 done
+echo "===== 0c) stub pack (stubs/) matches src/features.cpp"
+if stubout=$(python -I "$SRC/tools/make_stubs.py" --check); then echo "  ok   every stub present and current"
+else echo "$stubout" | grep FAIL; rc=1; fi
 
 for d in "$SIG" "$NOSIG"; do
     [ -f "$d/hoi4.exe" ] && [ -f "$d/version.dll" ] || { echo "missing $d/hoi4.exe or version.dll; build first"; exit 2; }

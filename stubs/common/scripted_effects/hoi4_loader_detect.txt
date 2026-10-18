@@ -1,0 +1,17 @@
+# hoi4_loader stub, used only when hoi4_loader (version.dll) is NOT active. The loader
+# serves its own version that sets hoi4_loader_present, global.hoi4_loader_version and
+# one hoi4_loader_plugin_<name> flag per active feature. Clearing here removes values
+# an earlier session with the loader may have saved.
+hoi4_loader_init = {
+	clr_global_flag = hoi4_loader_present
+	clear_variable = global.hoi4_loader_version
+	clr_global_flag = hoi4_loader_plugin_engine_probe
+	clr_global_flag = hoi4_loader_plugin_lifecycle
+	clr_global_flag = hoi4_loader_plugin_region_names
+	clr_global_flag = hoi4_loader_plugin_game_loaded
+	clr_global_flag = hoi4_loader_plugin_region_control
+	clr_global_flag = hoi4_loader_plugin_military_counts
+	clr_global_flag = hoi4_loader_plugin_army_condition
+	clr_global_flag = hoi4_loader_plugin_production_data
+	clr_global_flag = hoi4_loader_plugin_region_scope
+}
