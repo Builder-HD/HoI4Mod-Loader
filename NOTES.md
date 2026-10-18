@@ -2650,3 +2650,39 @@ Install the DLL and sync the test mod, start a 1939 game as France, and keep
   single match the header shows the name without parentheses.
 - **31:** "(English Channel): Changes name to Loader Test Sea C (flag protocol)."
 - **33:** "(Loader Test Sea C (flag protocol), Loader Test Sea A): Gets its original name back."
+
+### Step 10 passes: without the loader (2026-10-18, current feature set)
+
+- **Setup:**
+  - Diagnostics are off in the installed `loader_config.ini`.
+  - **Phase A, with the loader (DLL `2e0bb12b`):** new game, region 42 renamed to A, save, quit.
+  - `version.dll` was then renamed to `version.dll.off`.
+- **The loader did not run:** `loader.log` is unchanged since 11:17:40 (phase A).
+- **The save loads.**
+  - The Bay of Biscay shows its original name.
+  - "Region Name Check":
+    - stored flag name: Loader Test Sea A;
+    - native trigger: no;
+    - guard: no;
+    - plugin flag: active (stale from the save).
+  - After the first weekly refresh the plugin flag is cleared and the "unguarded" demo decision
+    disappears, as designed.
+- **Decision categories:** "data" and "AI cost" are hidden (`hoi4_loader_present` stub). The test
+  category shows only the unguarded decisions.
+- **`error.log`:** only the documented cost.
+  - "Unknown trigger-type" / "Unknown effect-type" for every native command, in:
+    - the three decision files;
+    - the scripted localisation (`strategic_region_has_custom_name`).
+  - The commands inside a dropped `strategic_region` block (`strategic_region_id`,
+    `is_sea_region`, `region_has_state`, the data triggers) get no line of their own: the
+    engine drops the whole block.
+  - No line for `hoi4_loader_feature_*`, `hoi4_loader_present` or `hoi4_loader_init` (the stubs
+    are served from disk).
+  - Everything else is unrelated and appears with the loader too: mod descriptors, vanilla
+    entities, the lobby `remotefile.cpp` exception.
+- **Found while preparing (`ec2621e`):**
+  - The test mod's stub `hoi4_loader_init` cleared only 4 of the 9 plugin flags. Now it clears
+    all of them.
+  - `run_smoke.sh` checks the stub and the README feature table against `src/features.cpp`.
+- **Afterwards:** `version.dll` was restored (`2e0bb12b`).
+- **Open:** D3 step 10, multiplayer and hot join. It needs a second player.
