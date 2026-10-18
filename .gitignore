@@ -1,7 +1,41 @@
+# Build output and IDE state
 build/
-*.user
-.vs/
-CMakeSettings.json
 out/
+.vs/
+*.user
+CMakeSettings.json
 __pycache__/
 release/
+
+# Game executables and copies of them (analysis works on copies kept outside the repo)
+*.exe
+*.dll
+*.backup
+*.bak
+*.dmp
+*.mdmp
+
+# Debug and linker files
+*.pdb
+*.ilk
+*.obj
+*.lib
+*.exp
+
+# Disassembler projects: Ghidra, IDA
+*.gpr
+*.rep/
+*.gzf
+*.lock
+*.lock~
+ghidra*/
+*.i64
+*.idb
+*.id0
+*.id1
+*.id2
+*.nam
+*.til
+
+# Logs from local runs
+*.log

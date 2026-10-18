@@ -36,6 +36,12 @@ done
 echo "===== 0c) stub pack (stubs/) matches src/features.cpp"
 if stubout=$(python -I "$SRC/tools/make_stubs.py" --check); then echo "  ok   every stub present and current"
 else echo "$stubout" | grep FAIL; rc=1; fi
+echo "===== 0d) git tracks no executables, debug files or analysis projects"
+if tracked=$(git -C "$SRC" ls-files 2>/dev/null); then
+    bad=$(echo "$tracked" | grep -iE '\.(exe|dll|pdb|ilk|obj|lib|exp|dmp|mdmp|i64|idb|id[0-2]|nam|til|gpr|gzf|backup|bak)$|\.rep/|ghidra|(^|/)(build|out|release)/')
+    if [ -z "$bad" ]; then echo "  ok   nothing of that kind tracked"
+    else echo "$bad" | sed 's/^/  FAIL tracked: /'; rc=1; fi
+else echo "  skip not a git checkout"; fi
 
 for d in "$SIG" "$NOSIG"; do
     [ -f "$d/hoi4.exe" ] && [ -f "$d/version.dll" ] || { echo "missing $d/hoi4.exe or version.dll; build first"; exit 2; }
