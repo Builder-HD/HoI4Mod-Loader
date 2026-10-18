@@ -1,0 +1,24 @@
+# README "Warning players when a required feature is off": the snippet as the test mod uses it.
+# This mod requires region_scope and region_control. Called from on_startup (new game),
+# on_game_loaded (loaded save, loader present) and on_weekly (fallback: no loader or
+# multiplayer). Warns once per country; re-arms when the features are back.
+hoi4_loader_test_check_requirements = {
+	if = {
+		limit = {
+			OR = {
+				NOT = { hoi4_loader_feature_region_scope = yes }
+				NOT = { hoi4_loader_feature_region_control = yes }
+			}
+			NOT = { has_country_flag = hoi4_loader_test_req_warned }
+		}
+		set_country_flag = hoi4_loader_test_req_warned
+		country_event = { id = hoi4_loader_req.1 hours = 1 }
+	}
+	else_if = {
+		limit = {
+			hoi4_loader_feature_region_scope = yes
+			hoi4_loader_feature_region_control = yes
+		}
+		clr_country_flag = hoi4_loader_test_req_warned
+	}
+}

@@ -1,0 +1,14 @@
+# README "Warning players when a required feature is off": the warning event.
+add_namespace = hoi4_loader_req
+
+country_event = {
+	id = hoi4_loader_req.1
+	title = hoi4_loader_req.1.t
+	desc = hoi4_loader_req.1.d
+	picture = GFX_report_event_generic_read_write
+	is_triggered_only = yes
+
+	option = {
+		name = hoi4_loader_req.1.a
+	}
+}

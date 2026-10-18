@@ -143,6 +143,85 @@ when the loader is missing or a feature is off. Without them, using a loader tri
 - **Updating:** `tools/make_stubs.py` writes the pack from the feature list. `run_smoke.sh`
   fails when `stubs/` or this table misses a feature.
 
+### Warning players when a required feature is off
+
+Guarded content simply disappears when a feature is missing, for example after a game patch,
+when the engine tier switches itself off. To tell the player why, show an event once. Copy the
+three pieces below and replace `my_mod`, the features and the texts. Ship the guard stubs of
+those features (see "Stub pack").
+
+```
+# common/scripted_effects/my_mod_requirements.txt
+my_mod_check_requirements = {
+	if = {
+		limit = {
+			OR = {
+				NOT = { hoi4_loader_feature_region_scope = yes }
+				NOT = { hoi4_loader_feature_region_control = yes }
+			}
+			NOT = { has_country_flag = my_mod_requirements_warned }
+		}
+		set_country_flag = my_mod_requirements_warned
+		country_event = { id = my_mod_requirements.1 hours = 1 }
+	}
+	else_if = {
+		limit = {
+			hoi4_loader_feature_region_scope = yes
+			hoi4_loader_feature_region_control = yes
+		}
+		clr_country_flag = my_mod_requirements_warned  # re-arm: warn again if they go missing later
+	}
+}
+```
+
+```
+# common/on_actions/my_mod_requirements_on_actions.txt
+on_actions = {
+	on_startup = {      # new game (no scope, so enter the human countries)
+		effect = { every_country = { limit = { is_ai = no } my_mod_check_requirements = yes } }
+	}
+	on_game_loaded = {  # loaded save, loader with game_loaded present (single player); ROOT = player
+		effect = { my_mod_check_requirements = yes }
+	}
+	on_weekly = {       # fallback: no loader, engine tier off after a patch, or multiplayer
+		effect = { if = { limit = { is_ai = no } my_mod_check_requirements = yes } }
+	}
+}
+```
+
+```
+# events/my_mod_requirements.txt
+add_namespace = my_mod_requirements
+country_event = {
+	id = my_mod_requirements.1
+	title = my_mod_requirements.1.t
+	desc = my_mod_requirements.1.d
+	picture = GFX_report_event_generic_read_write
+	is_triggered_only = yes
+	option = { name = my_mod_requirements.1.a }
+}
+```
+
+```yaml
+ my_mod_requirements.1.t:0 "hoi4_loader Features Missing"
+ my_mod_requirements.1.d:0 "This mod needs hoi4_loader with its region_scope and region_control features. Without them, the parts that use them are switched off. If you just updated the game, hoi4_loader may not support the new version yet."
+ my_mod_requirements.1.a:0 "Understood"
+```
+
+**When it shows:**
+
+| Situation | When |
+|---|---|
+| New game | at the start (`on_startup`) |
+| Loaded save, loader present but a feature off (e.g. `loader_config.ini`) | right after loading (`on_game_loaded`) |
+| Loaded save without the loader, or after a game patch | within 7 in-game days (`on_weekly`); `on_game_loaded` does not fire then |
+| Multiplayer | within 7 days (`on_weekly`) |
+
+- **Once per country:** the flag is saved. A save made after the warning doesn't warn again until
+  the features were back in between, and that clears the flag.
+- **The test mod** uses the same pieces (`hoi4_loader_test_requirements*` files). Its event also
+  lists each feature as available or missing, with scripted localisation.
+
 ## Versions and compatibility
 
 There are two version numbers:

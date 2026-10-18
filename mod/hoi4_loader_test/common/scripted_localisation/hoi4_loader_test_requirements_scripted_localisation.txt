@@ -1,0 +1,22 @@
+# README "Warning players when a required feature is off": one line per required feature.
+defined_text = {
+	name = GetHoi4LoaderReqRegionScope
+	text = {
+		trigger = { hoi4_loader_feature_region_scope = yes }
+		localization_key = hoi4_loader_req_yes
+	}
+	text = {
+		localization_key = hoi4_loader_req_no
+	}
+}
+
+defined_text = {
+	name = GetHoi4LoaderReqRegionControl
+	text = {
+		trigger = { hoi4_loader_feature_region_control = yes }
+		localization_key = hoi4_loader_req_yes
+	}
+	text = {
+		localization_key = hoi4_loader_req_no
+	}
+}

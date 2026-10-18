@@ -1,0 +1,26 @@
+# README "Warning players when a required feature is off" (see the scripted effect).
+on_actions = {
+	# New game. on_startup effects have no scope, so enter the human countries.
+	on_startup = {
+		effect = {
+			every_country = {
+				limit = { is_ai = no }
+				hoi4_loader_test_check_requirements = yes
+			}
+		}
+	}
+	# Loaded save with the loader's game_loaded feature (single player); ROOT is the player.
+	on_game_loaded = {
+		effect = { hoi4_loader_test_check_requirements = yes }
+	}
+	# Fallback within 7 days: a save loaded without the loader, after a game patch (engine tier
+	# off, so on_game_loaded does not fire), or in multiplayer.
+	on_weekly = {
+		effect = {
+			if = {
+				limit = { is_ai = no }
+				hoi4_loader_test_check_requirements = yes
+			}
+		}
+	}
+}

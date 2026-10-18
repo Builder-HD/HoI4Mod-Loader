@@ -145,3 +145,8 @@
  hoi4_loader_ai_cost_region_probe_desc:0 "Every country evaluates any_strategic_region = ( is_sea_region = yes air_superiority > 0.5 ) for this decision's AI weight."
  hoi4_loader_rs_requires_tt:0 "Requires hoi4_loader (strategic region scopes)"
  hoi4_loader_rs_not_99_sea_tt:0 "Fewer than 99 sea regions"
+ hoi4_loader_req.1.t:0 "hoi4_loader Features Missing"
+ hoi4_loader_req.1.d:0 "The hoi4_loader test mod needs hoi4_loader (version.dll) with its region_scope and region_control features.\n\nRegion scopes: [GetHoi4LoaderReqRegionScope]\nRegion control data: [GetHoi4LoaderReqRegionControl]\n\nWithout them the decisions that use them are hidden. If you just updated the game, hoi4_loader may not support the new version yet: see loader.log."
+ hoi4_loader_req.1.a:0 "Understood"
+ hoi4_loader_req_yes:0 "§Gavailable§!"
+ hoi4_loader_req_no:0 "§Rmissing§!"
