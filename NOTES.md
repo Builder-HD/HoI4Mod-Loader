@@ -2713,7 +2713,7 @@ hover and execution. Both paths make the same draw from a scope seeded the same 
      not when its tooltip is built. Each draw advances the counter, so the later pick shifts.
      The same holds for vanilla `random_state`.
 
-**In-game check (F9):** see the test plan below (step 1).
+**In-game check (F9):** "Release 0.5.0-beta: install test from the zip", session 1 step 4.
 
 ### Step 10 passes: without the loader (2026-10-18, current feature set)
 
@@ -2750,3 +2750,61 @@ hover and execution. Both paths make the same draw from a scope seeded the same 
   - `run_smoke.sh` checks the stub and the README feature table against `src/features.cpp`.
 - **Afterwards:** `version.dll` was restored (`2e0bb12b`).
 - **Open:** D3 step 10, multiplayer and hot join. It needs a second player.
+
+## Release 0.5.0-beta: install test from the zip (2026-10-18)
+
+The test uses only the zip's contents on a clean setup. Files are relative to the unpacked
+`hoi4_loader-v0.5\`; "the ini" is `loader_config.ini` in the game folder.
+
+**Setup:**
+1. Quit the game.
+2. Unpack `release\hoi4_loader-v0.5.zip`.
+3. Copy `game\version.dll` and `game\loader_config.ini` into the game folder.
+4. Delete `Documents\...\mod\hoi4_loader_test\` and `hoi4_loader_test.mod`, then copy the
+   zip's `mod\` contents there.
+5. Delete `%TEMP%\hoi4_loader\` and `%LOCALAPPDATA%\hoi4_loader\`.
+6. Enable HOI4 Loader Test in the launcher.
+
+**Session 1 (as shipped):**
+1. **`loader.log`:**
+   - the first line is `hoi4_loader 0.5.0-beta (script version 3)`;
+   - `Supported hoi4.exe build: 1.19.3_...`;
+   - `20 of 20 command(s) registered`;
+   - `Loader ready ... hoi4_loader_version = 3, engine tier enabled`;
+   - no `Signature report` line.
+2. **New game, France 1939:** no "hoi4_loader Features Missing" event. The status event shows
+   loader version 3.
+3. **Decisions:** both categories are there, and hovering behaves as in F7/F8.
+4. **F9, the random pick:**
+   1. Hover "rename one of North Sea, Channel, Bay of Biscay to C" and note the region in the
+      header.
+   2. Take it while the game runs: that region is renamed.
+   3. Take "reset all renamed regions".
+   4. Hover C again and note the region; take it again. The renamed region is the one the
+      tooltip named.
+5. Save as `v05_ok` and quit.
+
+**Session 2 (ini: add `[diagnostics]` `signature_scan = 1`):**
+- `loader.log` says `Signature report ([diagnostics] signature_scan = 1)`, then `44/44
+  signatures and anchors` and `17/17 code shapes`.
+- It has no `FAILS` or `NOT CHECKED` line, and the engine tier is enabled.
+- The main menu is enough; quit.
+
+**Session 3 (ini: remove `signature_scan`, add `[features]` `region_scope = 0`):**
+- Load `v05_ok`. Right after loading, the warning event shows: region scopes missing, region
+  control data available.
+- Don't save; quit.
+
+**Session 4 (ini: remove `region_scope = 0`; put `;` before both `[supported_hashes]` lines):**
+1. **`loader.log`:**
+   - `Unknown hoi4.exe build`;
+   - `44/44` and `17/17`;
+   - the "To report this game version" list;
+   - `engine tier disabled`.
+2. **Load `v05_ok`:**
+   - the data category is hidden;
+   - within 7 in-game days the warning event shows both features missing;
+   - the game runs normally.
+3. Don't save; quit.
+
+**Session 5 (copy `game\loader_config.ini` from the zip again):** the log is as in session 1.

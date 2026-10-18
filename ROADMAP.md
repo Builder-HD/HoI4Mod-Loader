@@ -1,7 +1,7 @@
 # hoi4_loader roadmap
 
-Triage of the suggestion list received on 2026-10-15. Status is one of **done**, **partly
-done**, **superseded** or **open**. Effort and risk are rough: S = hours, M = a day or two,
+Triage of the suggestion list received on 2026-10-15, updated for release 0.5.0-beta
+(2026-10-18). Status is one of **done**, **partly done**, **superseded** or **open**. Effort and risk are rough: S = hours, M = a day or two,
 L = several days, including in-game testing.
 
 | # | Suggestion | Status | Effort / risk |
@@ -10,18 +10,18 @@ L = several days, including in-game testing.
 | 2 | Incremental flag hook (update from the hooked token) | superseded | S / low, little gain |
 | 3 | Static C++ runtime | done | — |
 | 4 | Chain-load another `version.dll` | open | S-M / medium |
-| 5 | Native parameters optional when the scope provides them | open, scheduled in E | S-M / low |
-| 6 | Bump `hoi4_loader_version` or document the guard triggers | partly done | S / low |
+| 5 | Native parameters optional when the scope provides them | done (E, F) | — |
+| 6 | Bump `hoi4_loader_version` or document the guard triggers | done (0.5) | — |
 | 7a | Release: opt-in engine tier on unlisted builds | open | M / high |
 | 7b | Release: per-feature gating instead of per-build | partly done | M / medium |
-| 7c | Release: public signature checker | partly done | S-M / low |
+| 7c | Release: public signature checker | done (0.5) | — |
 | 8 | Plugin ABI: versioned C ABI, plugin DLLs, trust model | open | L / high |
 | 9a | Requirements: mods declare needed features; main-menu warning | open | M / low-medium |
-| 9b | Requirements: in-game guard warning | partly done | S / low |
-| 10a | Distribution: published hashes / code signing | open | S (hashes) / L (signing, cost) |
-| 10b | Distribution: stub pack for mods | partly done | S / low |
+| 9b | Requirements: in-game guard warning | done (0.5) | — |
+| 10a | Distribution: published hashes / code signing | partly done (hashes) | L (signing, cost) |
+| 10b | Distribution: stub pack for mods | done (0.5) | — |
 | 10c | Distribution: Proton notes | open | S / low (untested) |
-| 10d | Distribution: compatibility and deprecation policy | open | S / low |
+| 10d | Distribution: compatibility and deprecation policy | done (0.5) | — |
 
 ## Notes per item
 
@@ -74,17 +74,17 @@ on system DLLs only.
 - Log the chained module's path and version. Fail safe: if it fails to load, fall back to
   System32.
 
-**5. Parameters from scope (open, part of E).** Scheduled with the data triggers: a general
-"default from scope" for any parameter. It applies to existing commands too, e.g.
-`set_strategic_region_name = { name = X }` inside a strategic region scope. See NOTES E1, "API
-proposal".
+**5. Parameters from scope (done).** `ParamSpec::fromScope` (E2) gives any parameter a default
+from the scope; with the region scopes of part F, `set_strategic_region_name = { name = X }`
+works inside a strategic region scope. Tooltips can tell scope values apart
+(`Args::fromScope`, F8).
 
-**6. Version bump vs guard triggers (partly done).** README "Checking for features in script"
-already tells mods to check `hoi4_loader_feature_<name>`, which never goes stale. The version is
-still 2 although `game_loaded` was added since.
-- **Proposal:** a policy line in the README. The version goes up when the script-visible
-  contract of existing features changes (renamed or removed commands, changed semantics). New
-  features don't bump it, because the guard triggers announce them.
+**6. Version bump vs guard triggers (done in 0.5).** README "Versions and compatibility": the
+script version goes up only when something script-visible that already existed changes or goes
+away; new features are announced by their guards.
+- Applied: `hoi4_loader_version` is 3, because the `id` alias was dropped in Part C without a
+  bump.
+- The release version (0.5.0-beta) is separate and appears in `loader.log`'s first line.
 
 **7a. Opt-in engine tier on unlisted builds (open, M / high).** "Every signature matches
 exactly once" is necessary but not sufficient.
@@ -100,11 +100,13 @@ signatures fail and has its own guard trigger; that is the "one broken signature
 group" property. What's missing is gating by something finer than the exe hash. That only
 matters together with 7a.
 
-**7c. Public signature checker (partly done).** `tools/check_signatures.py` exists but needs
-Python and a copy of the exe.
-- **Small step:** on an unlisted build, let the loader itself scan all signatures read-only and
-  log "N/M signatures match exactly once". It patches nothing. Users can then report new hashes
-  with that log.
+**7c. Public signature checker (done in 0.5).** On an unlisted build the loader writes a
+signature report (README "Unknown game builds", `src/sigreport.cpp`).
+- It counts every SIG/ANCHOR, runs the resolver with faults contained to check every CODE
+  shape, and lists what to send.
+- `[diagnostics] signature_scan = 1` writes it on a listed build too.
+- `tools/check_signatures.py` and `check_code_shapes.py` remain the offline checks on exe
+  copies.
 
 **8. Plugin ABI (open, L / high).** Today features are compiled into the DLL.
 - **Needs:**
@@ -125,22 +127,26 @@ Python and a copy of the exe.
   reads through the VFS observer.
 - Needs a GUI or localisation key the main menu shows reliably (to be found).
 
-**9b. In-game guard warning (partly done).** Guard triggers exist; the test mod shows the
-pattern (decisions and events gated on them). Missing: a documented snippet ("show an event at
-game start if a required feature is off").
+**9b. In-game guard warning (done in 0.5).** README "Warning players when a required feature
+is off" is a copy-paste snippet (scripted effect, on_actions, event, loc). It warns at game start,
+right after loading (with the loader), or within 7 days (without it, or in multiplayer), once
+per country. The test mod uses it.
 
-**10a. Published hashes / code signing.** Publishing SHA-256 hashes of releases is S.
-Authenticode signing needs a certificate (cost, identity), so it's the user's decision.
+**10a. Published hashes / code signing (hashes done in 0.5).** `tools/make_release.py`
+writes `SHA256SUMS.txt` (in the zip and next to it) and the zip's own hash; PLAYERS.md shows how
+to check with `certutil`. Authenticode signing needs a certificate (cost, identity), so it's the
+user's decision.
 
-**10b. Stub pack (partly done).** The test mod contains every stub. Missing: a standalone
-folder (`stubs/`) with only the stub files, and a README table.
+**10b. Stub pack (done in 0.5).** `stubs/` (written by `tools/make_stubs.py`, checked by
+`run_smoke.sh`) and the README "Stub pack" table; the pack is in the release zip.
 
 **10c. Proton notes (open, S, untested).** `WINEDLLOVERRIDES="version=n,b" %command%` in Steam
 launch options should make Wine load the game-folder `version.dll`. Untested; it needs a Linux
 tester. The SEH, MinHook and CreateFileW paths should work under Wine, but that's unverified.
 
-**10d. Compatibility and deprecation policy (open, S).**
-- Commands are never removed or changed within a major loader version; they're deprecated
-  with a log line for one version first.
-- Guard triggers stay available forever (`no` when gone).
-- To be written down together with item 6.
+**10d. Compatibility and deprecation policy (done in 0.5).** README "Versions and
+compatibility": guards forever, deprecation for at least one release before removal (one major
+version from 1.0), saves loadable with and without the loader, game patches switch the engine
+tier off.
+- The deprecation log line is policy for now; nothing is deprecated in 0.5, so there is no
+  code for it yet.
