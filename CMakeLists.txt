@@ -40,6 +40,7 @@ add_library(hoi4_loader SHARED
     src/plugin_army_condition.cpp
     src/plugin_production_data.cpp
     src/plugin_region_scope.cpp
+    src/plugin_create_army.cpp
     src/engine.cpp
     src/engine_data.cpp
     src/engine_scope.cpp

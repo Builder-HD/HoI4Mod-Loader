@@ -52,8 +52,10 @@ src/plugin_game_loaded.cpp    game_loaded feature (fires on_game_loaded after a 
 src/plugin_region_control.cpp, plugin_military_counts.cpp, plugin_army_condition.cpp,
 src/plugin_production_data.cpp   data trigger features (numeric triggers)
 src/plugin_region_scope.cpp   region_scope feature (strategic region scope blocks, iterators)
+src/plugin_create_army.cpp    create_army feature (create_unit children -> army under a general)
 src/engine_data.cpp           engine access for the data triggers (read-only game state)
 src/engine_scope.cpp          engine access for scope blocks (vanilla iterator templates, child scopes)
+src/engine_army.cpp           engine access for armies (create army, set leader, characters)
 src/native_script.h, .cpp     native effect/trigger API: schemas, registration, parsing, docs
 src/native_script_engine.cpp  native API engine binding (vtable clones, registries, Scope)
 src/native_scope_engine.cpp   native API engine binding of scope blocks and iterators

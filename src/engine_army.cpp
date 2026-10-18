@@ -241,4 +241,31 @@ void SetArmyName(void* army, const char* name) {
     g_assign((EngineString*)((uint8_t*)army + g_armyName), name, strlen(name));
 }
 
+std::string ArmyName(const void* army) {
+    if (!army) return "";
+    const EngineString* s = (const EngineString*)((const uint8_t*)army + g_armyName);
+    return s->size < 1024 ? std::string(s->c_str(), (size_t)s->size) : std::string();
+}
+
+bool ArmySelfCheck(int tag, int* divisions, const char** why) {
+    *divisions = 0;
+    if (!ManagerHandle(tag)) {
+        *why = "the country's army manager does not carry its tag";
+        return false;
+    }
+    std::vector<void*> units;
+    if (!CountryDivisionList(tag, &units)) {
+        *why = "the country's division list is unreadable";
+        return false;
+    }
+    for (void* unit : units) {
+        if (UnitOwnerTag(unit) != tag || g_resolve((const uint8_t*)unit + kUnitHandle) != (uint8_t*)unit + kUnitRef) {
+            *why = "a division's handle does not resolve back to it";
+            return false;
+        }
+        ++*divisions;
+    }
+    return true;
+}
+
 }  // namespace Engine

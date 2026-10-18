@@ -37,6 +37,7 @@ Current features:
 | `army_condition` | engine (needs `lifecycle`) | `hoi4_loader_plugin_army_condition` | `avg_division_strength`, `avg_division_organisation` |
 | `production_data` | engine (needs `lifecycle`) | `hoi4_loader_plugin_production_data` | `factories_assigned` |
 | `region_scope` | engine (needs `lifecycle`) | `hoi4_loader_plugin_region_scope` | `strategic_region`, `any_`/`every_`/`random_strategic_region` and the region identity triggers, see below |
+| `create_army` | engine (needs `lifecycle`) | `hoi4_loader_plugin_create_army` | `create_army`: spawn divisions as an army under a chosen general, see below |
 
 On an unknown build the file tier stays on, the engine tier is off, and `loader.log` lists the
 disabled features and prints the exact line to add to `loader_config.ini`. A feature whose init
@@ -136,6 +137,7 @@ when the loader is missing or a feature is off. Without them, using a loader tri
 | `avg_division_strength`, `avg_division_organisation` | `scripted_triggers/hoi4_loader_feature_army_condition.txt` |
 | `factories_assigned` | `scripted_triggers/hoi4_loader_feature_production_data.txt` |
 | `strategic_region`, `any_`/`every_`/`random_strategic_region`, `strategic_region_id`, `is_sea_region`, `region_has_state` | `scripted_triggers/hoi4_loader_feature_region_scope.txt` |
+| `create_army` | `scripted_triggers/hoi4_loader_feature_create_army.txt` |
 
 - **Combinations:** a block that combines features needs each feature's stub and guard, e.g.
   `air_superiority` inside `strategic_region` needs both `region_control` and `region_scope`.
@@ -680,3 +682,125 @@ random_strategic_region = {
       evaluating it as an AI weight, that added 4.5–11 ms per in-game day.
     - Use it in AI weights and frequently checked triggers only when needed; prefer
       `strategic_region = { region = <id> ... }` when the region is known.
+
+## Armies under a chosen general (`create_army`)
+
+Vanilla `create_unit` spawns divisions without an army, and no vanilla effect puts given divisions
+under a given general. `create_army` does both: it runs vanilla `create_unit` blocks and makes the
+divisions they create a new army led by the general you name.
+
+```
+create_army = {
+    leader = GER_erwin_rommel        # character id (required)
+    name = "1. Panzerarmee"          # army name (optional; else the game's default "Nth Army")
+    reassign = yes                   # optional, see "General already leads an army"
+    create_unit = {
+        division = "division_template = \"Infanterie-Division\" start_experience_factor = 0.5 start_equipment_factor = 1.0"
+        owner = ROOT
+        prioritize_location = 6488
+        count = 8
+    }
+    create_unit = {
+        division = "division_template = \"Panzer-Division\" start_experience_factor = 0.5"
+        owner = ROOT
+        prioritize_location = 6488
+        count = 2
+    }
+}
+```
+
+- **Scope:** country. The army belongs to that country.
+- **Inside:** only `leader`, `name`, `reassign` and any number of `create_unit` blocks.
+  - The `create_unit` blocks are vanilla, with all their keys (`division`, `owner`,
+    `prioritize_location`, `allow_spawning_on_enemy_provs`, `country_score`, `count`, `id`,
+    `divisional_commander_xp`).
+  - Any other key is a parse error: `error.log` names the file and line ("Unexpected token"),
+    and that `create_army` does nothing. That keeps it exact which divisions join the army: the
+    ones its `create_unit` blocks created.
+- **Which divisions join:** every division the blocks created for this country. Divisions a block
+  creates for another `owner` stay outside the army.
+- **Where they spawn:** wherever `create_unit` puts them, by its own rules: `prioritize_location`
+  if that province works, otherwise owned provinces first, then friendly ones, enemy ones only
+  with `allow_spawning_on_enemy_provs = yes`. Divisions of one army may stand in different
+  provinces, as in any army.
+- **Size:** no limit. More divisions than the general's cap (vanilla
+  `NMilitary.CORPS_COMMANDER_DIVISIONS_CAP` and `FIELD_MARSHAL_DIVISIONS_CAP`, both 24) is
+  allowed, as in the game, and reduces the general's bonuses ("Commanding too many divisions").
+- **Command power:** none is charged (vanilla's `start_border_war` creates its armies the same
+  way). If your mod wants a cost, add vanilla `add_command_power = -20` in the same effect block.
+
+**The general (`leader`).** The character must be:
+- an army leader: a general (corps commander) or a field marshal (a field marshal may lead a
+  single army, as in the game);
+- recruited by the country in scope;
+- not captured, and not leading an army group.
+
+If any of these fails, **nothing spawns**. `loader.log` says why, and the tooltip shows a red line
+such as "Loader Test Admiral cannot lead a new army: not a general or field marshal. Nothing is
+created."
+
+**General already leads an army.**
+- **Default:** refused. Nothing spawns, logged, red tooltip line "... already leads an army".
+- **`reassign = yes`:** the general leaves the army they lead now and takes the new one. The old
+  army keeps its divisions without a general. The tooltip adds "... leaves <old army>, which keeps
+  its divisions without a general."
+- Refused either way while the old army's headquarters is deploying or withdrawing, as in the
+  game's own "assign general" button.
+- **AI countries' generals usually lead armies already:** use `reassign = yes`, or pick a
+  general who is free.
+
+To show the condition in the decision itself, check it with vanilla triggers:
+
+```
+my_mod_raise_panzer_army = {
+    visible = { hoi4_loader_feature_create_army = yes }
+    available = {
+        hoi4_loader_feature_create_army = yes
+        has_character = GER_erwin_rommel
+        GER_erwin_rommel = {
+            is_army_leader = yes
+            is_leading_army = no            # leave out with reassign = yes
+            is_leading_army_group = no
+            is_general_captured = no
+        }
+    }
+    complete_effect = {
+        create_army = { leader = GER_erwin_rommel name = "1. Panzerarmee" create_unit = { ... } }
+    }
+}
+```
+
+**When nothing is created.** Logged in `loader.log`; no crash, nothing half done:
+
+| Case | Result |
+|---|---|
+| General not available (any reason above) | nothing spawns; red tooltip line |
+| `create_unit` creates nothing (unknown template, no valid province) | no army; the general is unchanged; `create_unit`'s own error in `error.log` |
+| A key that is not allowed inside | parse error at load; this `create_army` does nothing |
+| The game refuses to create the army | the divisions stay without an army |
+
+**Tooltip.**
+- "Creates a new army led by **Erwin Rommel**." With `name`: "Creates the army
+  **1. Panzerarmee** led by **Erwin Rommel**." `create_unit` itself shows no line (as in
+  vanilla, mods usually add a `custom_effect_tooltip` for the divisions).
+- All texts can be translated with the keys listed in `loader_script_docs.md`:
+  - `HOI4_LOADER_CREATE_ARMY`, `_NAMED`, `_LEAVES` and `_UNAVAILABLE`;
+  - one key per reason, e.g. `HOI4_LOADER_CREATE_ARMY_LEADS_ARMY`.
+
+**AI countries.**
+- The game's AI rearranges its own armies by front. It moves divisions between them and assigns
+  generals.
+- A `create_army` for an AI country gives it that army as a starting point. The AI may later move
+  divisions out or give the army another general.
+- Players' armies are not touched.
+
+**Multiplayer:** the army is created by the game's own functions, called the way vanilla's
+`start_border_war` calls them. `create_unit` places divisions with the game's synced random
+numbers. Every machine runs the same effect and gets the same army.
+
+**Saves:** the army, its divisions, its name and its general are saved by the game itself. A save
+loaded without the loader keeps them (they are ordinary armies).
+
+**Without the loader:** `create_army` is an unknown effect. The game logs it once per use when
+parsing, and the whole block, `create_unit`s included, does nothing. Guard decisions with
+`hoi4_loader_feature_create_army = yes` (stub: `stubs/common/scripted_triggers/hoi4_loader_feature_create_army.txt`).

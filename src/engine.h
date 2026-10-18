@@ -288,6 +288,10 @@ void* CreateArmy(int tag, const std::vector<void*>& divisions);
 // keeps its divisions without a general), then the leader's refresh. True if the army then has him.
 bool SetArmyLeader(void* army, void* leader);
 void SetArmyName(void* army, const char* name);
+std::string ArmyName(const void* army);
+// The layout create_army relies on, checked with a country's own data: its army manager carries
+// its tag, and its divisions' handles resolve back to them. False and *why on a mismatch.
+bool ArmySelfCheck(int tag, int* divisions, const char** why);
 
 // Fires the on_action like the engine fires on_startup: synced-RNG seed, events, random events
 // and effect. countryTag > 0: ROOT = that country; 0: no scope. name: at most 15 characters.

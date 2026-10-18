@@ -638,7 +638,11 @@ std::string NativeScriptDocs() {
             }
             if (!c->texts.empty()) {
                 s += "- Tooltip texts (localisation keys a mod may define; English otherwise):\n";
-                for (const LocText& t : c->texts) s += std::string("  - `") + t.key + "`: \"" + t.english + "\"\n";
+                for (const LocText& t : c->texts) {
+                    std::string english;  // colour codes as a mod writes them in its .yml (§R ... §!)
+                    for (const char* p = t.english; *p; ++p) english += *p == '\x11' ? std::string("\xc2\xa7") : std::string(1, *p);
+                    s += std::string("  - `") + t.key + "`: \"" + english + "\"\n";
+                }
             }
             if (!c->params.empty()) {
                 s += "- Parameters:\n";
