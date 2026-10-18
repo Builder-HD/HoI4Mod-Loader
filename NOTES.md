@@ -2808,3 +2808,29 @@ The test uses only the zip's contents on a clean setup. Files are relative to th
 3. Don't save; quit.
 
 **Session 5 (copy `game\loader_config.ini` from the zip again):** the log is as in session 1.
+
+**Results (2026-10-18, vanilla 1.19.3): all five sessions pass.** The installed files are the
+zip's: `version.dll` sha256 `f5485f06…`, and the ini is identical to the release ini.
+- **Session 1:**
+  - **Startup:** `0.5.0-beta (script version 3)`, `1.19.3_vanilla`, 20 of 20 registered,
+    engine tier enabled.
+  - **New game:** no warning event.
+  - **F9:** the random pick matched the tooltip each time, including the second pick after the
+    reset.
+- **Session 2 (`signature_scan = 1`):**
+  - `44/44 signatures and anchors`, `17/17 code shapes`, no FAILS or NOT CHECKED lines;
+  - report 0.47 s; engine tier enabled.
+  - An inline comment after the value (`signature_scan = 1 ; …`) still reads as 1:
+    `GetPrivateProfileInt` takes the leading number.
+- **Session 3 (`region_scope = 0`):**
+  - the log says `DISABLED in loader_config.ini [features]` and guard `= no`;
+  - after loading `v05_ok`, `on_game_loaded fired: ROOT = FRA`;
+  - the warning event showed region scopes missing and region control data available.
+- **Session 4 (both hashes commented out):**
+  - **Log:** `Unknown hoi4.exe build (checked 0 hash(es))`, `44/44`, `17/17`, no fault, the
+    reporting list, engine tier disabled.
+  - **In game:** with `v05_ok`, the data category is hidden and the weekly check shows the
+    warning event. The game ran normally.
+  - **`error.log`:** only the known lobby `remotefile.cpp` lines.
+- **Session 5 (the release ini again):** the log is as in session 1.
+- **Still open:** multiplayer (D3 step 10).
