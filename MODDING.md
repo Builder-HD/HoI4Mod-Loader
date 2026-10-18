@@ -804,8 +804,14 @@ my_mod_raise_panzer_army = {
 **AI countries.**
 - The game's AI rearranges its own armies by front. It moves divisions between them and assigns
   generals.
-- A `create_army` for an AI country gives it that army as a starting point. The AI may later move
-  divisions out or give the army another general.
+- **For an AI country the army is only a starting point.** In the test (Italy, 1936), the AI:
+  - moved the general to another front at once (the Ethiopian front);
+  - kept the 10 divisions together for a few days and added others to them;
+  - had split them over its own armies after about a month, regrouping again whenever it changed
+    its theatres.
+
+  So the general does not stay with the divisions. Use `create_army` for player countries, or
+  for an AI country when only the initial setup matters.
 - Players' armies are not touched.
 
 **Multiplayer:** the army is created by the game's own functions, called the way vanilla's

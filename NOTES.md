@@ -2999,3 +2999,48 @@ id, slot 13 = clone. The game-state work in each execute:
 See the report in the conversation of 2026-10-18: options A (block with vanilla `create_unit`
 children), B (`division = { template count }` sugar), C (`add_to_army` in division scope),
 D (army group / field marshal), feature and guard `create_army`.
+
+### G2: implementation and in-game tests (2026-10-18/19)
+
+Implemented as option A (`create_army` block with vanilla `create_unit` children; decisions:
+no command power, refuse a busy general unless `reassign = yes`, only `leader` / `name` /
+`reassign` / `country` / `create_unit` inside). Engine access: `src/engine_army.cpp`, resolved as
+in G1.2; signatures and code shapes checked on 1.19.3 vanilla and checksum-patched and on 1.19.2.
+
+**First in-game run: nothing spawned (fixed).**
+- **Cause:** vanilla `create_unit` needs a **state** scope. Its execute reads the state at
+  `scope+0xa8` and spawns in that state's provinces; without one it logs "invalid scope state"
+  (`FUN_140352140`). Vanilla always uses it as `37 = { create_unit = { ... owner = ROOT } }` or
+  in `capital_scope`.
+- **The G1 proposal was wrong here:** it put `create_army` in country scope, so the children ran
+  without a state, and the division list comparison correctly found nothing.
+- **Its tooltip (slot 7, `FUN_14037dba0` -> `FUN_14036af20`) needs the state too.** It logged
+  the same error every frame while hovered.
+- **Fix:** `create_army` is used in a state scope like `create_unit`. Its children run there; the
+  army's country is the new `country` parameter, ROOT by default.
+
+**Tests 1-10 (Germany): all as expected.**
+- Armies A (6, Frankfurt), B (30 over Brandenburg, soft cap shown), C (two `create_unit` blocks,
+  field marshal) and the reassign case.
+- Every failure case: busy, unknown, unrecruited, admiral, French general, army group, no
+  divisions, key not allowed inside. Each showed a red preview line where expected, spawned
+  nothing, wrote a loader.log line and did not crash.
+
+**Preview:** the red line reflects the moment of hovering. A decision that recruits the general
+earlier in the same effect block previews red but works (seen in the Italy test). Vanilla
+`create_unit` adds its own line ("Create 10 Italian unit in Lazio").
+
+**AI (test 11, Italy, 1936):**
+- **Creation worked:** the army existed with 10 divisions under the test general.
+- **The general was moved at once** to guard the Ethiopian front.
+- **The divisions stayed together** for a while, and the AI added others to that army.
+- **After about a month** everything was split into the AI's own armies: mostly 1-4 divisions,
+  plus a few of 10-22.
+- **Later regrouping** followed its theatre changes: 3 theatres by May, then Europe and Africa,
+  then 6 after the Ethiopian war (October 1936).
+- **Conclusion:** for AI countries the army is a starting arrangement only; no vanilla lock
+  exists (G1.4). MODDING.md says so.
+
+**Still open:** save and reload (test 12), the session without the loader, the "captured" refusal
+(needs a captured general) and multiplayer.
+
