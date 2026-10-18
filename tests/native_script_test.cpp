@@ -37,8 +37,8 @@ Scope Scope::root() const { return Scope(p_ ? ((const FakeScope*)p_)->root : nul
 Scope Scope::from() const { return Scope(p_ ? ((const FakeScope*)p_)->from : nullptr); }
 Scope Scope::prev() const { return Scope(nullptr); }
 
-static int g_fail = 0;
-#define CHECK(cond, ...) do { if (cond) printf("  ok   " __VA_ARGS__); else { printf("  FAIL " __VA_ARGS__); ++g_fail; } printf("\n"); } while (0)
+static int g_fail = 0, g_checks = 0;
+#define CHECK(cond, ...) do { ++g_checks; if (cond) printf("  ok   " __VA_ARGS__); else { printf("  FAIL " __VA_ARGS__); ++g_fail; } printf("\n"); } while (0)
 
 static size_t LogCount(const char* needle) {
     size_t n = 0;
@@ -612,6 +612,6 @@ int main() {
     CHECK(loc == "\x11Yx\x11!, $MISSING$ and a lone $ sign", "highlight, unknown placeholder and lone $ kept");
     CHECK(native_localize_key("SOME_KEY") == "SOME_KEY", "missing key localises to itself");
 
-    printf("%s (%d failure(s))\n", g_fail ? "FAILED" : "PASSED", g_fail);
+    printf("%s (%d checks, %d failure(s))\n", g_fail ? "FAILED" : "PASSED", g_checks, g_fail);
     return g_fail;
 }

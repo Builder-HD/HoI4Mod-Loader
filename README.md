@@ -943,8 +943,8 @@ cmake --build build --config Release
 sh tests/run_smoke.sh build        # from Git Bash
 ```
 
-It first runs `native_script_test` (64 checks on the native script API core with a fake engine).
-That covers:
+It first runs `native_script_test`: the native script API core with a fake engine. Its last line
+gives the number of checks. It covers:
 - schema validation;
 - duplicate, vanilla-name and late registrations;
 - feature completeness;
@@ -952,12 +952,24 @@ That covers:
 - missing parameters;
 - crash containment;
 - generic tooltips;
-- the exact docs file content.
+- the exact docs file content;
+- scope defaults, country, choice and token parameters, and numeric triggers;
+- scope blocks and iterators;
+- translatable tooltip texts.
 
-Then it runs two stand-in `hoi4.exe` builds through eight scenarios: engine tier on/off, unknown
-hash, missing ini, missing signatures, and cache hit/miss/mtime/size/corrupt. Each one checks
-the served content, including the lazily generated guard triggers, and the log lines. It
-overwrites `loader.log` unless the game is running.
+Next come repository checks:
+- the test mod's stub clears every feature flag;
+- this README lists every feature, and the stub pack matches `src/features.cpp`;
+- no executables, debug files or analysis projects are tracked in git.
+
+Then it runs two stand-in `hoi4.exe` builds through nine scenarios:
+- engine tier on/off;
+- the signature report (unknown hash, and `signature_scan = 1`);
+- missing ini and missing signatures;
+- cache hit/miss/mtime/size/corrupt.
+
+Each one checks the served content, including the lazily generated guard triggers, and the log
+lines. It overwrites `loader.log` unless the game is running.
 
 ## Uninstall
 
