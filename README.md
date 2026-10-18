@@ -1,5 +1,9 @@
 # hoi4_loader
 
+**Disclaimer:** hoi4_loader is an unofficial tool, not affiliated with or endorsed by Paradox
+Interactive. It works only at runtime: no game files are modified or distributed. Use it at your
+own risk.
+
 A `version.dll` proxy that adds loader features to Hearts of Iron IV (Windows x64) at runtime.
 Nothing on disk in the game is modified.
 

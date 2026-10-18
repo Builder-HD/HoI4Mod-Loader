@@ -1,5 +1,9 @@
 # hoi4_loader 0.5.0-beta: for players
 
+**Disclaimer:** hoi4_loader is an unofficial tool, not affiliated with or endorsed by Paradox
+Interactive. It works only at runtime: no game files are modified or distributed. Use it at your
+own risk.
+
 hoi4_loader adds new script commands to Hearts of Iron IV that some mods need. It is a
 `version.dll` placed in the game folder. It changes nothing on disk: the game files stay as they
 are, and it works only while the game runs.

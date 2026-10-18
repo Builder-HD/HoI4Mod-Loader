@@ -4,6 +4,12 @@ Release versions name the DLL package. The script version is the number script r
 `global.hoi4_loader_version` (README "Versions and compatibility"). Development went in parts
 A–F; NOTES.md has the findings and test results behind each.
 
+## Unreleased
+
+- **Disclaimer** at the top of README.md and PLAYERS.md: unofficial, not affiliated with or
+  endorsed by Paradox Interactive, runtime only, use at your own risk. The 0.5.0-beta zip's
+  PLAYERS.md does not have it yet.
+
 ## 0.5.0-beta (2026-10-18), script version 3
 
 First packaged release. It supports Hearts of Iron IV 1.19.3 (Steam), both as distributed and
