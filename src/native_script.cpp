@@ -39,6 +39,7 @@ const char* TypeName(ParamType t) {
         case ParamType::Country: return "country";
         case ParamType::Choice: return "choice";
         case ParamType::Token: return "name";
+        case ParamType::Text: return "text";
         default: return "key";
     }
 }
@@ -682,6 +683,19 @@ bool NativeSetArg(ParsedCommand& pc, size_t index, const char* text, std::string
                     return false;
                 }
             }
+            break;
+        }
+        case ParamType::Text: {
+            size_t n = strlen(text);
+            bool ok = n > 0 && n <= 255;
+            for (size_t i = 0; ok && i < n; ++i) ok = (unsigned char)text[i] >= ' ' && text[i] != '{' && text[i] != '}';
+            if (!ok) {
+                *error = std::string("'") + spec.name + "' expects a text (1-255 characters, no braces or control characters), got '" +
+                         text + "'";
+                return false;
+            }
+            pc.storage[index] = text;
+            v.s = pc.storage[index].c_str();
             break;
         }
         case ParamType::Country: {

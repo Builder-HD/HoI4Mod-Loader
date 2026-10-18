@@ -163,8 +163,10 @@ bool MyFeatureInit() {
   - `Form::Block` (`name = { key = value ... }`) takes named parameters.
   - Types: `Int`, `Bool` (`yes`/`no`), `Key` (one word, up to 255 characters), `Country` (a tag
     or THIS/ROOT/FROM/PREV, resolved per use), `Choice` (one of `ParamSpec::choices`, e.g.
-    `"any|own|enemy"`; `Args::i` is the index) and `Token` (a key interned at parse time;
-    `Args::i` is the engine token, for lookups without allocation).
+    `"any|own|enemy"`; `Args::i` is the index), `Token` (a key interned at parse time;
+    `Args::i` is the engine token, for lookups without allocation) and `Text` (free text, quoted
+    in script if it has spaces, up to 255 bytes, no braces or control characters; e.g. army
+    names).
   - `ParamSpec::fromScope` (`StrategicRegion`, `State`, `Country`, `RootCountry`): the parameter
     may be left out and then comes from the scope. Such a parameter is not `required`. Missing
     in the scope: effects do nothing, triggers are false (see MODDING.md, "Parameters from scope").

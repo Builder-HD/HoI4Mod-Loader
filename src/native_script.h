@@ -19,8 +19,10 @@
 // Key: one identifier-like word (loc keys, names). Country: a tag (GER) or THIS/ROOT/FROM/PREV,
 // resolved per evaluation. Choice: one of ParamSpec::choices ("any|own|enemy"), Args::i = index.
 // Token: a key interned as an engine token at parse time (Args::i = token, Args::key = text), for
-// names the evaluate callback looks up without allocating (equipment names).
-enum class ParamType { Int, Bool, Key, Country, Choice, Token };
+// names the evaluate callback looks up without allocating (equipment names). Text: free text,
+// quoted in script if it has spaces (army names); 1-255 bytes, no braces or control characters;
+// Args::key = the text.
+enum class ParamType { Int, Bool, Key, Country, Choice, Token, Text };
 enum class CommandKind { Effect, Trigger };
 enum class Form { Value, Block };          // name = <value>   |   name = { key = value ... }
 

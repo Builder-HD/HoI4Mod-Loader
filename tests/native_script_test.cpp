@@ -336,6 +336,16 @@ int main() {
     CHECK(!NativeSetArg(*pc, 1, "has space", &err), "key with space refused");
     CHECK(!NativeSetArg(*pc, 1, std::string(256, 'K').c_str(), &err), "256-character key refused");
     CHECK(NativeSetArg(*pc, 1, std::string(255, 'K').c_str(), &err), "255-character key accepted");
+    Command textCmd{};
+    textCmd.name = "text_thing";
+    textCmd.params = {{"title", ParamType::Text, true}};
+    ParsedCommand* tp = NativeNewParsed(textCmd);
+    CHECK(NativeSetArg(*tp, 0, "1. Panzerarmee", &err) && std::string(tp->args[0].s) == "1. Panzerarmee", "text with spaces parsed");
+    CHECK(NativeSetArg(*tp, 0, "Armee \xc3\xa4", &err), "UTF-8 text accepted");
+    CHECK(!NativeSetArg(*tp, 0, "", &err), "empty text refused");
+    CHECK(!NativeSetArg(*tp, 0, "a{b}", &err) && err.find("expects a text") != std::string::npos, "text with braces refused");
+    CHECK(!NativeSetArg(*tp, 0, "line\nbreak", &err), "text with a control character refused");
+    CHECK(!NativeSetArg(*tp, 0, std::string(256, 'x').c_str(), &err), "256-character text refused");
 
     // 5. Validation (required parameters), logged once per command.
     ParsedCommand* missing = NativeNewParsed(*setThing);
