@@ -15,6 +15,8 @@ content in their place, so mods work, and stay error-free, with or without the l
 
 See [NOTES.md](NOTES.md) for the reverse-engineering findings and what may break on updates.
 Players who only install it: [PLAYERS.md](PLAYERS.md). Release history: [CHANGELOG.md](CHANGELOG.md).
+Downloads: [releases](https://github.com/Builder-HD/HoI4Mod-Loader/releases). Problems and requests: [issues](https://github.com/Builder-HD/HoI4Mod-Loader/issues).
+License: [MIT](LICENSE).
 
 ## Feature tiers
 
@@ -855,7 +857,7 @@ internet access on first configure (MinHook v1.3.3 is fetched from GitHub).
 From a "x64 Native Tools Command Prompt for VS 2022":
 
 ```
-cd C:\Users\palpa\source\repos\hoi4_loader
+cd <this repository>
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 ```
@@ -871,8 +873,8 @@ Or in Visual Studio: **File > Open > Folder...**, pick this folder, choose `x64-
 1. Quit HOI4. Copy `version.dll` and `loader_config.ini` into
    `C:\Program Files (x86)\Steam\steamapps\common\Hearts of Iron IV\`
    (or `cmake --install build --config Release --prefix "C:\Program Files (x86)\Steam\steamapps\common\Hearts of Iron IV"`).
-2. Copy the test mod into `<Documents>\Paradox Interactive\Hearts of Iron IV\mod\`
-   (here `C:\Users\palpa\OneDrive\Dokumente\...`):
+2. Copy the test mod into `<Documents>\Paradox Interactive\Hearts of Iron IV\mod\` (with
+   OneDrive often `C:\Users\<you>\OneDrive\Documents\...`):
    - `mod\hoi4_loader_test.mod` -> `...\mod\hoi4_loader_test.mod` (the launcher may rewrite its `path`)
    - `mod\hoi4_loader_test\`    -> `...\mod\hoi4_loader_test\`
 3. Enable **HOI4 Loader Test** in the launcher playset.

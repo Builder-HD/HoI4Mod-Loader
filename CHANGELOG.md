@@ -40,7 +40,8 @@ after the universal checksum patcher.
 - **Version in the log:** the first `loader.log` line names the release.
 - **Test mod fix:** its `hoi4_loader_init` stub clears every plugin flag (it missed five).
 
-**Packaging:** the release zip, `PLAYERS.md`, `SHA256SUMS.txt` and this changelog.
+**Packaging:** the release zip, `PLAYERS.md`, `SHA256SUMS.txt` and this changelog. Published
+under the MIT license.
 
 **Known limits:**
 - `on_game_loaded` and the loader's own flag refresh after loading are single player only. In

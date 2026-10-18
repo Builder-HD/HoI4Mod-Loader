@@ -6,7 +6,7 @@ Writes release/hoi4_loader-v<version>.zip (one top folder of the same name) with
   game/version.dll, game/loader_config.ini   -> the game folder
   mod/hoi4_loader_test.mod, mod/hoi4_loader_test/ -> Documents\\...\\Hearts of Iron IV\\mod\\
   stubs/                                      -> for mod authors (README "Stub pack")
-  PLAYERS.md, CHANGELOG.md, SHA256SUMS.txt
+  PLAYERS.md, CHANGELOG.md, LICENSE.txt, SHA256SUMS.txt
 and release/SHA256SUMS.txt (the zip contents) plus release/<zip>.sha256 (the zip itself).
 
 Checks first: the DLL carries LOADER_RELEASE from src/loader.h and is newer than every source
@@ -65,6 +65,7 @@ def files():
     out = [('game/version.dll', ROOT / 'build' / 'Release' / 'version.dll'),
            ('game/loader_config.ini', ROOT / 'loader_config.ini'),
            ('PLAYERS.md', ROOT / 'PLAYERS.md'),
+           ('LICENSE.txt', ROOT / 'LICENSE'),
            ('CHANGELOG.md', ROOT / 'CHANGELOG.md'),
            ('mod/hoi4_loader_test.mod', ROOT / 'mod' / 'hoi4_loader_test.mod')]
     for base, prefix in ((ROOT / 'mod' / 'hoi4_loader_test', 'mod/hoi4_loader_test/'), (ROOT / 'stubs', 'stubs/')):

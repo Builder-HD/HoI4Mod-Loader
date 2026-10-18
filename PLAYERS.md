@@ -62,7 +62,7 @@ A game update changes `hoi4.exe`, and the loader no longer recognises it.
 
 ## Reporting a problem
 
-Send these from `Documents\Paradox Interactive\Hearts of Iron IV\`:
+Open an issue at https://github.com/Builder-HD/HoI4Mod-Loader/issues and attach these from `Documents\Paradox Interactive\Hearts of Iron IV\`:
 1. `loader.log`, from the session with the problem (it is rewritten at every start, so copy it
    before restarting);
 2. `logs\error.log` and `logs\game.log`;
@@ -72,6 +72,12 @@ Send these from `Documents\Paradox Interactive\Hearts of Iron IV\`:
 5. what you did and what you expected.
 
 Never send `hoi4.exe` or other game files.
+
+## Downloads and license
+
+New releases: https://github.com/Builder-HD/HoI4Mod-Loader/releases. hoi4_loader is open
+source under the MIT license (`LICENSE.txt`). It is not affiliated with or endorsed by Paradox
+Interactive.
 
 ## Multiplayer
 
