@@ -1,4 +1,4 @@
-// Read-only signature report (ROADMAP 7c): on a hoi4.exe build that loader_config.ini does not
+// Read-only signature report: on a hoi4.exe build that loader_config.ini does not
 // list (or with [diagnostics] signature_scan = 1), count how every SIG and ANCHOR in
 // signatures.h matches, run the resolver to check every CODE shape where it is used, and log a
 // summary plus what to send when reporting a new game version. Nothing is hooked or patched.

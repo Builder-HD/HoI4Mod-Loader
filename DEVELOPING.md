@@ -2,7 +2,7 @@
 
 Building, extending and releasing the loader. Players: [README.md](README.md). Mod authors:
 [MODDING.md](MODDING.md). Reverse-engineering findings and what may break on game updates:
-[NOTES.md](NOTES.md). Plans: [ROADMAP.md](ROADMAP.md). Release history: [CHANGELOG.md](CHANGELOG.md).
+[NOTES.md](NOTES.md). Release history: [CHANGELOG.md](CHANGELOG.md).
 
 ## Build
 
@@ -73,7 +73,7 @@ README.md                     players: install, uninstall, game patches, reporti
 MODDING.md                    mod authors: guards, stubs, every script command
 DEVELOPING.md                 this file
 CHANGELOG.md                  release history
-NOTES.md, ROADMAP.md          reverse-engineering findings and test results; plans
+NOTES.md                      reverse-engineering findings and test results
 PLAYERS.md                    pointer to README.md (0.5.0-beta shipped it as the player guide)
 .github/ISSUE_TEMPLATE/       issue forms: bug report, question or request
 ```

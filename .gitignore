@@ -39,3 +39,6 @@ ghidra*/
 
 # Logs from local runs
 *.log
+
+# Roadmap: kept locally while it is reworked
+ROADMAP.md
