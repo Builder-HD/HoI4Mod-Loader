@@ -1,17 +1,21 @@
 // create_army (engine tier): spawn divisions as a ready army under a chosen general (NOTES.md G1).
 //
-//   create_army = {
-//       leader = GER_erwin_rommel   # character id: an army leader recruited by this country
-//       name = "1. Panzerarmee"     # optional army name
-//       reassign = yes              # optional: take the general even from the army they lead now
-//       create_unit = { ... }       # vanilla create_unit, any number; nothing else is allowed inside
+//   64 = {                            # a state scope, as vanilla create_unit needs one
+//       create_army = {
+//           leader = GER_erwin_rommel   # character id: an army leader recruited by the country
+//           name = "1. Panzerarmee"     # optional army name
+//           reassign = yes              # optional: take the general even from the army they lead now
+//           country = GER               # optional: the army's country (default ROOT)
+//           create_unit = { ... }       # vanilla create_unit, any number; nothing else is allowed inside
+//       }
 //   }
 //
 // The general is checked first; if not available, nothing spawns. Then the create_unit
-// children run, the country's division list before and after gives the new divisions, and the
-// game's own "create army" and "set leader" functions (as vanilla start_border_war calls them)
-// make them an army under that general. Game state writes, main thread, deterministic: the same effect
-// gives the same army on every machine. No command power is charged.
+// children run in the state scope (where they place the divisions), the country's division list
+// before and after gives the new divisions, and the game's own "create army" and "set leader"
+// functions (as vanilla start_border_war calls them) make them an army under that general. Game
+// state writes, main thread, deterministic: the same effect gives the same army on every machine.
+// No command power is charged.
 #include <windows.h>
 
 #include <atomic>
@@ -83,9 +87,9 @@ Refusal Check(const Args& a, int tag, Candidate* c) {
     return Refusal::None;
 }
 
-void Execute(const Args& a, const Scope& s, const EffectChildren& children) {
+void Execute(const Args& a, const Scope&, const EffectChildren& children) {
     if (!g_ok.load()) return;
-    int tag = s.countryTag();
+    int tag = a.i(3);  // country (ROOT by default), resolved by the core
     std::string country = Engine::CountryTagName(tag);
     Candidate c;
     Refusal r = Check(a, tag, &c);
@@ -130,10 +134,10 @@ void Execute(const Args& a, const Scope& s, const EffectChildren& children) {
         spawned.size() > kVanillaDivisionCap ? "; more than the vanilla 24-division cap: the general's bonuses are reduced" : "");
 }
 
-void Tooltip(const Args& a, const Scope& s, TooltipText& out) {
+void Tooltip(const Args& a, const Scope&, TooltipText& out) {
     if (!g_ok.load()) return;
     Candidate c;
-    Refusal r = Check(a, s.countryTag(), &c);
+    Refusal r = Check(a, a.i(3), &c);
     if (r != Refusal::None) {
         out.add(native_localize(kUnavailable, {{"LEADER", c.name}, {"REASON", native_localize(ReasonText(r))}}).c_str());
         return;
@@ -184,15 +188,19 @@ bool CreateArmyInit() {
         if (&t != &kReasons[0]) texts.push_back(t);
     register_native_effect_block(
         {"create_army",
-         "Spawns divisions with the vanilla create_unit blocks inside and makes them a new army led by `leader` (a "
-         "character id), with the name `name` if given. The general must be an army leader (general or field marshal) "
-         "recruited by this country, not captured and not leading an army group. If the general already leads an "
-         "army, nothing happens unless `reassign = yes`: then the general leaves it and it keeps its divisions "
-         "without a general. If the general is not available, nothing spawns (logged in loader.log; the tooltip shows the reason in red). Only "
-         "divisions created for this country join the army. No command power is charged; add vanilla "
+         "Use it in a state scope, as vanilla create_unit (e.g. `64 = { create_army = { ... } }`): the create_unit "
+         "blocks inside spawn their divisions in that state, and the divisions created for `country` (default ROOT) "
+         "become a new army of that country led by `leader` (a character id), named `name` if given. The general must "
+         "be an army leader (general or field marshal) recruited by that country, not captured and not leading an "
+         "army group. If the general already leads an army, nothing happens unless `reassign = yes`: then the "
+         "general leaves it and it keeps its divisions without a general. If the general is not available, nothing "
+         "spawns (logged in loader.log; the tooltip shows the reason in red). No command power is charged; add vanilla "
          "add_command_power in the same effect block for a cost.",
-         {{"leader", ParamType::Token, true}, {"name", ParamType::Text, false}, {"reassign", ParamType::Bool, false}},
-         ScopeMask::Country,
+         {{"leader", ParamType::Token, true},
+          {"name", ParamType::Text, false},
+          {"reassign", ParamType::Bool, false},
+          {"country", ParamType::Country, false, ScopeDefault::RootCountry}},
+         ScopeMask::State,
          {"create_unit"},
          &Execute,
          &Tooltip,

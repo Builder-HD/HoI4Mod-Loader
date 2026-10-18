@@ -25,8 +25,9 @@ A–F; NOTES.md has the findings and test results behind each.
     README.
 - **New feature `create_army`** (engine tier; guard `hoi4_loader_feature_create_army`; script version
   unchanged, as for every new feature).
-  - `create_army = { leader = <character> name = "..." reassign = yes create_unit = { ... } ... }`
-    spawns divisions with vanilla `create_unit` and makes them a new army under that general.
+  - `create_army = { leader = <character> name = "..." reassign = yes country = <tag> create_unit = { ... } ... }`,
+    in a state scope like vanilla `create_unit`, spawns divisions there with `create_unit` and
+    makes them a new army of `country` (default ROOT) under that general.
   - If the general is not available, nothing spawns: the tooltip line is red and `loader.log`
     says why. A general who already leads an army is refused unless `reassign = yes`.
   - No command power is charged. It works on 1.19.3 vanilla and checksum-patched, and its

@@ -690,39 +690,47 @@ under a given general. `create_army` does both: it runs vanilla `create_unit` bl
 divisions they create a new army led by the general you name.
 
 ```
-create_army = {
-    leader = GER_erwin_rommel        # character id (required)
-    name = "1. Panzerarmee"          # army name (optional; else the game's default "Nth Army")
-    reassign = yes                   # optional, see "General already leads an army"
-    create_unit = {
-        division = "division_template = \"Infanterie-Division\" start_experience_factor = 0.5 start_equipment_factor = 1.0"
-        owner = ROOT
-        prioritize_location = 6488
-        count = 8
-    }
-    create_unit = {
-        division = "division_template = \"Panzer-Division\" start_experience_factor = 0.5"
-        owner = ROOT
-        prioritize_location = 6488
-        count = 2
+55 = {                                   # a state, as for vanilla create_unit (55: Nassau)
+    create_army = {
+        leader = GER_erwin_rommel        # character id (required)
+        name = "1. Panzerarmee"          # army name (optional; else the game's default "Nth Army")
+        reassign = yes                   # optional, see "General already leads an army"
+        country = GER                    # optional: the army's country (default ROOT)
+        create_unit = {
+            division = "division_template = \"Infanterie-Division\" start_experience_factor = 0.5 start_equipment_factor = 1.0"
+            owner = ROOT
+            prioritize_location = 6488   # Frankfurt
+            count = 8
+        }
+        create_unit = {
+            division = "division_template = \"Panzer-Division\" start_experience_factor = 0.5"
+            owner = ROOT
+            prioritize_location = 6488
+            count = 2
+        }
     }
 }
 ```
 
-- **Scope:** country. The army belongs to that country.
-- **Inside:** only `leader`, `name`, `reassign` and any number of `create_unit` blocks.
+- **Scope:** a state, exactly where vanilla `create_unit` must be used (`55 = { ... }`,
+  `capital_scope = { ... }`, `random_owned_state = { ... }`). The divisions spawn in that state.
+- **The army's country:** `country` (a tag, ROOT, THIS, FROM or PREV), by default ROOT. In a
+  decision, event or focus that is the country taking it.
+- **Inside:** only `leader`, `name`, `reassign`, `country` and any number of `create_unit` blocks.
   - The `create_unit` blocks are vanilla, with all their keys (`division`, `owner`,
     `prioritize_location`, `allow_spawning_on_enemy_provs`, `country_score`, `count`, `id`,
     `divisional_commander_xp`).
   - Any other key is a parse error: `error.log` names the file and line ("Unexpected token"),
     and that `create_army` does nothing. That keeps it exact which divisions join the army: the
     ones its `create_unit` blocks created.
-- **Which divisions join:** every division the blocks created for this country. Divisions a block
-  creates for another `owner` stay outside the army.
-- **Where they spawn:** wherever `create_unit` puts them, by its own rules: `prioritize_location`
-  if that province works, otherwise owned provinces first, then friendly ones, enemy ones only
-  with `allow_spawning_on_enemy_provs = yes`. Divisions of one army may stand in different
-  provinces, as in any army.
+- **Which divisions join:** every division the blocks created for the army's country, so give
+  `create_unit` the same `owner` (usually `owner = ROOT`). Divisions created for another owner
+  stay outside the army.
+- **Where they spawn:** in the state in scope, wherever `create_unit` puts them by its own rules:
+  `prioritize_location` if that province of the state works, otherwise the state's owned
+  provinces first, then friendly ones, enemy ones only with `allow_spawning_on_enemy_provs =
+  yes`. Divisions of one army may stand in different provinces, as in any army. An army spread
+  over several states needs one `create_army` per state; they make separate armies.
 - **Size:** no limit. More divisions than the general's cap (vanilla
   `NMilitary.CORPS_COMMANDER_DIVISIONS_CAP` and `FIELD_MARSHAL_DIVISIONS_CAP`, both 24) is
   allowed, as in the game, and reduces the general's bonuses ("Commanding too many divisions").
@@ -732,7 +740,7 @@ create_army = {
 **The general (`leader`).** The character must be:
 - an army leader: a general (corps commander) or a field marshal (a field marshal may lead a
   single army, as in the game);
-- recruited by the country in scope;
+- recruited by the army's country;
 - not captured, and not leading an army group.
 
 If any of these fails, **nothing spawns**. `loader.log` says why, and the tooltip shows a red line
@@ -765,7 +773,9 @@ my_mod_raise_panzer_army = {
         }
     }
     complete_effect = {
-        create_army = { leader = GER_erwin_rommel name = "1. Panzerarmee" create_unit = { ... } }
+        capital_scope = {
+            create_army = { leader = GER_erwin_rommel name = "1. Panzerarmee" create_unit = { ... } }
+        }
     }
 }
 ```
