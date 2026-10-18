@@ -2643,3 +2643,10 @@ Install the DLL and sync the test mod, start a 1939 game as France, and keep
   - 31: "(North Sea): Changes name to Loader Test Sea C (flag protocol).";
   - 33: "(Loader Test Sea C (flag protocol), Loader Test Sea A): Gets its original name back.";
   - the every_ rename (B): the header, then "Changes name to Loader Test Sea B.".
+
+**In-game results (F8, 2026-10-18): all as expected.**
+- **27:** "Bay of Biscay: Changes name to Loader Test Sea A."
+- **30 (every_ rename to B):** "Loader Test Sea A: Changes name to Loader Test Sea B." With a
+  single match the header shows the name without parentheses.
+- **31:** "(English Channel): Changes name to Loader Test Sea C (flag protocol)."
+- **33:** "(Loader Test Sea C (flag protocol), Loader Test Sea A): Gets its original name back."
