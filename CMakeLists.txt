@@ -43,6 +43,7 @@ add_library(hoi4_loader SHARED
     src/engine.cpp
     src/engine_data.cpp
     src/engine_scope.cpp
+    src/engine_army.cpp
     src/engine.h
     src/lifecycle.cpp
     src/lifecycle.h

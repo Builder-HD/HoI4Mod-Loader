@@ -469,6 +469,7 @@ bool Resolve() {
     ResolveOnActions();
     ResolveData();
     ResolveScopeBlocks();
+    ResolveArmies();
 
     Log("Engine: gamestate %s, flags +0x%x, regions +0x%x/+0x%x", g_ppGameState ? SigDescribe(g_ppGameState).c_str() : "-",
         g_flagsOffset, g_regionArrayOffset, g_regionCountOffset);
@@ -486,6 +487,7 @@ bool HaveRegistry() {
 }
 
 void* GameState() { return g_ppGameState ? *g_ppGameState : nullptr; }
+void** GameStateSlot() { return g_ppGameState; }
 
 bool IsLoadedFromSave(void* gameState) { return gameState && g_isLoaded && g_isLoaded(gameState); }
 
