@@ -2651,6 +2651,70 @@ Install the DLL and sync the test mod, start a 1939 game as France, and keep
 - **31:** "(English Channel): Changes name to Loader Test Sea C (flag protocol)."
 - **33:** "(Loader Test Sea C (flag protocol), Loader Test Sea A): Gets its original name back."
 
+### F9. Does random_strategic_region's tooltip name the region that is picked? (2026-10-18)
+
+**Answer:** yes, for a decision, unless the candidate list or the draws before it differ between
+hover and execution. Both paths make the same draw from a scope seeded the same way. Read from
+1.19.3 (the code is vanilla; the loader replaces only the candidate collection, slot 25).
+
+**The draw: `CRandomStateEffect` slot 27 `FUN_1402f7510(effect, scope)`.**
+- `h = hash(scope+0x10 (seed) + scope+0xc (counter) * -0x4ad685b3)`, then
+  `scope+0xc += 1`, and the result is `candidates[(h & 0x7fffffff) % n]`.
+- `candidates` is our slot 25's list, filled in region id order with the regions that meet
+  `limit`.
+- It reads no global RNG and no date. The result depends only on the scope's seed, its counter
+  and the list.
+
+**Both paths call it with the scope they were given:**
+- Execute is slot 13, `FUN_1402f4520(effect, scope)`: collect, then `slot27(scope)`, then
+  `SetScope` on a copy, then the children.
+- Tooltip is slot 8, `FUN_1402f4ff0(effect, out, scope, depth)`: collect, then
+  `slot27(scope)`. The header shows that pick, through slot 28, and the children's lines are
+  built in a copy set to that pick.
+
+**The decision builds both scopes the same way:**
+- **Tooltip of `complete_effect`:** `FUN_14072aa30(decision, out, country)`.
+  1. `CEventScope()` (`FUN_140535110`: seed 0x5ea6ba9e, counter 1).
+  2. `SetCountry`.
+  3. `FUN_140735d00(decision, scope, 0)`.
+  4. `decision+0x408` slot 8 (the tooltip).
+- **Execution (`CSelectDecisionCommand` → `FUN_1407357f0` → `FUN_140727ae0(decision, country)`):**
+  1. `CEventScope()`.
+  2. `SetCountry`.
+  3. `FUN_140735d00(decision, scope, 0)`.
+  4. `decision+0x408` slot 12 (execute, which reaches slot 13).
+- **`FUN_140735d00(decision, scope, target)` sets the seed:**
+  - `x = gamestate+0x720 + decision+0x140 + record+0x10 + target`;
+  - `scope+0x10 = H1(x)`, `scope+0xc = H2(x)`, the same hashes as the seeded `CEventScope`
+    constructor; FROM is seeded from it too.
+  - `gamestate+0x720` is one synced random number drawn in `CInGameIdler::InitData`
+    (`FUN_1401e1120`, `gamestate.cpp:0x980`). It is the campaign's seed, not the date.
+  - `decision+0x140` is the decision's id.
+  - `record` is the country's entry for this decision and target (`FUN_14072dda0`, list at
+    country+0x148), or 0 if there is none. Taking the decision updates it only after the
+    effects ran.
+  - Targeted decisions pass their target (`FUN_140728720`, the same pattern).
+
+**What follows:**
+- Within one campaign, a decision shows and picks the same region as long as its candidate
+  list is the same.
+  - That holds across days and while the game runs: the command executes a tick later, but the
+    seed has no date in it.
+  - Different campaigns pick differently. F7 picked the North Sea and F8 the English Channel
+    with the same three candidates.
+- **The pick changes legitimately when:**
+  - the `limit` result changes;
+  - the decision's record changes after it was taken (a later hover may then show another
+    region, and that is again the one taken).
+- **The tooltip and execution can disagree when:**
+  1. the candidate list changes between hover and execution, e.g. a `limit` with a data
+     trigger whose value moves during that tick;
+  2. an earlier effect in the same block draws from the scope's counter only when it executes,
+     not when its tooltip is built. Each draw advances the counter, so the later pick shifts.
+     The same holds for vanilla `random_state`.
+
+**In-game check (F9):** see the test plan below (step 1).
+
 ### Step 10 passes: without the loader (2026-10-18, current feature set)
 
 - **Setup:**

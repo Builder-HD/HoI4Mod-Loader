@@ -499,8 +499,16 @@ random_strategic_region = {
     ```yaml
      my_fewer_than_99_sea_regions_tt:0 "Fewer than 99 sea regions"
     ```
-  - `every_` / `random_strategic_region` show the region names (for random: the one that will be
-    picked) and the effects, as vanilla does for states.
+  - `every_` / `random_strategic_region` show the region names and the effects, as vanilla does
+    for states. For random, that is the region that will be picked: the tooltip and the
+    execution make the same draw from the same scope seed.
+    - The pick changes only when the candidate list changes, or when the decision's own record
+      changes after it was taken. It does not change with the date.
+    - It can differ from the tooltip in two cases. The first is when `limit` gives a different
+      result by the time the decision is taken.
+    - The second is when an effect earlier in the same block draws a random number only when it
+      runs and not for its tooltip. Put `random_strategic_region` first if that matters.
+    - Details in NOTES.md F9.
 - **Without the loader** the blocks are unknown commands, which the game logs and drops. A
   dropped trigger block counts as **true**, so guard it with
   `hoi4_loader_feature_region_scope = yes` in the same AND block (see "Checking for features in
