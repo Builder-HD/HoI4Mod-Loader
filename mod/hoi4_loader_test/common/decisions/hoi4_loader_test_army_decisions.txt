@@ -1,7 +1,11 @@
 # Test decisions for hoi4_loader's create_army (MODDING.md "Armies under a chosen general
 # (create_army)", NOTES.md G1/G2). Play as Germany (1936 start). Run "Prepare" first: it recruits
 # the test generals (common/characters/hoi4_loader_test_characters.txt) and adds the template
-# "Loader Test Infantry". Province 6488 is Frankfurt, 3367 lies in Brandenburg.
+# "Loader Test Infantry".
+#
+# create_army runs in a state scope, as vanilla create_unit does: the divisions spawn in that
+# state. State 55 (Nassau) holds Frankfurt (province 6488); state 64 is Brandenburg (provinces
+# 3367 and 6521 among others). The army belongs to ROOT (Germany) unless `country` says otherwise.
 #
 # Every decision is guarded with hoi4_loader_feature_create_army = yes, so without the loader they
 # are hidden (the game still logs create_army as an unknown effect when parsing this file). The
@@ -40,64 +44,70 @@ hoi4_loader_army_category = {
 	}
 
 	# --- Armies --------------------------------------------------------------------------------
-	# A: 6 divisions at Frankfurt, named, general A.
+	# A: 6 divisions in Nassau, at Frankfurt if possible, named, general A.
 	hoi4_loader_army_a = {
 		icon = generic_research
 		cost = 0
 		visible = { hoi4_loader_feature_create_army = yes has_country_flag = hoi4_loader_army_prepared }
 		complete_effect = {
-			create_army = {
-				leader = HLT_general_a
-				name = "Loader Test Army A"
-				create_unit = {
-					division = "division_template = \"Loader Test Infantry\" start_experience_factor = 0.5 start_equipment_factor = 1.0"
-					owner = ROOT
-					prioritize_location = 6488
-					count = 6
+			55 = {
+				create_army = {
+					leader = HLT_general_a
+					name = "Loader Test Army A"
+					create_unit = {
+						division = "division_template = \"Loader Test Infantry\" start_experience_factor = 0.5 start_equipment_factor = 1.0"
+						owner = ROOT
+						prioritize_location = 6488
+						count = 6
+					}
 				}
 			}
 		}
 		ai_will_do = { base = 0 }
 	}
-	# B: 30 divisions without a location (create_unit spreads them over owned provinces), no
-	# name (the game's default army name), general B: over the 24-division soft cap.
+	# B: 30 divisions in Brandenburg without a location (create_unit spreads them over the state's
+	# provinces), no name (the game's default army name), general B: over the 24-division soft cap.
 	hoi4_loader_army_b = {
 		icon = generic_research
 		cost = 0
 		visible = { hoi4_loader_feature_create_army = yes has_country_flag = hoi4_loader_army_prepared }
 		complete_effect = {
-			create_army = {
-				leader = HLT_general_b
-				create_unit = {
-					division = "division_template = \"Loader Test Infantry\" start_experience_factor = 0.2"
-					owner = ROOT
-					count = 30
+			64 = {
+				create_army = {
+					leader = HLT_general_b
+					create_unit = {
+						division = "division_template = \"Loader Test Infantry\" start_experience_factor = 0.2"
+						owner = ROOT
+						count = 30
+					}
 				}
 			}
 		}
 		ai_will_do = { base = 0 }
 	}
-	# C: two create_unit blocks at two provinces (3 at Frankfurt, 3 in Brandenburg), named, led by
-	# the field marshal (a field marshal may lead a single army).
+	# C: two create_unit blocks at two provinces of Brandenburg (3 at 3367, 3 at 6521), named, led
+	# by the field marshal (a field marshal may lead a single army).
 	hoi4_loader_army_c = {
 		icon = generic_research
 		cost = 0
 		visible = { hoi4_loader_feature_create_army = yes has_country_flag = hoi4_loader_army_prepared }
 		complete_effect = {
-			create_army = {
-				leader = HLT_marshal
-				name = "Loader Test Army C"
-				create_unit = {
-					division = "division_template = \"Loader Test Infantry\" start_experience_factor = 0.5"
-					owner = ROOT
-					prioritize_location = 6488
-					count = 3
-				}
-				create_unit = {
-					division = "division_template = \"Loader Test Infantry\" start_experience_factor = 0.5"
-					owner = ROOT
-					prioritize_location = 3367
-					count = 3
+			64 = {
+				create_army = {
+					leader = HLT_marshal
+					name = "Loader Test Army C"
+					create_unit = {
+						division = "division_template = \"Loader Test Infantry\" start_experience_factor = 0.5"
+						owner = ROOT
+						prioritize_location = 3367
+						count = 3
+					}
+					create_unit = {
+						division = "division_template = \"Loader Test Infantry\" start_experience_factor = 0.5"
+						owner = ROOT
+						prioritize_location = 6521
+						count = 3
+					}
 				}
 			}
 		}
@@ -110,15 +120,17 @@ hoi4_loader_army_category = {
 		cost = 0
 		visible = { hoi4_loader_feature_create_army = yes has_country_flag = hoi4_loader_army_prepared }
 		complete_effect = {
-			create_army = {
-				leader = HLT_general_a
-				reassign = yes
-				name = "Loader Test Army A2"
-				create_unit = {
-					division = "division_template = \"Loader Test Infantry\""
-					owner = ROOT
-					prioritize_location = 6488
-					count = 2
+			55 = {
+				create_army = {
+					leader = HLT_general_a
+					reassign = yes
+					name = "Loader Test Army A2"
+					create_unit = {
+						division = "division_template = \"Loader Test Infantry\""
+						owner = ROOT
+						prioritize_location = 6488
+						count = 2
+					}
 				}
 			}
 		}
@@ -132,9 +144,11 @@ hoi4_loader_army_category = {
 		cost = 0
 		visible = { hoi4_loader_feature_create_army = yes has_country_flag = hoi4_loader_army_prepared }
 		complete_effect = {
-			create_army = {
-				leader = HLT_general_a
-				create_unit = { division = "division_template = \"Loader Test Infantry\"" owner = ROOT count = 1 }
+			64 = {
+				create_army = {
+					leader = HLT_general_a
+					create_unit = { division = "division_template = \"Loader Test Infantry\"" owner = ROOT count = 1 }
+				}
 			}
 		}
 		ai_will_do = { base = 0 }
@@ -144,9 +158,11 @@ hoi4_loader_army_category = {
 		cost = 0
 		visible = { hoi4_loader_feature_create_army = yes has_country_flag = hoi4_loader_army_prepared }
 		complete_effect = {
-			create_army = {
-				leader = HLT_no_such_character
-				create_unit = { division = "division_template = \"Loader Test Infantry\"" owner = ROOT count = 1 }
+			64 = {
+				create_army = {
+					leader = HLT_no_such_character
+					create_unit = { division = "division_template = \"Loader Test Infantry\"" owner = ROOT count = 1 }
+				}
 			}
 		}
 		ai_will_do = { base = 0 }
@@ -156,9 +172,11 @@ hoi4_loader_army_category = {
 		cost = 0
 		visible = { hoi4_loader_feature_create_army = yes has_country_flag = hoi4_loader_army_prepared }
 		complete_effect = {
-			create_army = {
-				leader = HLT_unrecruited
-				create_unit = { division = "division_template = \"Loader Test Infantry\"" owner = ROOT count = 1 }
+			64 = {
+				create_army = {
+					leader = HLT_unrecruited
+					create_unit = { division = "division_template = \"Loader Test Infantry\"" owner = ROOT count = 1 }
+				}
 			}
 		}
 		ai_will_do = { base = 0 }
@@ -168,9 +186,11 @@ hoi4_loader_army_category = {
 		cost = 0
 		visible = { hoi4_loader_feature_create_army = yes has_country_flag = hoi4_loader_army_prepared }
 		complete_effect = {
-			create_army = {
-				leader = HLT_admiral
-				create_unit = { division = "division_template = \"Loader Test Infantry\"" owner = ROOT count = 1 }
+			64 = {
+				create_army = {
+					leader = HLT_admiral
+					create_unit = { division = "division_template = \"Loader Test Infantry\"" owner = ROOT count = 1 }
+				}
 			}
 		}
 		ai_will_do = { base = 0 }
@@ -181,9 +201,11 @@ hoi4_loader_army_category = {
 		cost = 0
 		visible = { hoi4_loader_feature_create_army = yes has_country_flag = hoi4_loader_army_prepared }
 		complete_effect = {
-			create_army = {
-				leader = FRA_jean_de_lattre_de_tassigny
-				create_unit = { division = "division_template = \"Loader Test Infantry\"" owner = ROOT count = 1 }
+			64 = {
+				create_army = {
+					leader = FRA_jean_de_lattre_de_tassigny
+					create_unit = { division = "division_template = \"Loader Test Infantry\"" owner = ROOT count = 1 }
+				}
 			}
 		}
 		ai_will_do = { base = 0 }
@@ -194,10 +216,12 @@ hoi4_loader_army_category = {
 		cost = 0
 		visible = { hoi4_loader_feature_create_army = yes has_country_flag = hoi4_loader_army_prepared }
 		complete_effect = {
-			create_army = {
-				leader = HLT_marshal
-				reassign = yes
-				create_unit = { division = "division_template = \"Loader Test Infantry\"" owner = ROOT count = 1 }
+			64 = {
+				create_army = {
+					leader = HLT_marshal
+					reassign = yes
+					create_unit = { division = "division_template = \"Loader Test Infantry\"" owner = ROOT count = 1 }
+				}
 			}
 		}
 		ai_will_do = { base = 0 }
@@ -209,34 +233,39 @@ hoi4_loader_army_category = {
 		cost = 0
 		visible = { hoi4_loader_feature_create_army = yes has_country_flag = hoi4_loader_army_prepared }
 		complete_effect = {
-			create_army = {
-				leader = HLT_general_b
-				reassign = yes
-				create_unit = { division = "division_template = \"No Such Template\"" owner = ROOT count = 2 }
+			64 = {
+				create_army = {
+					leader = HLT_general_b
+					reassign = yes
+					create_unit = { division = "division_template = \"No Such Template\"" owner = ROOT count = 2 }
+				}
 			}
 		}
 		ai_will_do = { base = 0 }
 	}
-	# A key other than leader / name / reassign / create_unit inside: a parse error at load
-	# (error.log: "Unexpected token" with this file and line), and this create_army does nothing.
+	# A key other than leader / name / reassign / country / create_unit inside: a parse error at
+	# load (error.log: "Unexpected token" with this file and line), and this create_army does nothing.
 	hoi4_loader_army_fail_parse = {
 		icon = generic_research
 		cost = 0
 		visible = { hoi4_loader_feature_create_army = yes has_country_flag = hoi4_loader_army_prepared }
 		complete_effect = {
-			create_army = {
-				leader = HLT_general_b
-				reassign = yes
-				set_country_flag = hoi4_loader_army_not_allowed_inside
-				create_unit = { division = "division_template = \"Loader Test Infantry\"" owner = ROOT count = 1 }
+			64 = {
+				create_army = {
+					leader = HLT_general_b
+					reassign = yes
+					set_country_flag = hoi4_loader_army_not_allowed_inside
+					create_unit = { division = "division_template = \"Loader Test Infantry\"" owner = ROOT count = 1 }
+				}
 			}
 		}
 		ai_will_do = { base = 0 }
 	}
 
 	# --- AI ------------------------------------------------------------------------------------
-	# Italy gets a test general, the template and an army of 10 divisions under that general.
-	# Watch whether the AI keeps it as it is (test plan).
+	# Italy gets a test general, the template and an army of 10 divisions under that general, in
+	# its capital state (country = ITA: the decision's ROOT is Germany). Watch whether the AI keeps
+	# it as it is (test plan).
 	hoi4_loader_army_ai = {
 		icon = generic_research
 		cost = 0
@@ -256,13 +285,16 @@ hoi4_loader_army_category = {
 						infantry = { x = 1 y = 2 }
 					}
 				}
-				create_army = {
-					leader = HLT_general_ai
-					name = "Loader Test AI Army"
-					create_unit = {
-						division = "division_template = \"Loader Test Infantry\" start_experience_factor = 0.5"
-						owner = ITA
-						count = 10
+				capital_scope = {
+					create_army = {
+						leader = HLT_general_ai
+						country = ITA
+						name = "Loader Test AI Army"
+						create_unit = {
+							division = "division_template = \"Loader Test Infantry\" start_experience_factor = 0.5"
+							owner = ITA
+							count = 10
+						}
 					}
 				}
 			}
