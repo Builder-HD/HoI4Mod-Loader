@@ -14,6 +14,7 @@ Mods ship stub versions of the trigger and effect (see the test mod). The loader
 content in their place, so mods work, and stay error-free, with or without the loader.
 
 See [NOTES.md](NOTES.md) for the reverse-engineering findings and what may break on updates.
+Players who only install it: [PLAYERS.md](PLAYERS.md). Release history: [CHANGELOG.md](CHANGELOG.md).
 
 ## Feature tiers
 
@@ -814,6 +815,7 @@ src/main.cpp                  DllMain, version.dll forwarding, logging, startup 
 src/hash.cpp                  SHA-256 of hoi4.exe, hash cache, supported-hash lookup
 src/vfs.cpp                   virtual file API + CreateFileW/A hooks
 src/sigscan.cpp               signature scanner over hoi4.exe .text
+src/sigreport.cpp             read-only signature report (unlisted builds, signature_scan)
 src/signatures.h              all engine-tier byte signatures
 src/features.cpp              feature registry, tier gating, core detection files
 src/plugin_engine_probe.cpp   engine_probe feature
@@ -834,9 +836,16 @@ src/proxy.asm, version.def    version.dll export stubs
 src/sha256.h                  self-contained SHA-256
 tools/check_signatures.py     check src/signatures.h against hoi4.exe copies
 tools/check_code_shapes.py    check the CODE shapes at their RTTI-found addresses on hoi4.exe copies
+tools/make_stubs.py           write (or --check) stubs/ from the feature list
+tools/make_release.py         build release/hoi4_loader-v<version>.zip and its SHA256SUMS
 tests/                        out-of-game smoke test (stand-in hoi4.exe)
 mod/                          companion test mod
+stubs/                        stub pack for mod authors (README "Stub pack")
+PLAYERS.md, CHANGELOG.md      player guide and release history (both go into the zip)
 ```
+
+**Release:** build Release, run `sh tests/run_smoke.sh`, then `python -I tools/make_release.py`.
+It refuses a DLL that is older than `src/` or lacks the release string, and a stale stub pack.
 
 ## Build
 
