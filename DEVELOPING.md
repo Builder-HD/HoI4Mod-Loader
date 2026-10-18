@@ -190,6 +190,15 @@ bool MyFeatureInit() {
   the scope a `target` callback picks, e.g. `strategic_region`) and `register_native_iterator`
   (any / every / random over every object of a scope type, cloned from the game's state
   iterators). Only strategic region scopes are supported; see `src/plugin_region_scope.cpp`.
+- **Effect blocks:** `register_native_effect_block` declares an effect whose children run in the
+  current scope at the moment its execute callback calls `children.run()`, so a feature can act
+  before and after them (`create_army` compares the country's divisions around the
+  `create_unit` children; see `src/plugin_create_army.cpp`).
+  - Only the effects listed in `children` may appear inside. Each must exist in the game, or the
+    block is refused at engine registration. Any other key is the engine's "Unexpected token" and
+    makes that use do nothing.
+  - `run()` returns false if the children crashed (contained, logged once).
+  - Tooltip: the `tooltip` callback's line, then the children's lines one level deeper.
 - **When:** register from the feature's init only. Engine registration happens at lexer-ready,
   before any script is parsed; later calls are refused. The feature needs the engine tier and
   the `lifecycle` feature.
@@ -283,6 +292,8 @@ gives the number of checks. It covers:
 - the exact docs file content;
 - scope defaults, country, choice and token parameters, and numeric triggers;
 - scope blocks and iterators;
+- effect blocks (allowed children, before/after execution, crashes);
+- free text parameters;
 - translatable tooltip texts.
 
 Next come repository checks:

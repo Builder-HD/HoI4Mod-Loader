@@ -187,6 +187,13 @@ std::string Usage(const Command& c) {
             if (!p.reserved) s += std::string(" ") + p.name + " = " + ParamUsage(p);
         return s + " " + ChildrenWord(c.kind) + " }`";
     }
+    if (c.effectBlock) {
+        std::string s = "`" + c.name + " = {";
+        for (const ParamSpec& p : c.params)
+            if (!p.reserved) s += std::string(" ") + p.name + " = " + ParamUsage(p);
+        for (const std::string& child : c.childNames) s += " " + child + " = { ... }";
+        return s + " }`";
+    }
     if (c.numeric) {
         const char* rhs = c.numericKind == NumericKind::Ratio ? "<0..1>" : "<int>";
         std::string s;
@@ -216,6 +223,17 @@ void LogOnce(volatile long* flag, const char* fmt, const char* a, const char* b)
 bool SafeExecute(void (*fn)(const Args&, const Scope&), const Args* a, const Scope* s, DWORD* code) {
     __try {
         fn(*a, *s);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *code = GetExceptionCode();
+        return false;
+    }
+}
+
+bool SafeExecuteBlock(void (*fn)(const Args&, const Scope&, const EffectChildren&), const Args* a, const Scope* s,
+                      const EffectChildren* children, DWORD* code) {
+    __try {
+        fn(*a, *s, *children);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         *code = GetExceptionCode();
@@ -478,6 +496,40 @@ bool register_native_iterator(const NativeIterator& d, const char* feature) {
     return true;
 }
 
+bool register_native_effect_block(const NativeEffectBlock& d, const char* feature) {
+    std::string why;
+    if (g_finalized) why = "registration window is closed (engine registration already ran)";
+    else if (!ValidIdentifier(d.name)) why = "name must be 1-64 characters of a-z 0-9 _";
+    else if (!d.help || !*d.help) why = "help text is required";
+    else if (!d.execute) why = "execute callback is required";
+    else if (d.children.empty()) why = "an effect block needs at least one allowed child effect";
+    else why = CheckParams(d.params);
+    for (size_t i = 0; why.empty() && i < d.children.size(); ++i) {
+        const char* child = d.children[i];
+        if (!ValidIdentifier(child)) why = "child effect names must be 1-64 characters of a-z 0-9 _";
+        else if (strcmp(child, d.name) == 0) why = "an effect block cannot contain itself";
+        for (const ParamSpec& p : d.params)
+            if (why.empty() && strcmp(p.name, child) == 0) why = std::string("child effect '") + child + "' clashes with a parameter";
+        for (size_t j = 0; why.empty() && j < i; ++j)
+            if (strcmp(d.children[j], child) == 0) why = std::string("duplicate child effect '") + child + "'";
+    }
+    for (const LocText& t : d.texts)
+        if (why.empty() && (!t.key || !*t.key || !t.english || !*t.english)) why = "a tooltip text needs a key and an English text";
+    for (const Command* c : g_commands)
+        if (why.empty() && c->kind == CommandKind::Effect && c->name == d.name)
+            why = "an effect with this name is already registered by the loader";
+    if (!why.empty()) return Refuse(CommandKind::Effect, d.name, feature, why);
+    Command* c = NewCommand(CommandKind::Effect, feature, d.name, d.help, Form::Block, d.params, d.scopes);
+    c->effectBlock = true;
+    for (const char* child : d.children) c->childNames.push_back(child);
+    c->blockExecute = d.execute;
+    c->effectTooltip = d.tooltip;
+    c->texts = d.texts;
+    g_commands.push_back(c);
+    Log("Native effect block '%s' (feature %s) queued for engine registration", d.name, feature ? feature : "?");
+    return true;
+}
+
 bool NativeScriptFinalized() { return g_finalized; }
 
 namespace {
@@ -521,6 +573,13 @@ int NativeScriptFinalize(NativeBackend& backend, const std::wstring& docsPath) {
                 if (!c->paramTokens[i]) reason = std::string("cannot create a token for parameter '") + c->params[i].name + "'";
             if (reason.empty() && c->numeric && !c->compareKey.empty() && !(c->compareToken = backend.Intern(c->compareKey.c_str())))
                 reason = "cannot create a token for the compare key";
+            c->childTokens.clear();
+            for (size_t i = 0; i < c->childNames.size() && reason.empty(); ++i) {
+                int t = backend.Intern(c->childNames[i].c_str());
+                if (!t || !backend.EngineHas(CommandKind::Effect, t))
+                    reason = "the game has no effect '" + c->childNames[i] + "' to allow inside";
+                c->childTokens.push_back(t);
+            }
             if (reason.empty() && !backend.Bind(*c, &reason) && reason.empty()) reason = "engine binding failed";
         }
         if (reason.empty()) {
@@ -572,6 +631,11 @@ std::string NativeScriptDocs() {
             s += "- Usage: " + Usage(*c) + "\n";
             if (c->scopeBlock || c->iterator) s += "- Children run in: " + ScopeNames(c->childScope) + " scope\n";
             if (c->iterator && !c->keysDoc.empty()) s += "- Keys (as the game's state iterator): " + c->keysDoc + "\n";
+            if (c->effectBlock) {
+                s += "- Effects allowed inside (any number, run in the block's scope; any other key is an error):";
+                for (size_t i = 0; i < c->childNames.size(); ++i) s += (i ? ", `" : " `") + c->childNames[i] + "`";
+                s += "\n";
+            }
             if (!c->texts.empty()) {
                 s += "- Tooltip texts (localisation keys a mod may define; English otherwise):\n";
                 for (const LocText& t : c->texts) s += std::string("  - `") + t.key + "`: \"" + t.english + "\"\n";
@@ -783,6 +847,22 @@ void NativeExecute(const ParsedCommand* pc, const void* engineScope) {
     Args args(resolved, pc->args.size());
     DWORD code = 0;
     if (!SafeExecute(pc->cmd->execute, &args, &scope, &code)) LogException(*pc->cmd, "execute", code);
+}
+
+void NativeExecuteBlock(const ParsedCommand* pc, const void* engineScope, const EffectChildren& children) {
+    if (!pc || pc->parseError || !pc->cmd->blockExecute) return;
+    Scope scope(engineScope);
+    ArgValue resolved[kMaxParams];
+    if (!ResolveArgs(*pc, scope, resolved)) return;
+    Args args(resolved, pc->args.size());
+    DWORD code = 0;
+    if (!SafeExecuteBlock(pc->cmd->blockExecute, &args, &scope, &children, &code)) LogException(*pc->cmd, "execute", code);
+}
+
+bool NativeIsChild(const Command& cmd, int token) {
+    for (int t : cmd.childTokens)
+        if (t && t == token) return true;
+    return false;
 }
 
 bool NativeEvaluate(const ParsedCommand* pc, const void* engineScope) {
