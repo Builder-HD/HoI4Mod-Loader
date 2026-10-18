@@ -9,6 +9,8 @@ A–F; NOTES.md has the findings and test results behind each.
 - **Disclaimer** at the top of README.md and PLAYERS.md: unofficial, not affiliated with or
   endorsed by Paradox Interactive, runtime only, use at your own risk. The 0.5.0-beta zip's
   PLAYERS.md does not have it yet.
+- **Issue forms** on GitHub: a bug report asking for the loader release, game version and build,
+  logs, mod list and steps, plus a form for questions and requests.
 
 ## 0.5.0-beta (2026-10-18), script version 3
 

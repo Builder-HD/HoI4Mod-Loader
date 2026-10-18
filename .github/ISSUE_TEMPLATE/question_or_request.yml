@@ -1,0 +1,15 @@
+name: Question or feature request
+description: A question about using the loader or writing mods for it, or an idea for a new feature.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Players: [PLAYERS.md](https://github.com/Builder-HD/HoI4Mod-Loader/blob/main/PLAYERS.md) covers install, uninstall and game patches.
+        Mod authors: the [README](https://github.com/Builder-HD/HoI4Mod-Loader/blob/main/README.md) documents every script command.
+        If something is broken, use the bug report form instead: it asks for the logs needed to look into it.
+  - type: textarea
+    id: question
+    attributes:
+      label: Question or request
+    validations:
+      required: true

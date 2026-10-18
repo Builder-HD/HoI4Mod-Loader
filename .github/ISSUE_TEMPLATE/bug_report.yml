@@ -1,0 +1,76 @@
+name: Bug report
+description: Something goes wrong with hoi4_loader installed (a crash, an error, a feature that doesn't work).
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The files below are in `Documents\Paradox Interactive\Hearts of Iron IV\` (with OneDrive often `OneDrive\Documents\...` or `OneDrive\Dokumente\...`).
+        `loader.log` is rewritten at every start, so copy it before you restart the game.
+        **Never attach `hoi4.exe` or other game files.**
+  - type: input
+    id: loader_release
+    attributes:
+      label: Loader release
+      description: The first line of `loader.log`.
+      placeholder: hoi4_loader 0.5.0-beta (script version 3) starting in ...
+    validations:
+      required: true
+  - type: input
+    id: game_version
+    attributes:
+      label: Game version
+      description: As shown at the bottom left of the main menu.
+      placeholder: v1.19.3 and the text after it
+    validations:
+      required: true
+  - type: dropdown
+    id: game_build
+    attributes:
+      label: Game build
+      options:
+        - Vanilla (as Steam installs it)
+        - Checksum-patched
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What you did, what you expected, and what happened instead.
+      placeholder: |
+        1. Started a new game as ...
+        2. ...
+        Expected: ...
+        Happened: ...
+    validations:
+      required: true
+  - type: textarea
+    id: loader_log
+    attributes:
+      label: loader.log
+      description: Drag the file here, from the session with the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: error_log
+    attributes:
+      label: logs/error.log
+      description: Drag the file here. `logs\game.log` helps too.
+    validations:
+      required: true
+  - type: textarea
+    id: mods
+    attributes:
+      label: Enabled mods
+      description: The mods in your playset, in load order. "None" if you play without mods.
+    validations:
+      required: true
+  - type: textarea
+    id: crash
+    attributes:
+      label: Crash folder (after a crash)
+      description: Zip the newest folder in `crashes\` and drag it here.
+    validations:
+      required: false
