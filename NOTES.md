@@ -2610,8 +2610,16 @@ Install the DLL and sync the test mod, start a 1939 game as France, and keep
   - Only one line, naming only the first region. An every_ block builds its child lines once,
     for its first matching scope (vanilla every_state does the same).
   - My test plan expected one line per region. That was wrong.
-- **Not reported yet:** the air decision, any_strategic_region (vanilla `NOT any_state` wording),
-  data test 8.
+- **8 (NOT air superiority without a region):** "NOT: Air superiority of FRA above 0%", ticked.
+- **25 (any_strategic_region):** every line ticked.
+  - Under NOT the game negates the children, so "At least 99 of Any strategic region:" and the
+    custom header "Fewer than 99 sea regions:" both list "Is a land region".
+  - Vanilla shows "At least 2000 of Any state:" with "Is not coastal." the same way, which
+    confirms the README note: the wording comes from the engine, and `tooltip = <key>` is the
+    fix for the header.
+- **26 (air superiority above 50%, peace, not available):** "Any strategic region:", "Is a sea
+  region", "Air superiority of FRA above 50%". No "(currently ...)".
+- **"Always true":** none in any decision.
 
 ### F8. Rename lines inside a region scope (2026-10-18)
 
