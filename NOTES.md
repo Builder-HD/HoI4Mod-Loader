@@ -3058,6 +3058,19 @@ earlier in the same effect block previews red but works (seen in the Italy test)
   country). After a load it may not know either, and the reason then reads "not a character of
   this country".
 
-**Still open:** test 12 again with the fix, the session without the loader, the "captured"
-refusal (needs a captured general) and multiplayer.
+**Test 12 again, with the fix: passed.**
+- After loading, the previews read correctly, and reassign worked twice: General A moved to a
+  new army A2, then on to the next one.
+- A field marshal could be taken from his army with `reassign = yes`.
+- After a second load everything still worked.
+- The two failure tests stay available, which is intended (the decisions repeat) and does
+  nothing:
+  - "create_unit creates nothing": a normal preview (the general is fine, and the template is
+    only checked when `create_unit` runs). When taken, nothing spawns, loader.log says so and
+    error.log has `create_unit`'s own reason.
+  - "a key that is not allowed inside": the use is invalid, but its preview still showed the
+    vanilla `create_unit` line. Now an invalid use shows no preview lines at all.
+
+**Still open:** the session without the loader, the "captured" refusal (needs a captured general)
+and multiplayer.
 
