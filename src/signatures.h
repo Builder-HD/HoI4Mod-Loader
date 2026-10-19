@@ -362,6 +362,15 @@ CODE(kCodeCharacterOwnerGetter, "48 8D 41 ?? C3")
 // std::string at disp32 +0x3c; the engine's std::string assign (jmp at +0x58).
 CODE(kCodeSetArmyName, "40 53 48 83 EC 20 48 8B D9 48 83 C1 ?? 83 39 00 75 ?? 83 79 04 00 75 ?? 33 C0 EB ?? E8 ?? ?? ?? ?? 48 83 7B ?? 00 75 ?? 48 8B C8 48 83 C4 20 5B E9 ?? ?? ?? ?? 48 8D 53 ?? 48 8D 88 ?? ?? ?? ?? 48 3B CA 74 ?? 48 83 7A 18 0F 4C 8B 42 10 76 ?? 48 8B 12 48 83 C4 20 5B E9 ?? ?? ?? ??")
 static const size_t kCodeSetArmyNameResolveCall = 0x1c, kCodeSetArmyNameDisp = 0x3c, kCodeSetArmyNameAssign = 0x58;
+// CHasCharacterTrigger slot 22 (has_character): resolves its character target (call at +0x38).
+// That resolver falls back to a lookup of the character among the scope country's characters,
+// which works after a save is loaded (recruit_character's global table above does not).
+CODE(kCodeHasCharacterEval, "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B D9 48 8B FA 48 8D 4A 08 E8 ?? ?? ?? ?? 48 8B C8 E8 ?? ?? ?? ?? 48 8D 4B ?? 45 33 C0 48 8B D7 48 8B E8 E8 ?? ?? ?? ??")
+static const size_t kCodeHasCharacterResolveCall = 0x38;
+// ... in a function the resolver calls (SigFindIn): intern the name (+0), tag -> country (+8),
+// country -> its characters (+0x10), find(characters, token, true) (+0x1f).
+CODE(kCodeCountryCharacterLookup, "E8 ?? ?? ?? ?? 48 8B CB E8 ?? ?? ?? ?? 48 8B C8 E8 ?? ?? ?? ?? 8B 54 24 ?? 41 B0 01 48 8B C8 E8 ?? ?? ?? ??")
+static const size_t kCodeCountryCharactersCall = 0x10, kCodeCountryCharacterFindCall = 0x1f;
 
 #undef CODE
 #undef SIG

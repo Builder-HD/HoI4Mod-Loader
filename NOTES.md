@@ -3041,6 +3041,23 @@ earlier in the same effect block previews red but works (seen in the Italy test)
 - **Conclusion:** for AI countries the army is a starting arrangement only; no vanilla lock
   exists (G1.4). MODDING.md says so.
 
-**Still open:** save and reload (test 12), the session without the loader, the "captured" refusal
-(needs a captured general) and multiplayer.
+**Test 12, save and reload: character lookup failed (fixed).**
+- **Symptom:** after loading a save, every `create_army` said "there is no such character", even
+  for General A, who existed and led Army A.
+- **Cause:** recruit_character's lookup (`FUN_1406b4eb0(gamestate+0x6a8, token)`) found nothing
+  after a load. The armies themselves survived the save with their names, divisions and generals.
+- **Fix:** the general is now looked up among the army country's own characters, as
+  `has_character` does:
+  - `CHasCharacterTrigger` slot 22 calls its target resolver (+0x38), which falls back to
+    `FUN_1405434d0`;
+  - that function calls `FUN_1406cf250(country)` (the country's characters), then
+    `FUN_1410eb910(characters, token, true)`;
+  - code shapes `kCodeHasCharacterEval` and `kCodeCountryCharacterLookup` match on all four exe
+    copies.
+- **The global table** is only asked when that lookup fails, to say why (not recruited / another
+  country). After a load it may not know either, and the reason then reads "not a character of
+  this country".
+
+**Still open:** test 12 again with the fix, the session without the loader, the "captured"
+refusal (needs a captured general) and multiplayer.
 

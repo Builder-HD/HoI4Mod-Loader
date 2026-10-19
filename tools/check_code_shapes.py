@@ -223,6 +223,20 @@ def check_create_army(img, codes, text_va, text):
     results.append(('kCodeCharacterLookup / OwnerCheck (characters +0x%x, owner +0x%x)' % (mgr_off, owner), ok,
                     hex(rel32(img, look + 0x12)) if look else '-'))
 
+    # Characters of a country by token (has_character's lookup; works after loading a save).
+    has = img.vtable('.?AVCHasCharacterTrigger@@')
+    ok = bool(has) and img.match_at(has[1][22], codes['kCodeHasCharacterEval'])
+    lookup = None
+    if ok:
+        target = rel32(img, has[1][22] + 0x38)
+        for i in range(0x9b - 5):
+            if img.d[img.va2off(target + i)] == 0xe8:
+                lookup = find_in(img, rel32(img, target + i), 0x100, codes['kCodeCountryCharacterLookup'])
+                if lookup:
+                    break
+    results.append(('kCodeHasCharacterEval / CountryCharacterLookup', bool(lookup),
+                    '%s %s' % (hex(rel32(img, lookup + 0x10)), hex(rel32(img, lookup + 0x1f))) if lookup else '-'))
+
     ren = img.vtable('.?AVCSetOrderGroupNameCommand@@')
     ok = bool(ren) and img.match_at(ren[1][10], codes['kCodeSetArmyName']) and rel32(img, ren[1][10] + 0x1c) == resolve
     disp = i32(img, ren[1][10] + 0x3c) if ok else -1

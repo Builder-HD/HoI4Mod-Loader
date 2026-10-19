@@ -268,7 +268,12 @@ bool HaveArmies();
 bool HaveCountryDivisions();
 bool CountryDivisionList(int tag, std::vector<void*>* out);
 int UnitOwnerTag(const void* unit);
-// The character with this id token (recruit_character's lookup), or null.
+// The character with this id token among the country's own characters (has_character's lookup),
+// or null. Works in new games and after loading a save.
+void* CountryCharacterByToken(int tag, int token);
+// The character with this id token from recruit_character's table, or null. Only filled for new
+// games (in the 1.19.3 test it found nothing after loading a save). Used to tell why a character
+// is not available.
 void* CharacterByToken(int token);
 int CharacterCountry(const void* character);   // tag of the country that has recruited it, 0 if none
 void* ArmyLeaderRole(const void* character);   // its army leader role (CUnitLeader), or null

@@ -27,6 +27,8 @@ using FindCharacter_t = void*(__fastcall*)(void* characters, uint32_t token);
 using RoleOf_t = void*(__fastcall*)(const void* character);
 using LeaderVirtual_t = uint64_t(__fastcall*)(void* leader);
 using Assign_t = void*(__fastcall*)(EngineString* dst, const char* p, size_t n);
+using CountryCharacters_t = void*(__fastcall*)(void* country);
+using FindInCountry_t = void*(__fastcall*)(void* characters, uint32_t token, bool flag);
 
 Resolve_t g_resolve = nullptr;
 CreateArmy_t g_createArmy = nullptr;
@@ -35,6 +37,8 @@ CanChange_t g_canChange = nullptr;
 FindCharacter_t g_findCharacter = nullptr;
 RoleOf_t g_roleOf = nullptr;
 Assign_t g_assign = nullptr;
+CountryCharacters_t g_countryCharacters = nullptr;
+FindInCountry_t g_findInCountry = nullptr;
 void** g_gameStateSlot = nullptr;
 const uint64_t* g_nullHandle = nullptr;
 uint32_t g_manager = 0;         // country -> army manager array (its first element)
@@ -134,6 +138,19 @@ bool ResolveAll() {
     g_findCharacter = (FindCharacter_t)SigFollowRel32(look + kCodeCharacterFindCall);
     g_characterOwner = Rd<uint8_t>(getter, 3);
 
+    // A country's own characters by token, as has_character finds them (works after loading a
+    // save, unlike recruit_character's table): has_character's target resolver calls a function
+    // holding the lookup.
+    uint8_t* has = Slot(".?AVCHasCharacterTrigger@@", 22);
+    if (!has || !SigMatchAt(has, kCodeHasCharacterEval)) return Fail("has_character has an unexpected shape");
+    uint8_t* resolver = SigFollowRel32(has + kCodeHasCharacterResolveCall);
+    uint8_t* lookup = nullptr;
+    for (size_t i = 0; i + 5 <= 0xa0 && !lookup; ++i)
+        if (resolver[i] == 0xE8) lookup = SigFindIn(SigFollowRel32(resolver + i), 0x100, kCodeCountryCharacterLookup);
+    if (!lookup) return Fail("has_character's country character lookup not found");
+    g_countryCharacters = (CountryCharacters_t)SigFollowRel32(lookup + kCodeCountryCharactersCall);
+    g_findInCountry = (FindInCountry_t)SigFollowRel32(lookup + kCodeCountryCharacterFindCall);
+
     // Army names, from the rename command (which resolves with the same resolver).
     uint8_t* rename = Slot(".?AVCSetOrderGroupNameCommand@@", 10);
     if (!rename || !SigMatchAt(rename, kCodeSetArmyName) || (Resolve_t)SigFollowRel32(rename + kCodeSetArmyNameResolveCall) != g_resolve)
@@ -159,23 +176,29 @@ void ResolveArmies() {
         g_createArmy = nullptr;
         return;
     }
-    Log("create_army: create %s, set leader %s, can change %s, find character %s; manager +0x%x, characters +0x%x, owner "
+    Log("create_army: create %s, set leader %s, can change %s, find character %s, in country %s; manager +0x%x, characters +0x%x, owner "
         "+0x%x, role type +0x%x, led group +0x%x, army group flag +0x%x, leader name +0x%x, army leader +0x%x, army name "
         "+0x%x, captured slot +0x%x, refresh slot +0x%x",
         SigDescribe((void*)g_createArmy).c_str(), SigDescribe((void*)g_setLeader).c_str(), SigDescribe((void*)g_canChange).c_str(),
-        SigDescribe((void*)g_findCharacter).c_str(), g_manager, g_characters, g_characterOwner, g_roleType, g_ledGroup,
+        SigDescribe((void*)g_findCharacter).c_str(), SigDescribe((void*)g_findInCountry).c_str(), g_manager, g_characters, g_characterOwner, g_roleType, g_ledGroup,
         g_armyGroupFlag, g_leaderName, g_armyLeader, g_armyName, g_capturedSlot, g_refreshSlot);
 }
 
 bool HaveArmies() {
     return g_createArmy && g_setLeader && g_canChange && g_resolve && g_findCharacter && g_roleOf && g_assign && g_nullHandle &&
-           HaveCountryDivisions();
+           g_countryCharacters && g_findInCountry && HaveCountryDivisions();
 }
 
 void* CharacterByToken(int token) {
     void* gs = g_gameStateSlot ? *g_gameStateSlot : nullptr;
     void* characters = gs ? Rd<void*>(gs, g_characters) : nullptr;
     return characters && token > 0 ? g_findCharacter(characters, (uint32_t)token) : nullptr;
+}
+
+void* CountryCharacterByToken(int tag, int token) {
+    void* country = token > 0 ? CountryByTag(tag) : nullptr;
+    void* characters = country ? g_countryCharacters(country) : nullptr;
+    return characters ? g_findInCountry(characters, (uint32_t)token, true) : nullptr;
 }
 
 int CharacterCountry(const void* character) { return character ? Rd<int>(character, g_characterOwner) : 0; }

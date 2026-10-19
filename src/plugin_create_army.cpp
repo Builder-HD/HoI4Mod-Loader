@@ -47,7 +47,7 @@ enum class Refusal { None, UnknownCharacter, NotRecruited, OtherCountry, NotArmy
 
 const LocText kReasons[] = {
     {"HOI4_LOADER_CREATE_ARMY_OK", "available"},
-    {"HOI4_LOADER_CREATE_ARMY_UNKNOWN", "there is no such character"},
+    {"HOI4_LOADER_CREATE_ARMY_UNKNOWN", "not a character of this country"},
     {"HOI4_LOADER_CREATE_ARMY_NOT_RECRUITED", "not recruited"},
     {"HOI4_LOADER_CREATE_ARMY_OTHER_COUNTRY", "serves another country"},
     {"HOI4_LOADER_CREATE_ARMY_NOT_ARMY_LEADER", "not a general or field marshal"},
@@ -66,17 +66,23 @@ struct Candidate {
 
 // Who `leader` is and whether that general may lead a new army of `tag` now. Reads only.
 Refusal Check(const Args& a, int tag, Candidate* c) {
-    void* character = Engine::CharacterByToken(a.i(0));
     c->name = native_localize_key(a.key(0));
-    if (!character) return Refusal::UnknownCharacter;
-    void* leader = Engine::ArmyLeaderRole(character);
+    // The country's own characters first (has_character's lookup, valid after loading a save).
+    // Otherwise recruit_character's table, which only tells why: not recruited, or another country.
+    void* character = Engine::CountryCharacterByToken(tag, a.i(0));
+    void* other = character ? nullptr : Engine::CharacterByToken(a.i(0));
+    void* leader = Engine::ArmyLeaderRole(character ? character : other);
     if (leader) {
         std::string n = Engine::LeaderName(leader);
         if (!n.empty()) c->name = native_localize_key(n.c_str());
     }
-    int owner = Engine::CharacterCountry(character);
-    if (owner <= 0) return Refusal::NotRecruited;
-    if (owner != tag) return Refusal::OtherCountry;
+    if (!character) {
+        if (!other) return Refusal::UnknownCharacter;
+        int owner = Engine::CharacterCountry(other);
+        if (owner <= 0) return Refusal::NotRecruited;
+        if (owner != tag) return Refusal::OtherCountry;
+        character = other;
+    }
     if (!leader || !Engine::ReadLeader(leader, &c->state) || c->state.roleType < 0 || c->state.roleType >= 2)
         return Refusal::NotArmyLeader;
     c->leader = leader;
