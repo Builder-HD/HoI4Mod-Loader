@@ -142,6 +142,117 @@ def check(path, codes):
     results.append(('kCodeArmyDailyLoop (army.daily lea + 0x14)', ok, hex(refs[0]) if refs else '-'))
     results += check_region_scope(img, codes, text_va, text)
     results.append(check_trigger_registry(img, codes, text_va, text))
+    results += check_create_army(img, codes, text_va, text)
+    return results
+
+
+def find_in(img, va, length, pattern):
+    """First match of pattern in [va, va+length), as engine SigFindIn; None if none."""
+    off = img.va2off(va)
+    m = cs.compile_pattern(pattern).search(img.d, off, off + length)
+    return va + (m.start() - off) if m else None
+
+
+def i32(img, va):
+    return struct.unpack_from('<i', img.d, img.va2off(va))[0]
+
+
+def check_create_army(img, codes, text_va, text):
+    """create_army (NOTES.md G1): the same pieces engine_army.cpp resolves, with its cross-checks."""
+    results = []
+    sigs, _ = cs.load_signatures(pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h')
+    sigs = dict(sigs)
+    mgr = [m.start() for m in cs.compile_pattern(sigs['kSigBorderWarManager']).finditer(text)]
+    army = [m.start() for m in cs.compile_pattern(sigs['kSigBorderWarArmy']).finditer(text)]
+    if len(mgr) != 1 or len(army) != 1:
+        return [('create_army border war signatures', False, '%d/%d matches' % (len(mgr), len(army)))]
+    mgr_disp = i32(img, text_va + mgr[0] + 3)
+    army_va = text_va + army[0]
+    create = rel32(img, army_va + 0x1b)
+    sl = find_in(img, army_va + 0x1b, 0x40, codes['kCodeBorderWarSetLeader'])
+    set_leader = rel32(img, sl + 9) if sl else 0
+    refresh = i32(img, sl + 0x16) if sl else -1
+    results.append(('kCodeBorderWarSetLeader (manager +0x%x, refresh slot +0x%x)' % (mgr_disp, refresh), bool(sl), hex(set_leader)))
+
+    order = img.vtable('.?AVCOrderGroupCommand@@')
+    ok = bool(order) and img.match_at(order[1][10], codes['kCodeOrderGroupExecute'])
+    resolve = rel32(img, order[1][10] + 0x31) if ok else 0
+    oc = find_in(img, order[1][10], 0x100, codes['kCodeOrderGroupCreate']) if ok else None
+    ok = ok and bool(oc) and rel32(img, oc + 0x11) == create
+    results.append(('kCodeOrderGroupExecute / Create (same create_army)', ok, hex(create)))
+
+    setcmd = img.vtable('.?AVCSetArmyLeaderCommand@@')
+    ok = bool(setcmd) and img.match_at(setcmd[1][9], codes['kCodeSetLeaderCheck'])
+    ok = ok and rel32(img, setcmd[1][9] + 0x2a) == resolve
+    can_change = rel32(img, setcmd[1][9] + 0x6d) if ok else 0
+    ok = ok and calls(img, setcmd[1][10], 0x300, set_leader)
+    results.append(('kCodeSetLeaderCheck (resolver, can change; execute calls set_leader)', ok, hex(can_change)))
+
+    ok = bool(set_leader) and img.match_at(set_leader, codes['kCodeSetLeaderStart'])
+    name = img.d[img.va2off(set_leader + 0x51)] if ok else -1
+    cap = img.d[img.va2off(set_leader + 0x4c)] if ok else -1
+    lead = i32(img, set_leader + 0x76) if ok else -1
+    results.append(('kCodeSetLeaderStart (name +0x%x, army leader +0x%x)' % (name, lead), ok and cap == name + 0x18, hex(set_leader)))
+
+    isarmy = img.vtable('.?AVCIsArmyLeader@@')
+    ok = bool(isarmy) and img.match_at(isarmy[1][22], codes['kCodeIsArmyLeaderEval'])
+    role_fn = rel32(img, isarmy[1][22] + 0x34) if ok else 0
+    role_type = i32(img, isarmy[1][22] + 0x48) if ok else -1
+    results.append(('kCodeIsArmyLeaderEval (role type +0x%x)' % role_type, ok, hex(role_fn)))
+
+    leading = img.vtable('.?AVCIsLeadingArmy@@')
+    ev = leading[1][22] if leading else 0
+    ok = bool(leading) and img.match_at(ev, codes['kCodeIsLeadingArmyEval'])
+    ok = ok and i32(img, ev + 0x18) == role_type and rel32(img, ev + 0x3e) == resolve
+    led = i32(img, ev + 0x27) if ok else -1
+    ag = img.d[img.va2off(ev + 0x61)] if ok else -1
+    results.append(('kCodeIsLeadingArmyEval (led group +0x%x, army group flag +0x%x)' % (led, ag), ok, hex(ev)))
+
+    # can_change_leader's refusal fields (only for create_army's reason text; not fatal there).
+    ok = bool(can_change) and img.match_at(can_change, codes['kCodeCanChangeStart'])
+    dep = find_in(img, can_change + 0x40, 0x100, codes['kCodeCanChangeDeploying']) if ok else None
+    wd = find_in(img, dep + 0x11, 0xc0, codes['kCodeCanChangeWithdrawing']) if dep else None
+    war = i32(img, can_change + 0x2d) if ok else -1
+    d1, d2 = (i32(img, dep + 2), i32(img, dep + 0xb)) if dep else (-1, -1)
+    w = i32(img, wd + 2) if wd else -1
+    ok = bool(wd) and img.d[img.va2off(can_change + 0x1c)] == ag and i32(img, can_change + 0x3b) == lead
+    ok = ok and 0x40 < war < 0x230 and len({d1, d2, w}) == 3 and max(d1, d2, w) < 0x230
+    results.append(('kCodeCanChangeStart / Deploying / Withdrawing (border war +0x%x, deploying +0x%x/+0x%x, '
+                    'withdrawing +0x%x)' % (war, d1, d2, w), ok, hex(can_change)))
+
+    cap_vt = img.vtable('.?AVCIsGeneralCapturedTrigger@@')
+    ok = bool(cap_vt) and img.match_at(cap_vt[1][22], codes['kCodeIsCapturedEval'])
+    slot = i32(img, cap_vt[1][22] + 0x27) if ok else -1
+    results.append(('kCodeIsCapturedEval (captured slot +0x%x)' % slot, ok, hex(cap_vt[1][22]) if cap_vt else '-'))
+
+    rec = img.vtable('.?AVCRecruitCharacterEffect@@')
+    look = find_in(img, rec[1][13], 0x200, codes['kCodeCharacterLookup']) if rec else None
+    chk = find_in(img, rec[1][13], 0x400, codes['kCodeCharacterOwnerCheck']) if rec else None
+    getter = rel32(img, chk + 3) if chk else 0
+    ok = bool(look and chk) and img.match_at(getter, codes['kCodeCharacterOwnerGetter'])
+    mgr_off = i32(img, look + 0xe) if look else -1
+    owner = img.d[img.va2off(getter + 3)] if ok else -1
+    results.append(('kCodeCharacterLookup / OwnerCheck (characters +0x%x, owner +0x%x)' % (mgr_off, owner), ok,
+                    hex(rel32(img, look + 0x12)) if look else '-'))
+
+    # Characters of a country by token (has_character's lookup; works after loading a save).
+    has = img.vtable('.?AVCHasCharacterTrigger@@')
+    ok = bool(has) and img.match_at(has[1][22], codes['kCodeHasCharacterEval'])
+    lookup = None
+    if ok:
+        target = rel32(img, has[1][22] + 0x38)
+        for i in range(0x9b - 5):
+            if img.d[img.va2off(target + i)] == 0xe8:
+                lookup = find_in(img, rel32(img, target + i), 0x100, codes['kCodeCountryCharacterLookup'])
+                if lookup:
+                    break
+    results.append(('kCodeHasCharacterEval / CountryCharacterLookup', bool(lookup),
+                    '%s %s' % (hex(rel32(img, lookup + 0x10)), hex(rel32(img, lookup + 0x1f))) if lookup else '-'))
+
+    ren = img.vtable('.?AVCSetOrderGroupNameCommand@@')
+    ok = bool(ren) and img.match_at(ren[1][10], codes['kCodeSetArmyName']) and rel32(img, ren[1][10] + 0x1c) == resolve
+    disp = i32(img, ren[1][10] + 0x3c) if ok else -1
+    results.append(('kCodeSetArmyName (name +0x%x)' % disp, ok, hex(rel32(img, ren[1][10] + 0x58)) if ok else '-'))
     return results
 
 

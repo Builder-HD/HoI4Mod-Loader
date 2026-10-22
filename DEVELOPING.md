@@ -52,8 +52,10 @@ src/plugin_game_loaded.cpp    game_loaded feature (fires on_game_loaded after a 
 src/plugin_region_control.cpp, plugin_military_counts.cpp, plugin_army_condition.cpp,
 src/plugin_production_data.cpp   data trigger features (numeric triggers)
 src/plugin_region_scope.cpp   region_scope feature (strategic region scope blocks, iterators)
+src/plugin_create_army.cpp    create_army feature (create_unit children -> army under a general)
 src/engine_data.cpp           engine access for the data triggers (read-only game state)
 src/engine_scope.cpp          engine access for scope blocks (vanilla iterator templates, child scopes)
+src/engine_army.cpp           engine access for armies (create army, set leader, characters)
 src/native_script.h, .cpp     native effect/trigger API: schemas, registration, parsing, docs
 src/native_script_engine.cpp  native API engine binding (vtable clones, registries, Scope)
 src/native_scope_engine.cpp   native API engine binding of scope blocks and iterators
@@ -109,17 +111,17 @@ signature_scan = 1   ; write the signature report (below) on a listed build too
 On a hoi4.exe whose hash is not listed, the engine tier stays off and the loader writes a
 **signature report** to `loader.log`. It only reads hoi4.exe's code; nothing is hooked or
 patched.
-- **Signatures and anchors:** `Signature report: N/44 signatures and anchors match exactly
+- **Signatures and anchors:** `Signature report: N/<total> signatures and anchors match exactly
   once`, then one `FAILS` line per signature or anchor that does not, with its match count.
 - **Code shapes:** the resolver runs with faults contained (an exception is logged, never
-  raised), and `Signature report: N/17 code shapes match where the resolver checks them`
+  raised), and `Signature report: N/<total> code shapes match where the resolver checks them`
   follows.
   - `FAILS` means the code was found but looks different.
   - `NOT CHECKED` means the code it belongs to was not found, usually because a signature or
     RTTI class before it failed.
 - **What to send:** the log ends with the list: `loader.log`, `logs\error.log` and the game
   version from the main menu. The `my_build = <sha256>` line above it identifies the exe.
-- **All matching** (44/44 and 17/17) is necessary for listing a build, not sufficient. Offsets
+- **All matching** (N equal to the total in both lines) is necessary for listing a build, not sufficient. Offsets
   read out of the code can still differ, so a build is listed only after the in-game checks.
 - `[diagnostics] signature_scan = 1` writes the same report on a listed build, for comparison.
 
@@ -163,8 +165,10 @@ bool MyFeatureInit() {
   - `Form::Block` (`name = { key = value ... }`) takes named parameters.
   - Types: `Int`, `Bool` (`yes`/`no`), `Key` (one word, up to 255 characters), `Country` (a tag
     or THIS/ROOT/FROM/PREV, resolved per use), `Choice` (one of `ParamSpec::choices`, e.g.
-    `"any|own|enemy"`; `Args::i` is the index) and `Token` (a key interned at parse time;
-    `Args::i` is the engine token, for lookups without allocation).
+    `"any|own|enemy"`; `Args::i` is the index), `Token` (a key interned at parse time;
+    `Args::i` is the engine token, for lookups without allocation) and `Text` (free text, quoted
+    in script if it has spaces, up to 255 bytes, no braces or control characters; e.g. army
+    names).
   - `ParamSpec::fromScope` (`StrategicRegion`, `State`, `Country`, `RootCountry`): the parameter
     may be left out and then comes from the scope. Such a parameter is not `required`. Missing
     in the scope: effects do nothing, triggers are false (see MODDING.md, "Parameters from scope").
@@ -188,6 +192,18 @@ bool MyFeatureInit() {
   the scope a `target` callback picks, e.g. `strategic_region`) and `register_native_iterator`
   (any / every / random over every object of a scope type, cloned from the game's state
   iterators). Only strategic region scopes are supported; see `src/plugin_region_scope.cpp`.
+- **Effect blocks:** `register_native_effect_block` declares an effect whose children run in the
+  current scope at the moment its execute callback calls `children.run()`, so a feature can act
+  before and after them (`create_army` compares the country's divisions around the
+  `create_unit` children; see `src/plugin_create_army.cpp`).
+  - Only the effects listed in `children` may appear inside. Each must exist in the game, or the
+    block is refused at engine registration. Any other key is the engine's "Unexpected token" and
+    makes that use do nothing.
+  - `run()` returns false if the children crashed (contained, logged once).
+  - Tooltip: the `tooltip` callback's line, then the children's lines one level deeper. The
+    callback can call `out.hideChildren()` to leave them out when the block will not run them
+    (`create_army` does when the general is refused). An invalid use (parse error) shows nothing,
+    its children included, since nothing runs.
 - **When:** register from the feature's init only. Engine registration happens at lexer-ready,
   before any script is parsed; later calls are refused. The feature needs the engine tier and
   the `lifecycle` feature.
@@ -281,6 +297,8 @@ gives the number of checks. It covers:
 - the exact docs file content;
 - scope defaults, country, choice and token parameters, and numeric triggers;
 - scope blocks and iterators;
+- effect blocks (allowed children, before/after execution, crashes);
+- free text parameters;
 - translatable tooltip texts.
 
 Next come repository checks:

@@ -359,6 +359,7 @@ bool SafeBind(Command* c, std::string* reason, DWORD* code, void** where) {
         if (c->numeric) return BindNumeric(*c, reason);
         if (c->scopeBlock) return BindScopeBlock(*c, reason);
         if (c->iterator) return BindIterator(*c, reason);
+        if (c->effectBlock) return BindEffectBlock(*c, reason);
         return c->kind == CommandKind::Effect ? BindEffect(*c) : BindTrigger(*c);
     } __except (BindFilter(GetExceptionInformation(), code, where)) {
         return false;

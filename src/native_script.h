@@ -19,8 +19,10 @@
 // Key: one identifier-like word (loc keys, names). Country: a tag (GER) or THIS/ROOT/FROM/PREV,
 // resolved per evaluation. Choice: one of ParamSpec::choices ("any|own|enemy"), Args::i = index.
 // Token: a key interned as an engine token at parse time (Args::i = token, Args::key = text), for
-// names the evaluate callback looks up without allocating (equipment names).
-enum class ParamType { Int, Bool, Key, Country, Choice, Token };
+// names the evaluate callback looks up without allocating (equipment names). Text: free text,
+// quoted in script if it has spaces (army names); 1-255 bytes, no braces or control characters;
+// Args::key = the text.
+enum class ParamType { Int, Bool, Key, Country, Choice, Token, Text };
 enum class CommandKind { Effect, Trigger };
 enum class Form { Value, Block };          // name = <value>   |   name = { key = value ... }
 
@@ -124,10 +126,14 @@ public:
     // iterator's header), so the line shows no current value.
     void markScopeMissing() { scopeMissing_ = true; }
     bool scopeMissing() const { return scopeMissing_; }
+    // Effect blocks: leave out the children's lines, e.g. when the block will not run them.
+    void hideChildren() { hideChildren_ = true; }
+    bool childrenHidden() const { return hideChildren_; }
 
 private:
     std::string text_;
     bool scopeMissing_ = false;
+    bool hideChildren_ = false;
 };
 
 // A tooltip text a mod may translate: its localisation key and the English text used when no
@@ -245,6 +251,38 @@ struct NativeIterator {
 bool register_native_scope_block(const NativeScopeBlock& def, const char* feature);
 bool register_native_iterator(const NativeIterator& def, const char* feature);
 
+// --- Effect blocks ----------------------------------------------------------------------------
+// `name = { <params> <children> }`: an effect whose children, only the effects named in
+// `children`, run in the current scope when the execute callback calls children.run(), so the
+// plugin can act before and after them. Any other key is a parse error (engine error with file
+// and line) and makes that use do nothing. Tooltip: the callback's line, then the children's
+// lines one level deeper, unless the callback calls TooltipText::hideChildren().
+class EffectChildren {
+public:
+    using RunFn = bool (*)(void* self, const void* scope);
+    EffectChildren(RunFn fn, void* self, const void* scope) : fn_(fn), self_(self), scope_(scope) {}
+    // Runs the children in the current scope. False if they crashed (logged once).
+    bool run() const { return fn_ && fn_(self_, scope_); }
+
+private:
+    RunFn fn_;
+    void* self_;
+    const void* scope_;
+};
+
+struct NativeEffectBlock {
+    const char* name;
+    const char* help;
+    std::vector<ParamSpec> params;      // the block's own keys; may be empty
+    uint32_t scopes;                    // ScopeMask bits, 0 = any
+    std::vector<const char*> children;  // the effects allowed inside (must exist in the game)
+    void (*execute)(const Args&, const Scope&, const EffectChildren&);
+    void (*tooltip)(const Args&, const Scope&, TooltipText&);  // optional: the block's own line
+    std::vector<LocText> texts = {};
+};
+
+bool register_native_effect_block(const NativeEffectBlock& def, const char* feature);
+
 // True once engine registration ran and every native command of `feature` was registered
 // (true for features without native commands). Drives hoi4_loader_feature_<name>.
 bool NativeFeatureComplete(const char* feature);
@@ -289,6 +327,11 @@ struct Command {
     IteratorKind iteratorKind = IteratorKind::Any;
     std::string headerKey, headerText;
     std::string keysDoc;  // iterators: the block keys the engine's template reads (set when bound)
+    // Effect blocks.
+    bool effectBlock = false;
+    std::vector<std::string> childNames;
+    std::vector<int> childTokens;  // engine tokens of childNames (set at engine registration)
+    void (*blockExecute)(const Args&, const Scope&, const EffectChildren&) = nullptr;
     std::vector<LocText> texts;  // translatable tooltip texts (docs)
 
     CommandStatus status = CommandStatus::Pending;
@@ -350,10 +393,15 @@ bool NativeValidate(ParsedCommand& pc);
 
 // Runtime helpers (binding): run callbacks under SEH; log once per command on failure.
 void NativeExecute(const ParsedCommand* pc, const void* engineScope);
+// Effect blocks: the execute callback with the block's children.
+void NativeExecuteBlock(const ParsedCommand* pc, const void* engineScope, const EffectChildren& children);
+// Effect blocks: is `token` one of the effects allowed inside?
+bool NativeIsChild(const Command& cmd, int token);
 bool NativeEvaluate(const ParsedCommand* pc, const void* engineScope);
 // Tooltip text (UTF-8, no trailing newline). Triggers without a tooltip callback get the
-// generic line; effects without one get "".
-std::string NativeTooltip(const ParsedCommand* pc, const void* engineScope, bool negated);
+// generic line; effects without one get "". `childrenHidden` (optional): an effect block's
+// callback asked to leave out its children's lines.
+std::string NativeTooltip(const ParsedCommand* pc, const void* engineScope, bool negated, bool* childrenHidden = nullptr);
 
 // Scope blocks: the target for this use. False if a scope default is missing, the callback finds
 // none or crashed (logged once).

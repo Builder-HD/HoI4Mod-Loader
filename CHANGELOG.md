@@ -23,6 +23,24 @@ A–F; NOTES.md has the findings and test results behind each.
     `tools/make_release.py` also writes the GitHub release notes.
   - Help texts the DLL writes into `loader_script_docs.md` point to MODDING.md instead of the
     README.
+- **New feature `create_army`** (engine tier; guard `hoi4_loader_feature_create_army`; script version
+  unchanged, as for every new feature).
+  - `create_army = { leader = <character> name = "..." reassign = yes country = <tag> create_unit = { ... } ... }`,
+    in a state scope like vanilla `create_unit`, spawns divisions there with `create_unit` and
+    makes them a new army of `country` (default ROOT) under that general.
+  - If the general is not available, nothing spawns: the tooltip shows only a red line (no
+    `create_unit` lines) and `loader.log` says why. A general who already leads an army is
+    refused unless `reassign = yes`.
+  - With `reassign = yes`, a general whose army can't change its general now is refused as the
+    game's own button refuses. The reason has its own key per case:
+    `HOI4_LOADER_CREATE_ARMY_DEPLOYING`, `_WITHDRAWING` and `_BORDER_WAR`.
+    `HOI4_LOADER_CREATE_ARMY_CANNOT_LEAVE` is now only the fallback ("their army ... cannot change
+    its general now"); it used to cover deploying and withdrawing together.
+  - No command power is charged. It works on 1.19.3 vanilla and checksum-patched, and its
+    signatures also match 1.19.2.
+- **Native API:** effect blocks (`register_native_effect_block`), whose children run inside the
+  plugin's execute (their tooltip callback can hide the children's lines), and a `Text`
+  parameter type for free text such as army names.
 
 ## 0.5.0-beta (2026-10-18), script version 3
 

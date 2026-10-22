@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include <string>
+#include <vector>
 
 // MSVC std::string as laid out inside hoi4.exe (release STL): 16-byte inline buffer or heap
 // pointer, then size and capacity. The loader only reads engine strings and only hands out
@@ -44,6 +45,7 @@ bool HaveRegistry();   // effect registry + set_province_name entry layout
 
 // --- Game state ------------------------------------------------------------------------------
 void* GameState();  // null before a game exists
+void** GameStateSlot();  // where the engine keeps the gamestate pointer (cross-checks), or null
 bool IsLoadedFromSave(void* gameState);
 
 // --- Tokens (only after the lexer is synchronized, see Lifecycle) ----------------------------
@@ -257,6 +259,48 @@ const size_t kIterLimit = 0x78;       // every / random: the embedded `limit` tr
 const size_t kIterCandidates = 0xd0;  // every / random: CPdxArray { T** data, int cap, int count, allocator* }
 // engine.cpp: the CEventScope destructor (player_scope's), null if unresolved.
 void* EventScopeDestructor();
+
+// --- Armies (create_army; engine_army.cpp, NOTES.md G1) ---------------------------------------
+// Game state writes: main thread only (effect execution), never from triggers or tooltips.
+void ResolveArmies();
+bool HaveArmies();
+// The country's divisions in the engine's list order (engine_data.cpp, the army.daily list).
+bool HaveCountryDivisions();
+bool CountryDivisionList(int tag, std::vector<void*>* out);
+int UnitOwnerTag(const void* unit);
+// The character with this id token among the country's own characters (has_character's lookup),
+// or null. Works in new games and after loading a save.
+void* CountryCharacterByToken(int tag, int token);
+// The character with this id token from recruit_character's table, or null. Only filled for new
+// games (in the 1.19.3 test it found nothing after loading a save). Used to tell why a character
+// is not available.
+void* CharacterByToken(int token);
+int CharacterCountry(const void* character);   // tag of the country that has recruited it, 0 if none
+void* ArmyLeaderRole(const void* character);   // its army leader role (CUnitLeader), or null
+// Which of the game's can-change-leader refusals applies (read only to choose a message; the
+// refusal itself is the engine's check). Unknown: the fields were not found, or none is set.
+enum class LeaveBlock { None, Unknown, Deploying, Withdrawing, BorderWar };
+struct LeaderState {
+    int roleType = -1;          // 0 field marshal, 1 corps commander (general); >= 2 is not an army leader
+    bool captured = false;
+    void* leads = nullptr;      // the army or army group it leads, or null
+    bool leadsArmyGroup = false;
+    bool canLeave = true;       // its army may change leader now (the game's own check)
+    LeaveBlock whyNot = LeaveBlock::None;  // when !canLeave: why
+};
+bool ReadLeader(void* leader, LeaderState* out);  // false if the leader is unreadable (logged)
+std::string LeaderName(const void* leader);       // the leader's name text, "" if unreadable
+// A new army of the country from these of its divisions, as the UI's "create army" (divisions
+// leave their old army; old armies left empty are deleted). Null on failure (logged).
+void* CreateArmy(int tag, const std::vector<void*>& divisions);
+// Makes `leader` the army's general, as start_border_war does: links both ways (his previous army
+// keeps its divisions without a general), then the leader's refresh. True if the army then has him.
+bool SetArmyLeader(void* army, void* leader);
+void SetArmyName(void* army, const char* name);
+std::string ArmyName(const void* army);
+// The layout create_army relies on, checked with a country's own data: its army manager carries
+// its tag, and its divisions' handles resolve back to them. False and *why on a mismatch.
+bool ArmySelfCheck(int tag, int* divisions, const char** why);
 
 // Fires the on_action like the engine fires on_startup: synced-RNG seed, events, random events
 // and effect. countryTag > 0: ROOT = that country; 0: no scope. name: at most 15 characters.

@@ -232,6 +232,17 @@ SIG(kSigScopeSetRegion, "48 89 5C 24 08 57 48 83 EC 20 48 8B FA 48 8B D9 45 84 C
 SIG(kSigRegionSeaShare, "48 83 BB ?? ?? ?? ?? 00 7F ?? 49 8D 4F 08 41 B8 23 00 00 00 48 8D 15")
 static const size_t kSigRegionSeaShareDisp = 3;
 
+// --- Armies (create_army, NOTES.md G1) ----------------------------------------------------
+// start_border_war: the country's army manager is **(country+disp32) (its own handle at +8);
+// disp32 at +3. Then mov rax,[rip+x] loads the null handle (rel32 at +0xd, insn at +0xa).
+// (0x140337197)
+SIG(kSigBorderWarManager, "48 8B 80 ?? ?? ?? ?? 48 8B 08 48 8B 05 ?? ?? ?? ?? 48 89 45 ?? 48 85 C9 0F 84 ?? ?? ?? ?? 48 8B 41 08")
+static const size_t kSigBorderWarManagerDisp = 3, kSigBorderWarNullHandle = 0xa;
+// start_border_war: army = create_army(&null theatre, &manager handle, &unit handles, false), call
+// at +0x1b. (0x140337237)
+SIG(kSigBorderWarArmy, "48 8B 05 ?? ?? ?? ?? 48 89 45 ?? 45 33 C9 4C 8D 44 24 ?? 48 8D 55 ?? 48 8D 4D ?? E8 ?? ?? ?? ?? 48 8B D8")
+static const size_t kSigBorderWarCreateCall = 0x1b;
+
 // --- Code shapes at RTTI-found addresses (numeric triggers, NOTES.md E2) -------------------
 // CODE(name, "..."): checked with SigMatchAt at an address reached through an RTTI vtable, not
 // scanned (so not required to be unique). tools/check_code_shapes.py checks them on exe copies.
@@ -302,6 +313,75 @@ static const size_t kCodeDtorDeleteCall = 0x21;
 // map itself (effect Register reads head = *registry).
 CODE(kCodeTriggerRegisterMap, "48 8D 79 ?? 48 8B 37 48 8B 46 08")
 static const size_t kCodeTriggerRegisterMapAt = 0x1f, kCodeTriggerRegisterMapDisp = 3;
+
+// --- Armies (create_army, NOTES.md G1) ----------------------------------------------------
+// Right after kSigBorderWarArmy (SigFindIn; 1.19.3 checks the army for null first, 1.19.2 does
+// not): set_leader(army, leader, true) (call at +9), then the leader's virtual refresh
+// (call [rdx+disp32], disp at +0x16).
+CODE(kCodeBorderWarSetLeader, "41 B0 01 48 8B D7 48 8B C8 E8 ?? ?? ?? ?? 48 8B 17 48 8B CF FF 92 ?? ?? ?? ??")
+static const size_t kCodeBorderWarSetLeaderCall = 9, kCodeBorderWarLeaderSlotDisp = 0x16;
+// COrderGroupCommand slot 10 (the UI's "create army"): resolves the manager handle (call at +0x31
+// = the reference-handle resolver) ...
+CODE(kCodeOrderGroupExecute, "48 89 5C 24 10 57 48 83 EC 40 83 79 ?? 00 48 8B D9 7F ?? 80 79 ?? 00 75 ?? 48 83 C1 ?? 48 89 74 24 50 33 FF 39 39 75 ?? 39 79 04 75 ?? 8B F7 EB ?? E8 ?? ?? ?? ??")
+static const size_t kCodeOrderGroupResolveCall = 0x31;
+// ... and further in (SigFindIn) calls create_army (call at +0x11), the same as start_border_war's.
+CODE(kCodeOrderGroupCreate, "44 0F B6 4B ?? 4C 8D 41 ?? 48 8D 51 ?? 48 83 C1 ?? E8 ?? ?? ?? ??")
+static const size_t kCodeOrderGroupCreateCall = 0x11;
+// CSetArmyLeaderCommand slot 9 (can execute): resolves the army (call at +0x2a), then
+// can_change_leader(army, nullptr) (call at +0x6d).
+CODE(kCodeSetLeaderCheck, "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 50 48 8B D9 48 83 C1 ?? 83 39 00 75 ?? 83 79 04 00 0F 84 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B F8 48 85 C0 0F 84 ?? ?? ?? ?? 33 ED 39 6B ?? 75 ?? 39 6B ?? 75 ?? 8B F5 EB ?? 48 8D 4B ?? E8 ?? ?? ?? ?? 48 8B F0 48 8B CF E8 ?? ?? ?? ?? 48 3B C6 0F 84 ?? ?? ?? ?? 33 D2 48 8B CF E8 ?? ?? ?? ??")
+static const size_t kCodeSetLeaderCheckResolveCall = 0x2a, kCodeSetLeaderCheckCanChangeCall = 0x6d;
+// set_leader(army, leader, link) itself: its debug log reads the leader's name (std::string,
+// capacity disp8 at +0x4c, text disp8 at +0x51), then the army's current leader (disp32 at +0x76).
+CODE(kCodeSetLeaderStart, "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 30 80 3D ?? ?? ?? ?? 00 41 0F B6 E8 48 8B FA 48 8B D9 74 ?? 41 B9 05 00 00 00 48 8D 15 ?? ?? ?? ?? 41 B8 ?? ?? ?? ?? 48 8D 4C 24 20 E8 ?? ?? ?? ?? 48 85 FF 74 ?? 48 83 7F ?? 0F 4C 8D 4F ?? 76 ?? 4D 8B 09 EB ?? 4C 8D 0D ?? ?? ?? ?? 44 8B 43 ?? 48 8D 15 ?? ?? ?? ?? 48 8B C8 E8 ?? ?? ?? ?? 48 8B B3 ?? ?? ?? ??")
+static const size_t kCodeSetLeaderNameCapDisp = 0x4c, kCodeSetLeaderNameDisp = 0x51, kCodeSetLeaderArmyLeaderDisp = 0x76;
+// can_change_leader(army, reasonOut) itself (from kCodeSetLeaderCheck), only to tell which of its
+// refusals applies: army groups always may (flag disp8 at +0x1c); "in a border war" when a field
+// (disp32 at +0x2d) is set and the army has a leader (disp32 at +0x3b) ...
+CODE(kCodeCanChangeStart, "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 48 83 EC 40 48 8B FA 48 8B D9 80 79 ?? 00 74 ?? B0 01 E9 ?? ?? ?? ?? 40 B5 01 48 83 B9 ?? ?? ?? ?? 00 0F 84 ?? ?? ?? ?? 48 83 B9 ?? ?? ?? ?? 00")
+static const size_t kCodeCanChangeGroupDisp = 0x1c, kCodeCanChangeWarDisp = 0x2d, kCodeCanChangeLeaderDisp = 0x3b;
+// ... then (SigFindIn) "being deployed" when either of two flags is set (disp32 at +2 and +0xb) ...
+CODE(kCodeCanChangeDeploying, "80 BB ?? ?? ?? ?? 00 75 ?? 80 BB ?? ?? ?? ?? 00 75")
+static const size_t kCodeCanChangeDeployDisp = 2, kCodeCanChangeDeploy2Disp = 0xb;
+// ... and after it "being withdrawn" (flag disp32 at +2).
+CODE(kCodeCanChangeWithdrawing, "80 BB ?? ?? ?? ?? 00 0F 84")
+static const size_t kCodeCanChangeWithdrawDisp = 2;
+// CIsArmyLeader slot 22 (is_army_leader): character -> army leader role (call at +0x34), role
+// type disp32 at +0x48 (< 2: field marshal 0, corps commander 1).
+CODE(kCodeIsArmyLeaderEval, "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B F1 48 8B FA 48 8B CA E8 ?? ?? ?? ?? 48 8B D8 48 85 C0 74 ?? 48 8B CF E8 ?? ?? ?? ?? 84 C0 75 ?? 48 8B CB E8 ?? ?? ?? ?? 48 85 C0 74 ?? 48 8B CB E8 ?? ?? ?? ?? 83 B8 ?? ?? ?? ?? 01")
+static const size_t kCodeIsArmyLeaderRoleCall = 0x34, kCodeIsArmyLeaderTypeDisp = 0x48;
+// CIsLeadingArmy slot 22 (is_leading_army): role type disp32 at +0x18, the led group's handle
+// (lea, disp32 at +0x27), the resolver (call at +0x3e), the group's army-group flag (disp8 at +0x61).
+CODE(kCodeIsLeadingArmyEval, "40 56 48 83 EC 20 48 8B F1 48 8B CA E8 ?? ?? ?? ?? 48 85 C0 74 ?? 83 B8 ?? ?? ?? ?? 01 77 ?? 48 89 5C 24 30 48 8D 98 ?? ?? ?? ?? 48 89 7C 24 38 33 FF 39 3B 75 ?? 39 7B 04 74 ?? 48 8B CB E8 ?? ?? ?? ?? 48 85 C0 74 ?? 39 3B 75 ?? 39 7B 04 75 ?? 48 8B C7 EB ?? 48 8B CB E8 ?? ?? ?? ?? 40 38 78 ??")
+static const size_t kCodeLeadingTypeDisp = 0x18, kCodeLeadingGroupDisp = 0x27, kCodeLeadingResolveCall = 0x3e,
+                    kCodeLeadingArmyGroupDisp = 0x61;
+// CIsGeneralCapturedTrigger slot 22 (is_general_captured): the leader's "captured" virtual
+// (call [rdx+disp32], disp at +0x27).
+CODE(kCodeIsCapturedEval, "40 53 48 83 EC 20 48 8B D9 48 8B CA E8 ?? ?? ?? ?? 48 85 C0 74 ?? 83 B8 ?? ?? ?? ?? 01 77 ?? 48 8B 10 48 8B C8 FF 92 ?? ?? ?? ??")
+static const size_t kCodeIsCapturedSlotDisp = 0x27;
+// CRecruitCharacterEffect slot 13 (recruit_character), found inside it (SigFindIn): mov rax,
+// [rip+gamestate]; mov edx,[r?+0x58] (the token); mov rcx,[rax+<characters>]; call find_character.
+// gamestate rel32 at +3 (insn 7), characters disp32 at +0xe, call at +0x12.
+CODE(kCodeCharacterLookup, "48 8B 05 ?? ?? ?? ?? 41 8B ?? 58 48 8B 88 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B D8 48 85 C0 0F 85 ?? ?? ?? ??")
+static const size_t kCodeCharacterGameStateRel = 3, kCodeCharacterManagerDisp = 0xe, kCodeCharacterFindCall = 0x12;
+// ... then the owner check: call owner_tag_address(character) (+3); cmp dword [rax],0; jle.
+CODE(kCodeCharacterOwnerCheck, "48 8B CB E8 ?? ?? ?? ?? 48 8B F0 83 38 00 0F 8E")
+static const size_t kCodeCharacterOwnerCall = 3;
+// owner_tag_address: lea rax,[rcx+disp8]; ret.
+CODE(kCodeCharacterOwnerGetter, "48 8D 41 ?? C3")
+// CSetOrderGroupNameCommand slot 10 (rename army): resolves the army (call at +0x1c); the name
+// std::string at disp32 +0x3c; the engine's std::string assign (jmp at +0x58).
+CODE(kCodeSetArmyName, "40 53 48 83 EC 20 48 8B D9 48 83 C1 ?? 83 39 00 75 ?? 83 79 04 00 75 ?? 33 C0 EB ?? E8 ?? ?? ?? ?? 48 83 7B ?? 00 75 ?? 48 8B C8 48 83 C4 20 5B E9 ?? ?? ?? ?? 48 8D 53 ?? 48 8D 88 ?? ?? ?? ?? 48 3B CA 74 ?? 48 83 7A 18 0F 4C 8B 42 10 76 ?? 48 8B 12 48 83 C4 20 5B E9 ?? ?? ?? ??")
+static const size_t kCodeSetArmyNameResolveCall = 0x1c, kCodeSetArmyNameDisp = 0x3c, kCodeSetArmyNameAssign = 0x58;
+// CHasCharacterTrigger slot 22 (has_character): resolves its character target (call at +0x38).
+// That resolver falls back to a lookup of the character among the scope country's characters,
+// which works after a save is loaded (recruit_character's global table above does not).
+CODE(kCodeHasCharacterEval, "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B D9 48 8B FA 48 8D 4A 08 E8 ?? ?? ?? ?? 48 8B C8 E8 ?? ?? ?? ?? 48 8D 4B ?? 45 33 C0 48 8B D7 48 8B E8 E8 ?? ?? ?? ??")
+static const size_t kCodeHasCharacterResolveCall = 0x38;
+// ... in a function the resolver calls (SigFindIn): intern the name (+0), tag -> country (+8),
+// country -> its characters (+0x10), find(characters, token, true) (+0x1f).
+CODE(kCodeCountryCharacterLookup, "E8 ?? ?? ?? ?? 48 8B CB E8 ?? ?? ?? ?? 48 8B C8 E8 ?? ?? ?? ?? 8B 54 24 ?? 41 B0 01 48 8B C8 E8 ?? ?? ?? ??")
+static const size_t kCodeCountryCharactersCall = 0x10, kCodeCountryCharacterFindCall = 0x1f;
 
 #undef CODE
 #undef SIG

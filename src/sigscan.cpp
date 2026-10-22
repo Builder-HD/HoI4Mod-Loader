@@ -152,6 +152,26 @@ bool SigMatchAt(const uint8_t* p, const char* pattern) {
     return ok;
 }
 
+uint8_t* SigFindIn(const uint8_t* start, size_t len, const char* pattern) {
+    std::vector<uint8_t> bytes;
+    std::vector<bool> mask;
+    uint8_t* text;
+    size_t size;
+    uint8_t* found = nullptr;
+    if (start && ParsePattern(pattern, &bytes, &mask) && GetTextSection(&text, &size) && start >= text && start < text + size) {
+        size_t avail = (size_t)(text + size - start);
+        if (len > avail) len = avail;
+        if (len >= bytes.size()) CountMatches(bytes, mask, (uint8_t*)start, len, &found);
+    }
+    if (g_recordShapes) {
+        auto it = g_shapes.begin();
+        while (it != g_shapes.end() && it->first != pattern) ++it;
+        if (it == g_shapes.end()) g_shapes.emplace_back(pattern, found != nullptr);
+        else it->second = it->second || found != nullptr;
+    }
+    return found;
+}
+
 uint8_t* SigFollowRel32(uint8_t* insn) { return SigRipTarget(insn, 1, 5); }
 
 uint8_t* SigRipTarget(uint8_t* insn, size_t relOffset, size_t insnLen) {

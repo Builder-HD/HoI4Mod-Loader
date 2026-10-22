@@ -2834,3 +2834,378 @@ zip's: `version.dll` sha256 `f5485f06…`, and the ini is identical to the relea
   - **`error.log`:** only the known lobby `remotefile.cpp` lines.
 - **Session 5 (the release ini again):** the log is as in session 1.
 - **Still open:** multiplayer (D3 step 10).
+
+## Part G: create an army under a chosen general (investigation, G1)
+
+Investigation only, nothing implemented. Branch `feature/create-army`. Addresses are from vanilla
+1.19.3 (`hoi4_copy.exe`) and only for orientation; an implementation finds everything through
+RTTI and code shapes and is checked on all three builds first.
+
+### G1.1 What vanilla covers
+
+`documentation/effects_documentation.md` and `triggers_documentation.md`, 1.19.3:
+
+| Need | Vanilla | Notes |
+|---|---|---|
+| Spawn divisions | `create_unit = { division = "<OOB text>" owner = TAG prioritize_location = <prov> allow_spawning_on_enemy_provs = no country_score = { … } count = N id = N divisional_commander_xp = N }` | `division` holds `division_template`, `start_experience_factor`, `start_equipment_factor`, `name`; no army, no general |
+| Spawn from an OOB file | `load_oob = "ENG_1936"` (country) | OOB files have no army or general keys: `officer = { … }` in a division is its divisional commander, `army = { … }` only appears inside `portraits` |
+| Create or recruit generals | `create_corps_commander`, `create_field_marshal`, `recruit_character`, `promote_leader`, `add_corps_commander_role`, `add_field_marshal_role` | |
+| Move armies | `teleport_armies` (state scope) | moves existing units, no regrouping |
+| Iterate divisions / leaders | `every_country_division`, `random_country_division`, `every_state_division`, `every_army_leader`, … | division scope exists (scope bit 0x100, NOTES "Scopes") |
+| Read leader state | `is_corps_commander`, `is_field_marshal`, `is_leading_army`, `is_leading_army_group`, `is_army_leader`, `is_general_captured` | |
+| Army from divisions + general | **none for script.** `start_border_war` does it internally (G1.2) but only for the units already in the border state and a leader it picks by `leader_score` | |
+
+So vanilla cannot put given divisions under a given general. That part is missing.
+
+### G1.2 Engine structures
+
+**Naming.** The UI's "army" is a `COrdersGroup` (source `ordersgroup.cpp`). An army group is the
+same base class with the `IsArmyGroup` flag. A division is a `CArmy` (the `CUnit` handle
+sub-object sits at `+0x10`). The general is a `CUnitLeader` role of a `CCharacter`.
+
+**Reference handles.** Game objects are addressed by 8-byte handles `{type, index}`; the object's
+own handle is at `obj+8`. `FUN_14221f310(&handle)` resolves one (per-type hash tables;
+`DAT_14333d528` is the null handle). New armies take type `0x35` and the next index from the
+global counter `DAT_143087260`.
+
+**Per-country army manager (called X below):**
+- From a country: `X = **(country+0x168)` (as `start_border_war` does). From a division:
+  `X = unit+0x2a0` (`FUN_140bf9660`, as the UI does). From an army: `army+0x40`.
+- `X+0x48` tag; `+0x68` divisions (count `+0x74`); `+0x80` armies; `+0x98` army groups;
+  `+0xb0` all groups; `+0xc8` theatres (count `+0xd4`).
+
+**Army (`COrdersGroup`, 0x230 bytes; army group 0x250):**
+
+| Offset | Meaning |
+|---|---|
+| `+0x39` | is army group |
+| `+0x3c` | country tag |
+| `+0x40` | X |
+| `+0x50` / `+0x5c` | member list (division member sub-objects) / count |
+| `+0x68` | deployed army HQ (non-null while deployed) |
+| `+0x88` | leader (`CUnitLeader*`) |
+| `+0x160` | name string |
+| `+0x180` | theatre (`FUN_140befc20`, asserts it is set) |
+| `+0x199` / `+0x19a` / `+0x19b` | HQ deploying / deploying / withdrawing (leader change refused) |
+| `+0x1b0` | border war object (non-null while the army is in one; G1.3) |
+| `+0x1b8` | parent army group |
+| `+0x230` / `+0x23c` | child armies (army groups only) |
+
+**Division:** army at `unit+0xc0`, member sub-object at `unit+0xb8`, tag at `unit+0x1d8`,
+handle at `unit+0x18`, X at `unit+0x2a0`. The country's division list is `country+0x290`
+(Part E).
+
+**Leader:** role type at `leader+0xe7c` (0 field marshal, 1 corps commander, ≥ 2 navy; "army
+leader" is `< 2`); tag at `leader+0x120`; name at `leader+0x40`; handle of the army or army group
+it leads at `leader+0x1048`; vtable `+0xe8` is "captured" (`is_general_captured`).
+**Character:** `FUN_1406b4eb0(gamestate+0x6a8, token)` finds it by token (`recruit_character`,
+"Unknown character %s"); owner tag at `character+0x68` (< 1 = not recruited); army leader role
+`FUN_140f9f9c0(character)` (`+0xa8`, else handle `+0xc8`). A character scope holds the handle at
+`scope+0x50`; `FUN_140535e00(scope)` gives its army leader role.
+
+**UI commands (lockstep `CCommand`s).** Slot 9 = can execute, slot 10 = execute, slot 11 = type
+id, slot 13 = clone. The game-state work in each execute:
+
+| UI action | Command | Inner function (what the loader would call) |
+|---|---|---|
+| Create army from selected divisions | `COrderGroupCommand` | `FUN_140bebf30(&theatre, &X, &unitHandles, keepEmpty)` → new army; then `FUN_140beab30(parent, army, -1)` if a parent army group was given |
+| Assign general | `CSetArmyLeaderCommand` (id 0x3051) | `FUN_140bf5a20(army, leader, 1)`; before it `FUN_140bebaa0(army, 0)` = can change leader |
+| Create army group | `CArmyGroupCommand` | `FUN_140ef0fc0(X, armies, 0, 0)` |
+| Add army to army group | `CAssignToArmyGroupCommand` | `FUN_140beab30(group, army, index)` (owner check first) |
+| Delete army | `CDeleteOrderGroupCommand` | `FUN_140f009e0(X, army, 1)` |
+
+- **`FUN_140bebf30` (create army)** does all the bookkeeping:
+  - creates the army with `FUN_140ef1180(X, …)`, which puts it into X's lists and, with no
+    theatre given, into X's last theatre (or a new one; `FUN_140eecf20`);
+  - for each handle: skips units of another tag, asserts against railway guns, and moves the unit
+    in (`FUN_140befcb0`: out of its old army, into the member list, `unit+0xc0` = army);
+  - deletes the new army again if it stayed empty (unless `keepEmpty`);
+  - deletes each old army the units left if that one is now empty (`FUN_140ef16f0`).
+- **`FUN_140bf5a20` (set leader)** stores `army+0x88` and, with the last argument 1, calls
+  `FUN_140c267a0(leader, army, 1)`. That detaches the leader from the army it led before (which
+  keeps its divisions and has no general) and sets `leader+0x1048`.
+- **`CSetArmyLeaderCommand` execute adds, around that call:**
+  - the command power charge: `FUN_140c15140(leader)` computes the assignment cost (country
+    modifier 0x249 for army leaders, "UNIT_LEADER_ASSIGNMENT_COST_HEADER") and `FUN_1406cfe60`
+    applies it to `country+0x1f0`;
+  - an AI bookkeeping reset (`FUN_141950d70` on `country+0xf88` → `+0x290` → `+0x9f8`);
+  - HQ handling;
+  - UI refreshes through `DAT_14332f698`, which an effect must not call.
+- **Vanilla precedent: `start_border_war` (`FUN_140335500`) does the same from an effect:**
+  1. `FUN_140bebf30(null theatre, &X, &units, 0)`;
+  2. `FUN_140bf5a20(army, leader, 1)`;
+  3. the leader's vtable slot 25.
+
+  It does no command power charge and no UI call. The loader would follow exactly this sequence.
+
+**`create_unit` (`CCreateUnitEffect`, execute = slot 13, `FUN_140352140`):**
+- **Location:** chosen per division by `FUN_14036aa00`, honouring `prioritize_location`,
+  `allow_spawning_on_enemy_provs` and `country_score`. The choice uses the scope's synced random
+  numbers (the same hash as NOTES F9). On failure it logs "pBestLocation was not found
+  [reason] %s".
+- **Creation:** a new `CArmy` (0x688 bytes); the `division` string is parsed into it at execute
+  time ("error reading army data"); then it is registered (`FUN_1406d2ca0`, `FUN_140bb9220`).
+- **Return value:** none. The new units are not returned. A before/after comparison of the
+  country's division list (or X's) identifies them; whether they are appended at the end is still
+  to be confirmed.
+
+### G1.3 Rules the game enforces
+
+- **Division caps are soft:**
+  - `NMilitary.CORPS_COMMANDER_DIVISIONS_CAP = 24`, `FIELD_MARSHAL_DIVISIONS_CAP = 24` and
+    `FIELD_MARSHAL_ARMIES_CAP = 5` (0 = unlimited, < 0 = blocked);
+  - going over is allowed. "Commanding too many divisions will reduce all positive Commander
+    Trait and Skill modifiers" (`LEADING_TOO_MANY_DIVISIONS_DESC`; armies:
+    `ARMY_AMOUNT_PENALTY`);
+  - `GARRISON_ORDER_ARMY_CAP_FACTOR = 3.0` raises the cap for garrison orders.
+- **Leader change refused** (`FUN_140bebaa0`) while the army's HQ is deploying
+  (`CANNOT_CHANGE_LEADER_DEPLOYING`, `+0x199` or `+0x19a`) or withdrawing (`…_WITHDRAWING`,
+  `+0x19b`), and with `CANNOT_CHANGE_LEADER_WAR` when `army+0x1b0` is set and the army has a
+  leader. Order in the function: war, deploying, withdrawing; army groups always may.
+- **`army+0x1b0` is the army's border war** (identified 2026-10-22, vanilla 1.19.3 copy; the
+  function's layout is the same on 1.19.3 checksum-patched and 1.19.2):
+  - **Every reader the game has gives it a border-war meaning.** Besides `FUN_140bebaa0`
+    ("Army is in a border war"):
+    - the unit move check `FUN_140bfa300` refuses with `UNIT_BORDER_WAR` ("$STATE$ is in a border
+      war.") when the unit's army (`unit+0xc0`) has `+0x1b0` set;
+    - `start_border_war` (`FUN_140335500`), choosing divisions for a new border war, skips units
+      whose army has a `+0x1b0` object, unless that object's byte `+0x52` is set.
+  - **What it points to:** an object with two sides (`+0x28`, `+0x30`). Each side holds an army
+    handle at `+0x4e8` and a value at `+0x4f0`. `FUN_140bef440` (the army's commander skill)
+    takes that value from the side matching the army instead of from its general;
+    `FUN_140beb770` derives a ratio from it for the UI.
+  - **Lifetime:** the army constructor (`FUN_140be9c10`) sets it to 0.
+  - **Not found:** the store that sets it. No direct write exists in the army code or in
+    `start_border_war`. It is likely a small generic setter: there are several `+0x1b0` /
+    `+0x1b8` pair setters, such as `FUN_14126c7f0`. The in-game test 15 (G2) checks it
+    end-to-end.
+  - `create_army` reads these fields only to name the refusal (G2); the refusal itself is
+    `FUN_140bebaa0`.
+- **Leader eligibility:** the UI lists the country's army leaders. The engine checks for:
+  - an army leader: `leader+0xe7c < 2`; a field marshal can lead a single army (the AI avoids
+    it, `ARMY_LEADER_ASSIGN_FIELD_MARSHAL_TO_ARMY = -500`);
+  - the same country;
+  - not captured.
+
+  A general who already leads an army is moved, and his old army keeps its divisions without a
+  general.
+- **Command power:** recruiting costs `NPolitics.ARMY_LEADER_COST = 5` × leaders of that type
+  (max 80). Assigning through the UI costs the 0x249 modifier value; `start_border_war` charges
+  nothing.
+- **Units:** same tag as the army (asserted), no railway guns (asserted). `create_army` would add
+  only divisions it spawned for the leader's country.
+- **Location:** everything `create_unit` does: own provinces first, then friendly ones, enemy
+  only with `allow_spawning_on_enemy_provs`.
+
+### G1.4 Behaviour
+
+- **AI countries reorganise armies.**
+  - `ai_front.cpp` (`FUN_14106c700`, `FUN_14106cdf0`) reassigns divisions to armies per front
+    ("Front %s: reassigned %i units to army %i") and creates and edits army groups.
+  - AI leader assignment (`ARMY_LEADER_ASSIGN_*` defines) can swap generals.
+  - No per-army lock flag was found. For an AI country a spawned army is a starting arrangement
+    the AI may reshape.
+- **Player armies** are not touched by that code. To check in game.
+- **Multiplayer.**
+  - Every call is game-state code that vanilla's own `start_border_war` effect already runs on
+    all machines. Spawning uses the scope's synced random numbers. New army ids come from the
+    shared counter, so they stay identical when every machine executes the same effects in the
+    same order (lockstep).
+  - The loader must skip the UI refreshes that `CSetArmyLeaderCommand` makes.
+- **Saves:** armies, their members and their leader are the same objects the UI creates, so the
+  game saves them. To check in game (save, reload, army and general still there).
+
+### G1.5 Proposal (option A approved 2026-10-18)
+
+**Approved:** option A, with the decisions G2 lists: no command power, refuse a busy general
+unless `reassign = yes`, and only `leader` / `name` / `reassign` / `country` / `create_unit`
+inside. C (`add_to_army`) follows as a separate step; B was dropped; D comes later. The
+proposal as made:
+
+See the report in the conversation of 2026-10-18: options A (block with vanilla `create_unit`
+children), B (`division = { template count }` sugar), C (`add_to_army` in division scope),
+D (army group / field marshal), feature and guard `create_army`.
+
+### G2: implementation and in-game tests (2026-10-18/19)
+
+Implemented as option A (`create_army` block with vanilla `create_unit` children; decisions:
+no command power, refuse a busy general unless `reassign = yes`, only `leader` / `name` /
+`reassign` / `country` / `create_unit` inside). Engine access: `src/engine_army.cpp`, resolved as
+in G1.2; signatures and code shapes checked on 1.19.3 vanilla and checksum-patched and on 1.19.2.
+
+**First in-game run: nothing spawned (fixed).**
+- **Cause:** vanilla `create_unit` needs a **state** scope. Its execute reads the state at
+  `scope+0xa8` and spawns in that state's provinces; without one it logs "invalid scope state"
+  (`FUN_140352140`). Vanilla always uses it as `37 = { create_unit = { ... owner = ROOT } }` or
+  in `capital_scope`.
+- **The G1 proposal was wrong here:** it put `create_army` in country scope, so the children ran
+  without a state, and the division list comparison correctly found nothing.
+- **Its tooltip (slot 7, `FUN_14037dba0` -> `FUN_14036af20`) needs the state too.** It logged
+  the same error every frame while hovered.
+- **Fix:** `create_army` is used in a state scope like `create_unit`. Its children run there; the
+  army's country is the new `country` parameter, ROOT by default.
+
+**Tests 1-10 (Germany): all as expected.**
+- Armies A (6, Frankfurt), B (30 over Brandenburg, soft cap shown), C (two `create_unit` blocks,
+  field marshal) and the reassign case.
+- Every failure case: busy, unknown, unrecruited, admiral, French general, army group, no
+  divisions, key not allowed inside. Each showed a red preview line where expected, spawned
+  nothing, wrote a loader.log line and did not crash.
+
+**Preview:** the red line reflects the moment of hovering. A decision that recruits the general
+earlier in the same effect block previews red but works (seen in the Italy test). Vanilla
+`create_unit` adds its own line ("Create 10 Italian unit in Lazio").
+
+**AI (test 11, Italy, 1936):**
+- **Creation worked:** the army existed with 10 divisions under the test general.
+- **The general was moved at once** to guard the Ethiopian front.
+- **The divisions stayed together** for a while, and the AI added others to that army.
+- **After about a month** everything was split into the AI's own armies: mostly 1-4 divisions,
+  plus a few of 10-22.
+- **Later regrouping** followed its theatre changes: 3 theatres by May, then Europe and Africa,
+  then 6 after the Ethiopian war (October 1936).
+- **Conclusion:** for AI countries the army is a starting arrangement only; no vanilla lock
+  exists (G1.4). MODDING.md says so.
+
+**Test 12, save and reload: character lookup failed (fixed).**
+- **Symptom:** after loading a save, every `create_army` said "there is no such character", even
+  for General A, who existed and led Army A.
+- **Cause:** recruit_character's lookup (`FUN_1406b4eb0(gamestate+0x6a8, token)`) found nothing
+  after a load. The armies themselves survived the save with their names, divisions and generals.
+- **Fix:** the general is now looked up among the army country's own characters, as
+  `has_character` does:
+  - `CHasCharacterTrigger` slot 22 calls its target resolver (+0x38), which falls back to
+    `FUN_1405434d0`;
+  - that function calls `FUN_1406cf250(country)` (the country's characters), then
+    `FUN_1410eb910(characters, token, true)`;
+  - code shapes `kCodeHasCharacterEval` and `kCodeCountryCharacterLookup` match on all four exe
+    copies.
+- **The global table** is only asked when that lookup fails, to say why (not recruited / another
+  country). After a load it may not know either, and the reason then reads "not a character of
+  this country".
+
+**Test 12 again, with the fix: passed.**
+- After loading, the previews read correctly, and reassign worked twice: General A moved to a
+  new army A2, then on to the next one.
+- A field marshal could be taken from his army with `reassign = yes`.
+- After a second load everything still worked.
+- The two failure tests stay available, which is intended (the decisions repeat) and does
+  nothing:
+  - "create_unit creates nothing": a normal preview (the general is fine, and the template is
+    only checked when `create_unit` runs). When taken, nothing spawns, loader.log says so and
+    error.log has `create_unit`'s own reason.
+  - "a key that is not allowed inside": the use is invalid, but its preview still showed the
+    vanilla `create_unit` line. Now an invalid use shows no preview lines at all (checked in game:
+    the decision has no effect tooltip).
+
+**Test 13, without the loader (2026-10-22, `version.dll` renamed): passed.**
+- The same save loads; the "HOI4 Loader: Armies" category is hidden (the detect stub clears the
+  guard trigger), and the armies made by `create_army` stay as they were.
+- error.log: `create_army` is an unknown effect once per use (13 uses, 13 errors), the 5
+  `recruit_character` warnings, the unknown native commands of the other test decisions, and the
+  known lobby `remotefile.cpp:238` lines. Nothing else new.
+
+**Test 14, captured: passed.**
+- No war is needed: vanilla `capture_by` (character scope, as the game's own debug decisions use
+  it) and `release_from_captivity`. The test mod has "France captures General B", "fail, General B
+  is captured" and "release General B".
+- With General B captured, every `create_army` naming General B shows "Loader Test General B cannot
+  lead a new army: captured. Nothing is created." in red (checked on decision B).
+- **Found while testing:** a refused `create_army` still showed the vanilla `create_unit` lines
+  under the red line ("Create 30 German unit in Brandenburg"), although nothing is created.
+  Now the tooltip callback can call `TooltipText::hideChildren()`, and `create_army` does when the
+  general is refused: only the red line shows. Checked in game: refused decisions (captured,
+  already leads an army) show only the red line; reassign still shows its `create_unit` line;
+  after the release, decision B shows its normal lines again.
+
+**Still open:** multiplayer (G3) and test 15 (border war refusal, below).
+
+**Refusal while the general's army can't change leader** (checked for the PR, 2026-10-22):
+`ReadLeader` calls the engine's own check `FUN_140bebaa0(army, nullptr)` (found through
+`kCodeSetLeaderCheck`) on the army the general leads now; it does not read `+0x199` / `+0x19b`
+itself. The game's assign-general command (`CSetArmyLeaderCommand` can-execute,
+`FUN_14184efb0`) runs that check on both armies:
+- **The general's current army** (`leader+0x1048`): the same call as the loader.
+- **The target army:** for a new army it always passes. The war case needs a leader at `+0x88`,
+  `+0x199` / `+0x19a` / `+0x19b` are not set, and the HQ check after it (`FUN_140bf2020`) needs a
+  leader and a deployed HQ.
+
+So `create_army` refuses exactly where the button would: HQ deploying, HQ withdrawing, and the
+army in a border war (`army+0x1b0`, G1.3).
+
+**Reason text per case (fix before the merge, 2026-10-22).** The red line used to say "deploying
+or withdrawing" for all three. Now, after `FUN_140bebaa0` refuses, `WhyNot` reads the same fields
+in the function's order, only to choose the message:
+- **Offsets:** taken from the function's own code (`kCodeCanChangeStart` / `Deploying` /
+  `Withdrawing`). They are cross-checked against the army group flag and the leader field found
+  elsewhere, and are the same on all three builds.
+- **If they are not found,** the generic reason is used and `create_army` still works.
+
+| Key | English | Vanilla text it follows |
+|---|---|---|
+| `HOI4_LOADER_CREATE_ARMY_DEPLOYING` | their army $ARMY$ is currently being deployed | `CANNOT_CHANGE_LEADER_DEPLOYING` "$NAME$ is currently being deployed" |
+| `HOI4_LOADER_CREATE_ARMY_WITHDRAWING` | their army $ARMY$ is currently being withdrawn | `CANNOT_CHANGE_LEADER_WITHDRAWING` "$NAME$ is currently being withdrawn" |
+| `HOI4_LOADER_CREATE_ARMY_BORDER_WAR` | their army $ARMY$ is in a border war | `CANNOT_CHANGE_LEADER_WAR` "Army is in a border war" |
+| `HOI4_LOADER_CREATE_ARMY_CANNOT_LEAVE` | their army $ARMY$ cannot change its general now | (fallback: fields not found) |
+
+**Test 15, border war (open, in game).** The test mod's "border war from Saxony, led by General
+B" runs vanilla `start_border_war` (65 into 69) with a `leader_score` that picks General B. Then:
+- check that the border war army's general is General B;
+- hover "fail, General B's army is in a border war": the red line should end "their army <name>
+  is in a border war. Nothing is created.";
+- take it: nothing spawns, and loader.log has the same reason;
+- "end the border war" cancels it.
+
+If another general is picked, the test is inconclusive; note who.
+
+### G3: multiplayer test plan (open)
+
+**Blocks the next published release (zip), not the merge of `feature/create-army`.** Nothing in
+the loader has been tested in multiplayer yet (README). One session also covers D3 step 10.
+
+**Setup:**
+- Two players on the same game build (the same `hoi4.exe` build line in both `loader.log`s) and
+  the same `version.dll` (compare its SHA-256), both with `hoi4_loader_test` enabled.
+- The host plays Germany, the client Italy. New game, 1936.
+- After each step, compare on both machines:
+  - the army's name, its division count, its general, and the province of its divisions;
+  - the `create_army (...)` line in both `loader.log`s (every machine runs the effect, so the
+    lines must be identical);
+  - no out-of-sync warning in game.
+
+**Steps:**
+1. **Session classes (D3 step 10, part 1).** Host `loader.log`: "Lifecycle: game entered (...;
+   session: CNetworkServer, multiplayer)". Client: the same with `CProxyServer`.
+2. **The host takes a decision.** "Armies: prepare", then "Armies: A (6 divisions at Frankfurt)".
+   Loader Test Army A has 6 divisions at Frankfurt under General A on both machines.
+3. **The client takes a decision.** "Armies: prepare Italy (AI test)", then "Armies: give Italy
+   an army (AI test)". Loader Test AI Army has 10 divisions in Lazio under General AI on both.
+   Italy is human here, so the AI does not rearrange it.
+4. **`reassign = yes`.** The host takes "Armies: reassign General A". Army A2 (2 divisions) is
+   under General A, and Army A keeps 6 divisions without a general, on both machines.
+5. **A refused case.** The host takes "Armies: fail, general already leads an army". Nothing
+   spawns on either machine, and both `loader.log`s have the same refusal line.
+6. **Hot join** (`DAT_143087260`, the army handle counter, G1.2):
+   - the client leaves;
+   - the host takes "Armies: C (two provinces, field marshal)" and keeps the game running;
+   - the client hot-joins at once;
+   - check: joiner's `loader.log` has "..., HOT JOIN" in the game-entered line, and Army C is
+     the same on both;
+   - then the host takes "Armies: B (30 divisions, spread)". B must be the same on both, with no
+     OOS, for at least a week of game time;
+   - give Army B and Army C a move order on the host and watch them move on the client. A
+     counter that differs would give different army handles, and orders would go astray or
+     cause an OOS.
+7. **Save and reload in multiplayer:**
+   - the host saves, and both quit to the menu;
+   - the host loads that save in a multiplayer game, and the client joins;
+   - every army from steps 2-6 is unchanged on both machines;
+   - the host takes "Armies: reassign General A" once more; it must be the same on both, with no
+     OOS.
+8. **on_game_loaded (D3 step 10, part 2).** After step 7, both `loader.log`s have "on_game_loaded
+   NOT fired: ... (this version fires in single player only)" and no "on_game_loaded fired". On
+   the hot join (step 6) it must not fire either.
+
+**Pass:** steps 1-8 as described, no OOS, no crash. Then MODDING.md's "Not tested in
+multiplayer yet" for `create_army` and the README's multiplayer note can be updated.
+
