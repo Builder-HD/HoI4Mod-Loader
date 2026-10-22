@@ -3088,7 +3088,9 @@ earlier in the same effect block previews red but works (seen in the Italy test)
 - **Found while testing:** a refused `create_army` still showed the vanilla `create_unit` lines
   under the red line ("Create 30 German unit in Brandenburg"), although nothing is created.
   Now the tooltip callback can call `TooltipText::hideChildren()`, and `create_army` does when the
-  general is refused: only the red line shows.
+  general is refused: only the red line shows. Checked in game: refused decisions (captured,
+  already leads an army) show only the red line; reassign still shows its `create_unit` line;
+  after the release, decision B shows its normal lines again.
 
 **Still open:** multiplayer.
 
