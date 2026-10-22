@@ -31,6 +31,11 @@ A–F; NOTES.md has the findings and test results behind each.
   - If the general is not available, nothing spawns: the tooltip shows only a red line (no
     `create_unit` lines) and `loader.log` says why. A general who already leads an army is
     refused unless `reassign = yes`.
+  - With `reassign = yes`, a general whose army can't change its general now is refused as the
+    game's own button refuses. The reason has its own key per case:
+    `HOI4_LOADER_CREATE_ARMY_DEPLOYING`, `_WITHDRAWING` and `_BORDER_WAR`.
+    `HOI4_LOADER_CREATE_ARMY_CANNOT_LEAVE` is now only the fallback ("their army ... cannot change
+    its general now"); it used to cover deploying and withdrawing together.
   - No command power is charged. It works on 1.19.3 vanilla and checksum-patched, and its
     signatures also match 1.19.2.
 - **Native API:** effect blocks (`register_native_effect_block`), whose children run inside the

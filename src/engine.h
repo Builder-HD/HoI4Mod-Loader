@@ -277,12 +277,16 @@ void* CountryCharacterByToken(int tag, int token);
 void* CharacterByToken(int token);
 int CharacterCountry(const void* character);   // tag of the country that has recruited it, 0 if none
 void* ArmyLeaderRole(const void* character);   // its army leader role (CUnitLeader), or null
+// Which of the game's can-change-leader refusals applies (read only to choose a message; the
+// refusal itself is the engine's check). Unknown: the fields were not found, or none is set.
+enum class LeaveBlock { None, Unknown, Deploying, Withdrawing, BorderWar };
 struct LeaderState {
     int roleType = -1;          // 0 field marshal, 1 corps commander (general); >= 2 is not an army leader
     bool captured = false;
     void* leads = nullptr;      // the army or army group it leads, or null
     bool leadsArmyGroup = false;
-    bool canLeave = true;       // its army may change leader now (no HQ deploying or withdrawing)
+    bool canLeave = true;       // its army may change leader now (the game's own check)
+    LeaveBlock whyNot = LeaveBlock::None;  // when !canLeave: why
 };
 bool ReadLeader(void* leader, LeaderState* out);  // false if the leader is unreadable (logged)
 std::string LeaderName(const void* leader);       // the leader's name text, "" if unreadable

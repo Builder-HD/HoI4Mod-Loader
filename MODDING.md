@@ -753,11 +753,12 @@ created."
   army keeps its divisions without a general. The tooltip adds "... leaves <old army>, which keeps
   its divisions without a general."
 - Refused either way in the cases the game's own "assign general" button refuses: the loader runs
-  the game's own check on the army the general leads now. That is:
-  - its headquarters is being deployed;
-  - its headquarters is being withdrawn;
-  - it is in a border war: the game refuses when a field of the army is set whose message is
-    "Army is in a border war". What else sets that field is not known.
+  the game's own check on the army the general leads now. The red line names the case, in the
+  game's words:
+  - "their army <name> is currently being deployed";
+  - "their army <name> is currently being withdrawn";
+  - "their army <name> is in a border war" (e.g. after vanilla `start_border_war` picked this
+    general).
 - **AI countries' generals usually lead armies already:** use `reassign = yes`, or pick a
   general who is free.
 

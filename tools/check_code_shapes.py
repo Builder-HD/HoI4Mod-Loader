@@ -208,6 +208,18 @@ def check_create_army(img, codes, text_va, text):
     ag = img.d[img.va2off(ev + 0x61)] if ok else -1
     results.append(('kCodeIsLeadingArmyEval (led group +0x%x, army group flag +0x%x)' % (led, ag), ok, hex(ev)))
 
+    # can_change_leader's refusal fields (only for create_army's reason text; not fatal there).
+    ok = bool(can_change) and img.match_at(can_change, codes['kCodeCanChangeStart'])
+    dep = find_in(img, can_change + 0x40, 0x100, codes['kCodeCanChangeDeploying']) if ok else None
+    wd = find_in(img, dep + 0x11, 0xc0, codes['kCodeCanChangeWithdrawing']) if dep else None
+    war = i32(img, can_change + 0x2d) if ok else -1
+    d1, d2 = (i32(img, dep + 2), i32(img, dep + 0xb)) if dep else (-1, -1)
+    w = i32(img, wd + 2) if wd else -1
+    ok = bool(wd) and img.d[img.va2off(can_change + 0x1c)] == ag and i32(img, can_change + 0x3b) == lead
+    ok = ok and 0x40 < war < 0x230 and len({d1, d2, w}) == 3 and max(d1, d2, w) < 0x230
+    results.append(('kCodeCanChangeStart / Deploying / Withdrawing (border war +0x%x, deploying +0x%x/+0x%x, '
+                    'withdrawing +0x%x)' % (war, d1, d2, w), ok, hex(can_change)))
+
     cap_vt = img.vtable('.?AVCIsGeneralCapturedTrigger@@')
     ok = bool(cap_vt) and img.match_at(cap_vt[1][22], codes['kCodeIsCapturedEval'])
     slot = i32(img, cap_vt[1][22] + 0x27) if ok else -1

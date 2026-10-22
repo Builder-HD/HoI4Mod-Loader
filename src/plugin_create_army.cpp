@@ -43,7 +43,22 @@ const LocText kLeaves{"HOI4_LOADER_CREATE_ARMY_LEAVES", "$LEADER|Y$ leaves $ARMY
 const LocText kUnavailable{"HOI4_LOADER_CREATE_ARMY_UNAVAILABLE",
                            "\x11R$LEADER$ cannot lead a new army: $REASON$. Nothing is created.\x11!"};
 
-enum class Refusal { None, UnknownCharacter, NotRecruited, OtherCountry, NotArmyLeader, Captured, LeadsArmyGroup, LeadsArmy, CannotLeave };
+// CannotLeave .. BorderWar: the game's own can-change-leader check refuses for the army the
+// general leads now; the last three name its reason as vanilla's CANNOT_CHANGE_LEADER_* texts do.
+enum class Refusal {
+    None,
+    UnknownCharacter,
+    NotRecruited,
+    OtherCountry,
+    NotArmyLeader,
+    Captured,
+    LeadsArmyGroup,
+    LeadsArmy,
+    CannotLeave,
+    Deploying,
+    Withdrawing,
+    BorderWar
+};
 
 const LocText kReasons[] = {
     {"HOI4_LOADER_CREATE_ARMY_OK", "available"},
@@ -54,15 +69,37 @@ const LocText kReasons[] = {
     {"HOI4_LOADER_CREATE_ARMY_CAPTURED", "captured"},
     {"HOI4_LOADER_CREATE_ARMY_LEADS_ARMY_GROUP", "leads an army group"},
     {"HOI4_LOADER_CREATE_ARMY_LEADS_ARMY", "already leads an army"},
-    {"HOI4_LOADER_CREATE_ARMY_CANNOT_LEAVE", "the headquarters of their current army is deploying or withdrawing"},
+    {"HOI4_LOADER_CREATE_ARMY_CANNOT_LEAVE", "their army $ARMY$ cannot change its general now"},
+    {"HOI4_LOADER_CREATE_ARMY_DEPLOYING", "their army $ARMY$ is currently being deployed"},
+    {"HOI4_LOADER_CREATE_ARMY_WITHDRAWING", "their army $ARMY$ is currently being withdrawn"},
+    {"HOI4_LOADER_CREATE_ARMY_BORDER_WAR", "their army $ARMY$ is in a border war"},
 };
 const LocText& ReasonText(Refusal r) { return kReasons[(int)r]; }
+
+Refusal LeaveRefusal(Engine::LeaveBlock why) {
+    switch (why) {
+        case Engine::LeaveBlock::Deploying: return Refusal::Deploying;
+        case Engine::LeaveBlock::Withdrawing: return Refusal::Withdrawing;
+        case Engine::LeaveBlock::BorderWar: return Refusal::BorderWar;
+        default: return Refusal::CannotLeave;
+    }
+}
+
+// The reason in English for loader.log, with the army the general leads now in place of $ARMY$.
+std::string ReasonEnglish(Refusal r, const std::string& army) {
+    std::string s = ReasonText(r).english;
+    size_t at = s.find("$ARMY$");
+    if (at != std::string::npos) s.replace(at, 6, "\"" + army + "\"");
+    return s;
+}
 
 struct Candidate {
     void* leader = nullptr;
     Engine::LeaderState state;
     std::string name;  // display name (localised if the name is a key)
 };
+
+std::string CurrentArmy(const Candidate& c) { return c.state.leads ? Engine::ArmyName(c.state.leads) : std::string(); }
 
 // Who `leader` is and whether that general may lead a new army of `tag` now. Reads only.
 Refusal Check(const Args& a, int tag, Candidate* c) {
@@ -89,7 +126,7 @@ Refusal Check(const Args& a, int tag, Candidate* c) {
     if (c->state.captured) return Refusal::Captured;
     if (c->state.leads && c->state.leadsArmyGroup) return Refusal::LeadsArmyGroup;
     if (c->state.leads && !a.b(2)) return Refusal::LeadsArmy;
-    if (c->state.leads && !c->state.canLeave) return Refusal::CannotLeave;
+    if (c->state.leads && !c->state.canLeave) return LeaveRefusal(c->state.whyNot);
     return Refusal::None;
 }
 
@@ -101,7 +138,7 @@ void Execute(const Args& a, const Scope&, const EffectChildren& children) {
     Refusal r = Check(a, tag, &c);
     if (r != Refusal::None) {
         Log("create_army (%s): %s (%s) cannot lead a new army: %s; nothing created", country.c_str(), c.name.c_str(), a.key(0),
-            ReasonText(r).english);
+            ReasonEnglish(r, CurrentArmy(c)).c_str());
         return;
     }
     std::vector<void*> before, after;
@@ -146,7 +183,8 @@ void Tooltip(const Args& a, const Scope&, TooltipText& out) {
     Refusal r = Check(a, a.i(3), &c);
     if (r != Refusal::None) {
         // Nothing runs, so no create_unit lines either.
-        out.add(native_localize(kUnavailable, {{"LEADER", c.name}, {"REASON", native_localize(ReasonText(r))}}).c_str());
+        std::string reason = native_localize(ReasonText(r), {{"ARMY", CurrentArmy(c)}});
+        out.add(native_localize(kUnavailable, {{"LEADER", c.name}, {"REASON", reason}}).c_str());
         out.hideChildren();
         return;
     }

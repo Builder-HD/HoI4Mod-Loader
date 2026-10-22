@@ -52,6 +52,8 @@ uint32_t g_armyName = 0;        // army -> name (std::string)
 uint8_t g_armyGroupFlag = 0;    // army -> "is an army group" byte
 uint32_t g_capturedSlot = 0;    // leader vtable byte offset: captured
 uint32_t g_refreshSlot = 0;     // leader vtable byte offset: refresh after start_border_war's set_leader
+// army -> the fields can_change_leader refuses on (0 = not found: the reason is then Unknown)
+uint32_t g_borderWar = 0, g_deploying = 0, g_deploying2 = 0, g_withdrawing = 0;
 
 // Fixed by the engine's reference objects: the manager's tag (create_army compares units' tags
 // with it) and a division's own handle, which resolves to the division + 0x10. Both are checked
@@ -73,6 +75,39 @@ uint8_t* Slot(const char* rtti, size_t slot) {
 bool Fail(const char* what) {
     Log("ERROR: create_army: %s; armies unavailable", what);
     return false;
+}
+
+// The fields can_change_leader refuses on, from its own code. Only for the refusal's message: if
+// they are not found, create_army still works and names no specific reason.
+void ResolveLeaveFields() {
+    const uint8_t* fn = (const uint8_t*)g_canChange;
+    const uint8_t* dep = SigMatchAt(fn, kCodeCanChangeStart) ? SigFindIn(fn + 0x40, 0x100, kCodeCanChangeDeploying) : nullptr;
+    const uint8_t* wd = dep ? SigFindIn(dep + 0x11, 0xc0, kCodeCanChangeWithdrawing) : nullptr;
+    uint32_t war = wd ? Rd<uint32_t>(fn, kCodeCanChangeWarDisp) : 0, d1 = dep ? Rd<uint32_t>(dep, kCodeCanChangeDeployDisp) : 0,
+             d2 = dep ? Rd<uint32_t>(dep, kCodeCanChangeDeploy2Disp) : 0, w = wd ? Rd<uint32_t>(wd, kCodeCanChangeWithdrawDisp) : 0;
+    // Cross-checks: the army group flag and the leader field it reads are the ones found elsewhere,
+    // and the fields lie inside an army (0x230 bytes) and differ.
+    bool ok = wd && Rd<uint8_t>(fn, kCodeCanChangeGroupDisp) == g_armyGroupFlag &&
+              Rd<uint32_t>(fn, kCodeCanChangeLeaderDisp) == g_armyLeader && war < 0x230 && d1 < 0x230 && d2 < 0x230 && w < 0x230 &&
+              d1 != d2 && w != d1 && w != d2 && war > 0x40;
+    if (!ok) {
+        Log("create_army: can_change_leader's refusal fields not found; a refused general is reported without the "
+            "specific reason");
+        return;
+    }
+    g_borderWar = war;
+    g_deploying = d1;
+    g_deploying2 = d2;
+    g_withdrawing = w;
+}
+
+// Mirrors can_change_leader's order: border war, deploying, withdrawing.
+LeaveBlock WhyNot(const void* army) {
+    if (!g_borderWar) return LeaveBlock::Unknown;
+    if (Rd<uint64_t>(army, g_borderWar) != 0 && Rd<void*>(army, g_armyLeader)) return LeaveBlock::BorderWar;
+    if (Rd<uint8_t>(army, g_deploying) || Rd<uint8_t>(army, g_deploying2)) return LeaveBlock::Deploying;
+    if (Rd<uint8_t>(army, g_withdrawing)) return LeaveBlock::Withdrawing;
+    return LeaveBlock::Unknown;
 }
 
 bool ResolveAll() {
@@ -157,6 +192,7 @@ bool ResolveAll() {
         return Fail("CSetOrderGroupNameCommand has an unexpected shape");
     g_armyName = Rd<uint32_t>(rename, kCodeSetArmyNameDisp);
     g_assign = (Assign_t)SigFollowRel32(rename + kCodeSetArmyNameAssign);
+    ResolveLeaveFields();
     return true;
 }
 
@@ -182,6 +218,9 @@ void ResolveArmies() {
         SigDescribe((void*)g_createArmy).c_str(), SigDescribe((void*)g_setLeader).c_str(), SigDescribe((void*)g_canChange).c_str(),
         SigDescribe((void*)g_findCharacter).c_str(), SigDescribe((void*)g_findInCountry).c_str(), g_manager, g_characters, g_characterOwner, g_roleType, g_ledGroup,
         g_armyGroupFlag, g_leaderName, g_armyLeader, g_armyName, g_capturedSlot, g_refreshSlot);
+    if (g_borderWar)
+        Log("create_army: leader change refused on: border war +0x%x, deploying +0x%x / +0x%x, withdrawing +0x%x", g_borderWar,
+            g_deploying, g_deploying2, g_withdrawing);
 }
 
 bool HaveArmies() {
@@ -216,6 +255,7 @@ bool ReadLeader(void* leader, LeaderState* out) {
     if (out->leads) {
         out->leadsArmyGroup = Rd<uint8_t>(out->leads, g_armyGroupFlag) != 0;
         out->canLeave = out->leadsArmyGroup || g_canChange(out->leads, nullptr);
+        if (!out->canLeave) out->whyNot = WhyNot(out->leads);
     }
     return true;
 }

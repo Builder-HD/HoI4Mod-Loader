@@ -335,6 +335,17 @@ static const size_t kCodeSetLeaderCheckResolveCall = 0x2a, kCodeSetLeaderCheckCa
 // capacity disp8 at +0x4c, text disp8 at +0x51), then the army's current leader (disp32 at +0x76).
 CODE(kCodeSetLeaderStart, "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 30 80 3D ?? ?? ?? ?? 00 41 0F B6 E8 48 8B FA 48 8B D9 74 ?? 41 B9 05 00 00 00 48 8D 15 ?? ?? ?? ?? 41 B8 ?? ?? ?? ?? 48 8D 4C 24 20 E8 ?? ?? ?? ?? 48 85 FF 74 ?? 48 83 7F ?? 0F 4C 8D 4F ?? 76 ?? 4D 8B 09 EB ?? 4C 8D 0D ?? ?? ?? ?? 44 8B 43 ?? 48 8D 15 ?? ?? ?? ?? 48 8B C8 E8 ?? ?? ?? ?? 48 8B B3 ?? ?? ?? ??")
 static const size_t kCodeSetLeaderNameCapDisp = 0x4c, kCodeSetLeaderNameDisp = 0x51, kCodeSetLeaderArmyLeaderDisp = 0x76;
+// can_change_leader(army, reasonOut) itself (from kCodeSetLeaderCheck), only to tell which of its
+// refusals applies: army groups always may (flag disp8 at +0x1c); "in a border war" when a field
+// (disp32 at +0x2d) is set and the army has a leader (disp32 at +0x3b) ...
+CODE(kCodeCanChangeStart, "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 48 83 EC 40 48 8B FA 48 8B D9 80 79 ?? 00 74 ?? B0 01 E9 ?? ?? ?? ?? 40 B5 01 48 83 B9 ?? ?? ?? ?? 00 0F 84 ?? ?? ?? ?? 48 83 B9 ?? ?? ?? ?? 00")
+static const size_t kCodeCanChangeGroupDisp = 0x1c, kCodeCanChangeWarDisp = 0x2d, kCodeCanChangeLeaderDisp = 0x3b;
+// ... then (SigFindIn) "being deployed" when either of two flags is set (disp32 at +2 and +0xb) ...
+CODE(kCodeCanChangeDeploying, "80 BB ?? ?? ?? ?? 00 75 ?? 80 BB ?? ?? ?? ?? 00 75")
+static const size_t kCodeCanChangeDeployDisp = 2, kCodeCanChangeDeploy2Disp = 0xb;
+// ... and after it "being withdrawn" (flag disp32 at +2).
+CODE(kCodeCanChangeWithdrawing, "80 BB ?? ?? ?? ?? 00 0F 84")
+static const size_t kCodeCanChangeWithdrawDisp = 2;
 // CIsArmyLeader slot 22 (is_army_leader): character -> army leader role (call at +0x34), role
 // type disp32 at +0x48 (< 2: field marshal 0, corps commander 1).
 CODE(kCodeIsArmyLeaderEval, "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B F1 48 8B FA 48 8B CA E8 ?? ?? ?? ?? 48 8B D8 48 85 C0 74 ?? 48 8B CF E8 ?? ?? ?? ?? 84 C0 75 ?? 48 8B CB E8 ?? ?? ?? ?? 48 85 C0 74 ?? 48 8B CB E8 ?? ?? ?? ?? 83 B8 ?? ?? ?? ?? 01")
