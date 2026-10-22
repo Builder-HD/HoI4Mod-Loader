@@ -752,8 +752,12 @@ created."
 - **`reassign = yes`:** the general leaves the army they lead now and takes the new one. The old
   army keeps its divisions without a general. The tooltip adds "... leaves <old army>, which keeps
   its divisions without a general."
-- Refused either way while the old army's headquarters is deploying or withdrawing, as in the
-  game's own "assign general" button.
+- Refused either way in the cases the game's own "assign general" button refuses: the loader runs
+  the game's own check on the army the general leads now. That is:
+  - its headquarters is being deployed;
+  - its headquarters is being withdrawn;
+  - it is in a border war: the game refuses when a field of the army is set whose message is
+    "Army is in a border war". What else sets that field is not known.
 - **AI countries' generals usually lead armies already:** use `reassign = yes`, or pick a
   general who is free.
 
@@ -815,9 +819,10 @@ my_mod_raise_panzer_army = {
   for an AI country when only the initial setup matters.
 - Players' armies are not touched.
 
-**Multiplayer:** the army is created by the game's own functions, called the way vanilla's
-`start_border_war` calls them. `create_unit` places divisions with the game's synced random
-numbers. Every machine runs the same effect and gets the same army.
+**Multiplayer:** built so that every machine runs the same effect and gets the same army: the
+army is created by the game's own functions, called the way vanilla's `start_border_war` calls
+them, and `create_unit` places divisions with the game's synced random numbers. **Not tested in
+multiplayer yet.**
 
 **Saves:** the army, its divisions, its name and its general are saved by the game itself. A save
 loaded without the loader keeps them (they are ordinary armies).
