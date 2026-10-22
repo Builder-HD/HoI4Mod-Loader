@@ -261,6 +261,54 @@ hoi4_loader_army_category = {
 		}
 		ai_will_do = { base = 0 }
 	}
+	# Captured, in three steps: France captures General B (vanilla capture_by, as the game's own
+	# debug decisions do; no war needed), create_army with General B is then refused ("captured"),
+	# and the release brings General B back (vanilla release_from_captivity).
+	hoi4_loader_army_capture = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_create_army = yes
+			has_country_flag = hoi4_loader_army_prepared
+			HLT_general_b = { is_general_captured = no }
+		}
+		complete_effect = {
+			HLT_general_b = { capture_by = FRA }
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_army_fail_captured = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_create_army = yes
+			has_country_flag = hoi4_loader_army_prepared
+			HLT_general_b = { is_general_captured = yes }
+		}
+		complete_effect = {
+			64 = {
+				create_army = {
+					leader = HLT_general_b
+					reassign = yes
+					create_unit = { division = "division_template = \"Loader Test Infantry\"" owner = ROOT count = 1 }
+				}
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_army_release = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_create_army = yes
+			has_country_flag = hoi4_loader_army_prepared
+			HLT_general_b = { is_general_captured = yes }
+		}
+		complete_effect = {
+			HLT_general_b = { release_from_captivity = yes }
+		}
+		ai_will_do = { base = 0 }
+	}
 
 	# --- AI ------------------------------------------------------------------------------------
 	# Two steps, so the second decision's preview sees General AI already recruited by Italy:
