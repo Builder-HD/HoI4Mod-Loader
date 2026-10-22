@@ -1024,7 +1024,8 @@ std::string native_localize_key(const char* key) {
     return key ? key : "";
 }
 
-std::string NativeTooltip(const ParsedCommand* pc, const void* engineScope, bool negated) {
+std::string NativeTooltip(const ParsedCommand* pc, const void* engineScope, bool negated, bool* childrenHidden) {
+    if (childrenHidden) *childrenHidden = false;
     if (!pc) return "";
     const Command& c = *pc->cmd;
     Scope scope(engineScope);
@@ -1041,6 +1042,7 @@ std::string NativeTooltip(const ParsedCommand* pc, const void* engineScope, bool
             LogException(c, "tooltip", code);
             return "";
         }
+        if (childrenHidden) *childrenHidden = out.childrenHidden();
         return out.text();
     }
     // Trigger tooltips also run when a scope default is missing (the parameter is then absent).

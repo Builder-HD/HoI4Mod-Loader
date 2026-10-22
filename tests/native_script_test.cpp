@@ -155,7 +155,10 @@ static void ExecBlockCrash(const Args&, const Scope&, const EffectChildren&) {
     volatile int* p = nullptr;
     *p = 1;
 }
-static void TipBlock(const Args& a, const Scope&, TooltipText& out) { out.add("Group led by ").add(a.key(0)); }
+static void TipBlock(const Args& a, const Scope&, TooltipText& out) {
+    out.add("Group led by ").add(a.key(0));
+    if (!a.has(1)) out.hideChildren();  // stands for "the block will not run its children"
+}
 static bool FakeChildren(void*, const void*) {
     ++g_blockRuns;
     return true;
@@ -703,7 +706,13 @@ int main() {
     g_blockLeader.clear();
     NativeExecuteBlock(g2, &regionScope, EffectChildren(&FakeChildren, nullptr, &regionScope));
     CHECK(!NativeValidate(*g2) && g_blockLeader.empty(), "missing leader: invalid, nothing executed");
-    CHECK(NativeTooltip(g1, &regionScope, false) == "Group led by GER_erwin_rommel", "block tooltip line");
+    bool hidden = true;
+    CHECK(NativeTooltip(g1, &regionScope, false, &hidden) == "Group led by GER_erwin_rommel" && !hidden,
+          "block tooltip line, children shown");
+    ParsedCommand* g4 = NativeNewParsed(*group);
+    CHECK(NativeSetArg(*g4, 0, "GER_erwin_rommel", &err) && NativeValidate(*g4) &&
+              NativeTooltip(g4, &regionScope, false, &hidden) == "Group led by GER_erwin_rommel" && hidden,
+          "block tooltip line, children hidden by the callback");
     ParsedCommand* g3 = NativeNewParsed(*crashGroup);
     NativeExecuteBlock(g3, &regionScope, EffectChildren(&FakeChildren, nullptr, &regionScope));
     CHECK(LogCount("'crash_group': execute crashed") == 1, "crashing block execute contained and logged");

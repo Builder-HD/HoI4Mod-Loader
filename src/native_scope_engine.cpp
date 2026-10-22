@@ -289,18 +289,21 @@ void __fastcall EB_Execute(void* self, void* scope, void*, void*) {
     NativeExecuteBlock(Rec(self), scope, EffectChildren(&RunChildren, self, scope));
 }
 
-// Slots 8 / 10: the block's own line, then the children's lines one level deeper. An invalid use
-// (parse error) runs nothing, so it shows nothing, its children included.
+// Slots 8 / 10: the block's own line, then the children's lines one level deeper (left out when
+// the callback hides them). An invalid use (parse error) runs nothing, so it shows nothing, its
+// children included.
 bool Invalid(void* self) { return !Rec(self) || Rec(self)->parseError; }
 
-std::string BlockLine(void* self, void* scope, int indent) {
-    std::string own = NativeTooltip(Rec(self), scope, false);
+std::string BlockLine(void* self, void* scope, int indent, bool* childrenHidden) {
+    std::string own = NativeTooltip(Rec(self), scope, false, childrenHidden);
     return own.empty() ? std::string() : Indent(indent) + own;
 }
 
 EngineString* __fastcall EB_Tooltip8(void* self, EngineString* out, void* scope, int indent, int flag) {
     if (Invalid(self)) return MakeTooltip(out, "");
-    std::string text = BlockLine(self, scope, indent);
+    bool hidden = false;
+    std::string text = BlockLine(self, scope, indent, &hidden);
+    if (hidden) return MakeTooltip(out, text);
     EngineString tmp{};
     ((EffectTooltip8_t)Engine::effectBase.vt[8])(self, &tmp, scope, text.empty() ? indent : indent + 1, flag);
     if (tmp.size) text += (text.empty() ? "" : "\n") + Text(tmp);
@@ -310,7 +313,9 @@ EngineString* __fastcall EB_Tooltip8(void* self, EngineString* out, void* scope,
 
 EngineString* __fastcall EB_Tooltip10(void* self, EngineString* out, void* scope, int indent) {
     if (Invalid(self)) return MakeTooltip(out, "");
-    std::string text = BlockLine(self, scope, indent);
+    bool hidden = false;
+    std::string text = BlockLine(self, scope, indent, &hidden);
+    if (hidden) return MakeTooltip(out, text);
     EngineString tmp{};
     ((EffectTooltip10_t)Engine::effectBase.vt[10])(self, &tmp, scope, text.empty() ? indent : indent + 1);
     if (tmp.size) text += (text.empty() ? "" : "\n") + Text(tmp);

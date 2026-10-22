@@ -200,8 +200,10 @@ bool MyFeatureInit() {
     block is refused at engine registration. Any other key is the engine's "Unexpected token" and
     makes that use do nothing.
   - `run()` returns false if the children crashed (contained, logged once).
-  - Tooltip: the `tooltip` callback's line, then the children's lines one level deeper. An invalid
-    use (parse error) shows nothing, its children included, since nothing runs.
+  - Tooltip: the `tooltip` callback's line, then the children's lines one level deeper. The
+    callback can call `out.hideChildren()` to leave them out when the block will not run them
+    (`create_army` does when the general is refused). An invalid use (parse error) shows nothing,
+    its children included, since nothing runs.
 - **When:** register from the feature's init only. Engine registration happens at lexer-ready,
   before any script is parsed; later calls are refused. The feature needs the engine tier and
   the `lifecycle` feature.

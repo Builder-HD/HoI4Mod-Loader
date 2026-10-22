@@ -28,12 +28,14 @@ A–F; NOTES.md has the findings and test results behind each.
   - `create_army = { leader = <character> name = "..." reassign = yes country = <tag> create_unit = { ... } ... }`,
     in a state scope like vanilla `create_unit`, spawns divisions there with `create_unit` and
     makes them a new army of `country` (default ROOT) under that general.
-  - If the general is not available, nothing spawns: the tooltip line is red and `loader.log`
-    says why. A general who already leads an army is refused unless `reassign = yes`.
+  - If the general is not available, nothing spawns: the tooltip shows only a red line (no
+    `create_unit` lines) and `loader.log` says why. A general who already leads an army is
+    refused unless `reassign = yes`.
   - No command power is charged. It works on 1.19.3 vanilla and checksum-patched, and its
     signatures also match 1.19.2.
 - **Native API:** effect blocks (`register_native_effect_block`), whose children run inside the
-  plugin's execute, and a `Text` parameter type for free text such as army names.
+  plugin's execute (their tooltip callback can hide the children's lines), and a `Text`
+  parameter type for free text such as army names.
 
 ## 0.5.0-beta (2026-10-18), script version 3
 

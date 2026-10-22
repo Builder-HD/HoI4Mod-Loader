@@ -145,7 +145,9 @@ void Tooltip(const Args& a, const Scope&, TooltipText& out) {
     Candidate c;
     Refusal r = Check(a, a.i(3), &c);
     if (r != Refusal::None) {
+        // Nothing runs, so no create_unit lines either.
         out.add(native_localize(kUnavailable, {{"LEADER", c.name}, {"REASON", native_localize(ReasonText(r))}}).c_str());
+        out.hideChildren();
         return;
     }
     out.add(native_localize(a.has(1) ? kCreateNamed : kCreate, {{"LEADER", c.name}, {"NAME", a.has(1) ? a.key(1) : ""}}).c_str());

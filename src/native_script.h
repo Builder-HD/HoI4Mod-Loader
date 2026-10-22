@@ -126,10 +126,14 @@ public:
     // iterator's header), so the line shows no current value.
     void markScopeMissing() { scopeMissing_ = true; }
     bool scopeMissing() const { return scopeMissing_; }
+    // Effect blocks: leave out the children's lines, e.g. when the block will not run them.
+    void hideChildren() { hideChildren_ = true; }
+    bool childrenHidden() const { return hideChildren_; }
 
 private:
     std::string text_;
     bool scopeMissing_ = false;
+    bool hideChildren_ = false;
 };
 
 // A tooltip text a mod may translate: its localisation key and the English text used when no
@@ -252,7 +256,7 @@ bool register_native_iterator(const NativeIterator& def, const char* feature);
 // `children`, run in the current scope when the execute callback calls children.run(), so the
 // plugin can act before and after them. Any other key is a parse error (engine error with file
 // and line) and makes that use do nothing. Tooltip: the callback's line, then the children's
-// lines one level deeper.
+// lines one level deeper, unless the callback calls TooltipText::hideChildren().
 class EffectChildren {
 public:
     using RunFn = bool (*)(void* self, const void* scope);
@@ -395,8 +399,9 @@ void NativeExecuteBlock(const ParsedCommand* pc, const void* engineScope, const 
 bool NativeIsChild(const Command& cmd, int token);
 bool NativeEvaluate(const ParsedCommand* pc, const void* engineScope);
 // Tooltip text (UTF-8, no trailing newline). Triggers without a tooltip callback get the
-// generic line; effects without one get "".
-std::string NativeTooltip(const ParsedCommand* pc, const void* engineScope, bool negated);
+// generic line; effects without one get "". `childrenHidden` (optional): an effect block's
+// callback asked to leave out its children's lines.
+std::string NativeTooltip(const ParsedCommand* pc, const void* engineScope, bool negated, bool* childrenHidden = nullptr);
 
 // Scope blocks: the target for this use. False if a scope default is missing, the callback finds
 // none or crashed (logged once).

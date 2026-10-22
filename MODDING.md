@@ -784,7 +784,7 @@ my_mod_raise_panzer_army = {
 
 | Case | Result |
 |---|---|
-| General not available (any reason above) | nothing spawns; red tooltip line |
+| General not available (any reason above) | nothing spawns; red tooltip line, without the `create_unit` lines |
 | `create_unit` creates nothing (unknown template, no valid province) | no army; the general is unchanged; `create_unit`'s own error in `error.log` |
 | A key that is not allowed inside | parse error at load; this `create_army` does nothing |
 | The game refuses to create the army | the divisions stay without an army |
@@ -792,7 +792,8 @@ my_mod_raise_panzer_army = {
 **Tooltip.**
 - "Creates a new army led by **Erwin Rommel**." With `name`: "Creates the army
   **1. Panzerarmee** led by **Erwin Rommel**." Below it each `create_unit` adds its own vanilla
-  line, e.g. "Create 10 Italian unit in Lazio".
+  line, e.g. "Create 10 Italian unit in Lazio". When the general is not available, only the red
+  line shows: nothing will be created, so the `create_unit` lines are left out.
 - **The preview shows the general as things are when the player hovers.** If the same effect
   block makes the general available first, the line is red although taking it works. For
   example, `recruit_character` or freeing the general earlier in the block. Recruit the general
