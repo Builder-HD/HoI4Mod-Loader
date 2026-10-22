@@ -3069,8 +3069,15 @@ earlier in the same effect block previews red but works (seen in the Italy test)
     only checked when `create_unit` runs). When taken, nothing spawns, loader.log says so and
     error.log has `create_unit`'s own reason.
   - "a key that is not allowed inside": the use is invalid, but its preview still showed the
-    vanilla `create_unit` line. Now an invalid use shows no preview lines at all.
+    vanilla `create_unit` line. Now an invalid use shows no preview lines at all (checked in game:
+    the decision has no effect tooltip).
 
-**Still open:** the session without the loader, the "captured" refusal (needs a captured general)
-and multiplayer.
+**Test 13, without the loader (2026-10-22, `version.dll` renamed): passed.**
+- The same save loads; the "HOI4 Loader: Armies" category is hidden (the detect stub clears the
+  guard trigger), and the armies made by `create_army` stay as they were.
+- error.log: `create_army` is an unknown effect once per use (13 uses, 13 errors), the 5
+  `recruit_character` warnings, the unknown native commands of the other test decisions, and the
+  known lobby `remotefile.cpp:238` lines. Nothing else new.
+
+**Still open:** the "captured" refusal (needs a captured general) and multiplayer.
 
