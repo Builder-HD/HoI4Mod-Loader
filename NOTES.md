@@ -2994,7 +2994,12 @@ id, slot 13 = clone. The game-state work in each execute:
 - **Saves:** armies, their members and their leader are the same objects the UI creates, so the
   game saves them. To check in game (save, reload, army and general still there).
 
-### G1.5 Proposal (awaiting approval)
+### G1.5 Proposal (option A approved 2026-10-18)
+
+**Approved:** option A, with the decisions G2 lists: no command power, refuse a busy general
+unless `reassign = yes`, and only `leader` / `name` / `reassign` / `country` / `create_unit`
+inside. C (`add_to_army`) follows as a separate step; B was dropped; D comes later. The
+proposal as made:
 
 See the report in the conversation of 2026-10-18: options A (block with vanilla `create_unit`
 children), B (`division = { template count }` sugar), C (`add_to_army` in division scope),
@@ -3092,5 +3097,71 @@ earlier in the same effect block previews red but works (seen in the Italy test)
   already leads an army) show only the red line; reassign still shows its `create_unit` line;
   after the release, decision B shows its normal lines again.
 
-**Still open:** multiplayer.
+**Still open:** multiplayer (G3).
+
+**Refusal while the general's army can't change leader** (checked for the PR, 2026-10-22):
+`ReadLeader` calls the engine's own check `FUN_140bebaa0(army, nullptr)` (found through
+`kCodeSetLeaderCheck`) on the army the general leads now; it does not read `+0x199` / `+0x19b`
+itself. The game's assign-general command (`CSetArmyLeaderCommand` can-execute,
+`FUN_14184efb0`) runs that check on both armies:
+- **The general's current army** (`leader+0x1048`): the same call as the loader.
+- **The target army:** for a new army it always passes. The war case needs a leader at `+0x88`,
+  `+0x199` / `+0x19a` / `+0x19b` are not set, and the HQ check after it (`FUN_140bf2020`) needs a
+  leader and a deployed HQ.
+
+So `create_army` refuses exactly where the button would: HQ deploying, HQ withdrawing, and
+`army+0x1b0` set. The game's text for the last one is `CANNOT_CHANGE_LEADER_WAR` = "Army is in a
+border war"; what else sets `+0x1b0` is not known. The red line's reason text
+(`HOI4_LOADER_CREATE_ARMY_CANNOT_LEAVE`) names only deploying or withdrawing.
+
+### G3: multiplayer test plan (open)
+
+**Blocks the next published release (zip), not the merge of `feature/create-army`.** Nothing in
+the loader has been tested in multiplayer yet (README). One session also covers D3 step 10.
+
+**Setup:**
+- Two players on the same game build (the same `hoi4.exe` build line in both `loader.log`s) and
+  the same `version.dll` (compare its SHA-256), both with `hoi4_loader_test` enabled.
+- The host plays Germany, the client Italy. New game, 1936.
+- After each step, compare on both machines:
+  - the army's name, its division count, its general, and the province of its divisions;
+  - the `create_army (...)` line in both `loader.log`s (every machine runs the effect, so the
+    lines must be identical);
+  - no out-of-sync warning in game.
+
+**Steps:**
+1. **Session classes (D3 step 10, part 1).** Host `loader.log`: "Lifecycle: game entered (...;
+   session: CNetworkServer, multiplayer)". Client: the same with `CProxyServer`.
+2. **The host takes a decision.** "Armies: prepare", then "Armies: A (6 divisions at Frankfurt)".
+   Loader Test Army A has 6 divisions at Frankfurt under General A on both machines.
+3. **The client takes a decision.** "Armies: prepare Italy (AI test)", then "Armies: give Italy
+   an army (AI test)". Loader Test AI Army has 10 divisions in Lazio under General AI on both.
+   Italy is human here, so the AI does not rearrange it.
+4. **`reassign = yes`.** The host takes "Armies: reassign General A". Army A2 (2 divisions) is
+   under General A, and Army A keeps 6 divisions without a general, on both machines.
+5. **A refused case.** The host takes "Armies: fail, general already leads an army". Nothing
+   spawns on either machine, and both `loader.log`s have the same refusal line.
+6. **Hot join** (`DAT_143087260`, the army handle counter, G1.2):
+   - the client leaves;
+   - the host takes "Armies: C (two provinces, field marshal)" and keeps the game running;
+   - the client hot-joins at once;
+   - check: joiner's `loader.log` has "..., HOT JOIN" in the game-entered line, and Army C is
+     the same on both;
+   - then the host takes "Armies: B (30 divisions, spread)". B must be the same on both, with no
+     OOS, for at least a week of game time;
+   - give Army B and Army C a move order on the host and watch them move on the client. A
+     counter that differs would give different army handles, and orders would go astray or
+     cause an OOS.
+7. **Save and reload in multiplayer:**
+   - the host saves, and both quit to the menu;
+   - the host loads that save in a multiplayer game, and the client joins;
+   - every army from steps 2-6 is unchanged on both machines;
+   - the host takes "Armies: reassign General A" once more; it must be the same on both, with no
+     OOS.
+8. **on_game_loaded (D3 step 10, part 2).** After step 7, both `loader.log`s have "on_game_loaded
+   NOT fired: ... (this version fires in single player only)" and no "on_game_loaded fired". On
+   the hot join (step 6) it must not fire either.
+
+**Pass:** steps 1-8 as described, no OOS, no crash. Then MODDING.md's "Not tested in
+multiplayer yet" for `create_army` and the README's multiplayer note can be updated.
 
