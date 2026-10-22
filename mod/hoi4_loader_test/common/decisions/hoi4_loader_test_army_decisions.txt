@@ -309,6 +309,82 @@ hoi4_loader_army_category = {
 		}
 		ai_will_do = { base = 0 }
 	}
+	# Border war, in three steps: Germany starts a vanilla border war from Saxony (65) into the
+	# Sudetenland (69, Czechoslovakia), whose leader_score picks General B; create_army with General
+	# B and reassign = yes is then refused because General B's army is in a border war; the last
+	# decision ends the border war (vanilla cancel_border_war).
+	hoi4_loader_army_border_war = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_create_army = yes
+			has_country_flag = hoi4_loader_army_prepared
+			NOT = { has_global_flag = hoi4_loader_army_border_war }
+			HLT_general_b = { is_general_captured = no }
+		}
+		complete_effect = {
+			set_global_flag = hoi4_loader_army_border_war
+			HLT_general_b = { set_character_flag = hoi4_loader_border_war_leader }
+			start_border_war = {
+				change_state_after_war = no
+				attacker = {
+					state = 65
+					num_provinces = 4
+					on_win = hoi4_loader_bw.1
+					on_lose = hoi4_loader_bw.1
+					on_cancel = hoi4_loader_bw.1
+					leader_score = {
+						base = 0
+						modifier = { has_character_flag = hoi4_loader_border_war_leader add = 1000 }
+					}
+				}
+				defender = {
+					state = 69
+					num_provinces = 4
+					on_win = hoi4_loader_bw.1
+					on_lose = hoi4_loader_bw.1
+					on_cancel = hoi4_loader_bw.1
+				}
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_army_fail_border_war = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_create_army = yes
+			has_country_flag = hoi4_loader_army_prepared
+			has_global_flag = hoi4_loader_army_border_war
+		}
+		complete_effect = {
+			64 = {
+				create_army = {
+					leader = HLT_general_b
+					reassign = yes
+					create_unit = { division = "division_template = \"Loader Test Infantry\"" owner = ROOT count = 1 }
+				}
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_army_end_border_war = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_create_army = yes
+			has_global_flag = hoi4_loader_army_border_war
+		}
+		complete_effect = {
+			clr_global_flag = hoi4_loader_army_border_war
+			HLT_general_b = { clr_character_flag = hoi4_loader_border_war_leader }
+			cancel_border_war = {
+				attacker = 65
+				defender = 69
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
 
 	# --- AI ------------------------------------------------------------------------------------
 	# Two steps, so the second decision's preview sees General AI already recruited by Italy:

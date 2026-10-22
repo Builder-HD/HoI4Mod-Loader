@@ -1,0 +1,15 @@
+# The border war test (hoi4_loader_test_army_decisions.txt): start_border_war needs on_win /
+# on_lose / on_cancel events; this one only reports that the border war ended.
+add_namespace = hoi4_loader_bw
+
+country_event = {
+	id = hoi4_loader_bw.1
+	title = hoi4_loader_bw.1.t
+	desc = hoi4_loader_bw.1.d
+	picture = GFX_report_event_generic_read_write
+	is_triggered_only = yes
+
+	option = {
+		name = hoi4_loader_bw.1.a
+	}
+}
