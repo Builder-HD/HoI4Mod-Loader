@@ -3079,5 +3079,16 @@ earlier in the same effect block previews red but works (seen in the Italy test)
   `recruit_character` warnings, the unknown native commands of the other test decisions, and the
   known lobby `remotefile.cpp:238` lines. Nothing else new.
 
-**Still open:** the "captured" refusal (needs a captured general) and multiplayer.
+**Test 14, captured: passed.**
+- No war is needed: vanilla `capture_by` (character scope, as the game's own debug decisions use
+  it) and `release_from_captivity`. The test mod has "France captures General B", "fail, General B
+  is captured" and "release General B".
+- With General B captured, every `create_army` naming General B shows "Loader Test General B cannot
+  lead a new army: captured. Nothing is created." in red (checked on decision B).
+- **Found while testing:** a refused `create_army` still showed the vanilla `create_unit` lines
+  under the red line ("Create 30 German unit in Brandenburg"), although nothing is created.
+  Now the tooltip callback can call `TooltipText::hideChildren()`, and `create_army` does when the
+  general is refused: only the red line shows.
+
+**Still open:** multiplayer.
 
