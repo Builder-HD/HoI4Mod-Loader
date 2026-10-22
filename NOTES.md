@@ -2886,7 +2886,8 @@ global counter `DAT_143087260`.
 | `+0x88` | leader (`CUnitLeader*`) |
 | `+0x160` | name string |
 | `+0x180` | theatre (`FUN_140befc20`, asserts it is set) |
-| `+0x199` / `+0x19a` / `+0x19b` | HQ deploying / … / withdrawing (leader change refused) |
+| `+0x199` / `+0x19a` / `+0x19b` | HQ deploying / deploying / withdrawing (leader change refused) |
+| `+0x1b0` | border war object (non-null while the army is in one; G1.3) |
 | `+0x1b8` | parent army group |
 | `+0x230` / `+0x23c` | child armies (army groups only) |
 
@@ -2958,8 +2959,28 @@ id, slot 13 = clone. The game-state work in each execute:
     `ARMY_AMOUNT_PENALTY`);
   - `GARRISON_ORDER_ARMY_CAP_FACTOR = 3.0` raises the cap for garrison orders.
 - **Leader change refused** (`FUN_140bebaa0`) while the army's HQ is deploying
-  (`CANNOT_CHANGE_LEADER_DEPLOYING`) or withdrawing (`…_WITHDRAWING`), and with `CANNOT_CHANGE_LEADER_WAR` when `army+0x1b0` is set (that field is
-  not identified yet).
+  (`CANNOT_CHANGE_LEADER_DEPLOYING`, `+0x199` or `+0x19a`) or withdrawing (`…_WITHDRAWING`,
+  `+0x19b`), and with `CANNOT_CHANGE_LEADER_WAR` when `army+0x1b0` is set and the army has a
+  leader. Order in the function: war, deploying, withdrawing; army groups always may.
+- **`army+0x1b0` is the army's border war** (identified 2026-10-22, vanilla 1.19.3 copy; the
+  function's layout is the same on 1.19.3 checksum-patched and 1.19.2):
+  - **Every reader the game has gives it a border-war meaning.** Besides `FUN_140bebaa0`
+    ("Army is in a border war"):
+    - the unit move check `FUN_140bfa300` refuses with `UNIT_BORDER_WAR` ("$STATE$ is in a border
+      war.") when the unit's army (`unit+0xc0`) has `+0x1b0` set;
+    - `start_border_war` (`FUN_140335500`), choosing divisions for a new border war, skips units
+      whose army has a `+0x1b0` object, unless that object's byte `+0x52` is set.
+  - **What it points to:** an object with two sides (`+0x28`, `+0x30`). Each side holds an army
+    handle at `+0x4e8` and a value at `+0x4f0`. `FUN_140bef440` (the army's commander skill)
+    takes that value from the side matching the army instead of from its general;
+    `FUN_140beb770` derives a ratio from it for the UI.
+  - **Lifetime:** the army constructor (`FUN_140be9c10`) sets it to 0.
+  - **Not found:** the store that sets it. No direct write exists in the army code or in
+    `start_border_war`. It is likely a small generic setter: there are several `+0x1b0` /
+    `+0x1b8` pair setters, such as `FUN_14126c7f0`. The in-game test 15 (G2) checks it
+    end-to-end.
+  - `create_army` reads these fields only to name the refusal (G2); the refusal itself is
+    `FUN_140bebaa0`.
 - **Leader eligibility:** the UI lists the country's army leaders. The engine checks for:
   - an army leader: `leader+0xe7c < 2`; a field marshal can lead a single army (the AI avoids
     it, `ARMY_LEADER_ASSIGN_FIELD_MARSHAL_TO_ARMY = -500`);
@@ -3097,7 +3118,7 @@ earlier in the same effect block previews red but works (seen in the Italy test)
   already leads an army) show only the red line; reassign still shows its `create_unit` line;
   after the release, decision B shows its normal lines again.
 
-**Still open:** multiplayer (G3).
+**Still open:** multiplayer (G3) and test 15 (border war refusal, below).
 
 **Refusal while the general's army can't change leader** (checked for the PR, 2026-10-22):
 `ReadLeader` calls the engine's own check `FUN_140bebaa0(army, nullptr)` (found through
@@ -3109,10 +3130,33 @@ itself. The game's assign-general command (`CSetArmyLeaderCommand` can-execute,
   `+0x199` / `+0x19a` / `+0x19b` are not set, and the HQ check after it (`FUN_140bf2020`) needs a
   leader and a deployed HQ.
 
-So `create_army` refuses exactly where the button would: HQ deploying, HQ withdrawing, and
-`army+0x1b0` set. The game's text for the last one is `CANNOT_CHANGE_LEADER_WAR` = "Army is in a
-border war"; what else sets `+0x1b0` is not known. The red line's reason text
-(`HOI4_LOADER_CREATE_ARMY_CANNOT_LEAVE`) names only deploying or withdrawing.
+So `create_army` refuses exactly where the button would: HQ deploying, HQ withdrawing, and the
+army in a border war (`army+0x1b0`, G1.3).
+
+**Reason text per case (fix before the merge, 2026-10-22).** The red line used to say "deploying
+or withdrawing" for all three. Now, after `FUN_140bebaa0` refuses, `WhyNot` reads the same fields
+in the function's order, only to choose the message:
+- **Offsets:** taken from the function's own code (`kCodeCanChangeStart` / `Deploying` /
+  `Withdrawing`). They are cross-checked against the army group flag and the leader field found
+  elsewhere, and are the same on all three builds.
+- **If they are not found,** the generic reason is used and `create_army` still works.
+
+| Key | English | Vanilla text it follows |
+|---|---|---|
+| `HOI4_LOADER_CREATE_ARMY_DEPLOYING` | their army $ARMY$ is currently being deployed | `CANNOT_CHANGE_LEADER_DEPLOYING` "$NAME$ is currently being deployed" |
+| `HOI4_LOADER_CREATE_ARMY_WITHDRAWING` | their army $ARMY$ is currently being withdrawn | `CANNOT_CHANGE_LEADER_WITHDRAWING` "$NAME$ is currently being withdrawn" |
+| `HOI4_LOADER_CREATE_ARMY_BORDER_WAR` | their army $ARMY$ is in a border war | `CANNOT_CHANGE_LEADER_WAR` "Army is in a border war" |
+| `HOI4_LOADER_CREATE_ARMY_CANNOT_LEAVE` | their army $ARMY$ cannot change its general now | (fallback: fields not found) |
+
+**Test 15, border war (open, in game).** The test mod's "border war from Saxony, led by General
+B" runs vanilla `start_border_war` (65 into 69) with a `leader_score` that picks General B. Then:
+- check that the border war army's general is General B;
+- hover "fail, General B's army is in a border war": the red line should end "their army <name>
+  is in a border war. Nothing is created.";
+- take it: nothing spawns, and loader.log has the same reason;
+- "end the border war" cancels it.
+
+If another general is picked, the test is inconclusive; note who.
 
 ### G3: multiplayer test plan (open)
 
