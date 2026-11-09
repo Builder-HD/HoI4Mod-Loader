@@ -284,8 +284,14 @@ void RefreshConstructionView() {
     if (target) g_uiPost(target, &event);
 }
 
-// Dismantling a level costs this fraction of building it (the same work at a third of the time).
-const int64_t kDismantleCostDivisor = 3;
+// Dismantling a level costs this percentage of building it: a game rule's global flag, read by the
+// plugin, refreshed at each entry point below (daily step, progress, queueing) so StepCost stays cheap.
+RailwayCost_t g_costFn = nullptr;
+int g_costPercent = kRailwayDismantleDefaultPercent;
+void RefreshCostPercent() {
+    int p = g_costFn ? g_costFn() : -1;
+    g_costPercent = p >= 0 ? p : kRailwayDismantleDefaultPercent;
+}
 const char kInsertAtEnd = 1;  // CreateRailwayLine reorders the queue only for 0, 2 and 3
 
 int LineBase(void* line) { return Rd<int>(line, g_lineBase); }
@@ -309,7 +315,7 @@ void* Slot(void* line, uint32_t slot) { return (*(void***)line)[slot]; }
 int64_t StepCost(void* holder, int level) {
     int64_t cost = 0;
     g_cost(&cost, level, holder);
-    return cost > 0 ? cost / kDismantleCostDivisor : 0;
+    return cost > 0 ? cost * g_costPercent / 100 : 0;
 }
 
 // Index of the first link above the target (in path order) and its level, or -1.
@@ -362,6 +368,7 @@ void WriteProgress(void* line, int64_t costLeft, int levelsLeft) {
 void DismantleProgress(void* line) {
     void* holder = LineHolder(line);
     if (!holder) return;
+    RefreshCostPercent();
     int levelsLeft;
     int64_t costLeft = CostLeft(line, holder, &levelsLeft);
     WriteProgress(line, costLeft, levelsLeft);
@@ -371,6 +378,7 @@ void DismantleProgress(void* line) {
 int g_dailyLogged = 0;
 
 void DismantleDaily(void* line) {
+    RefreshCostPercent();
     Wr<int>(line, g_lineCurrent, -1);
     int count;
     const int* path = LinePath(line, &count);
@@ -622,17 +630,43 @@ thread_local bool g_markDismantle = false;
 
 struct Marker {
     const char* key;
-    const char* fallback;  // UTF-8
-    std::string text;      // resolved on first use (main thread)
+    const char* icon;   // the built-in text icon's name
+    bool resolved;
+    std::string text;   // resolved on first use (main thread); may stay empty (no marker)
 };
-Marker g_dismantleMarker{kRailwayDismantlePrefixKey, "\xC2\xA3" "decrease_texticon" "\xC2\xA3" " "};
-Marker g_buildMarker{kRailwayBuildPrefixKey, "\xC2\xA3" "increase_texticon" "\xC2\xA3" " "};
+Marker g_dismantleMarker{kRailwayDismantlePrefixKey, "decrease_texticon", false, {}};
+Marker g_buildMarker{kRailwayBuildPrefixKey, "increase_texticon", false, {}};
+
+// The engine does not keep "£" from a localisation file as typed: it converts the icon delimiter
+// on load to its own byte sequence (a literal "£", in UTF-8 or Windows-1252, shows as text or
+// blanks the title). So the delimiter is read back from vanilla's TRIGGER_FULLFILLED_PREFIX,
+// "£trigger_yes£" in the file. Empty when that key does not have that shape.
+std::string IconDelimiter() {
+    const EngineString* v = LocalizeKey("TRIGGER_FULLFILLED_PREFIX");
+    if (!v) return {};
+    std::string s = v->c_str();
+    size_t at = s.find("trigger_yes");
+    if (at == 0 || at == std::string::npos) return {};
+    std::string d = s.substr(0, at);
+    if (s.compare(at + 11, std::string::npos, d) != 0) return {};
+    return d;
+}
 
 const std::string& MarkerText(Marker& m) {
-    if (m.text.empty()) {
-        const EngineString* custom = LocalizeKey(m.key);
-        m.text = custom ? custom->c_str() : m.fallback;
-        Log("railway_queue: railway queue titles use %s", custom ? m.key : m.fallback);
+    if (!m.resolved) {
+        m.resolved = true;
+        if (const EngineString* custom = LocalizeKey(m.key)) {
+            m.text = custom->c_str();
+            Log("railway_queue: railway queue titles use %s", m.key);
+        } else if (std::string d = IconDelimiter(); !d.empty()) {
+            m.text = d + m.icon + d + " ";
+            std::string hex;
+            char b[4];
+            for (unsigned char c : d) { snprintf(b, sizeof b, "%02X", c); hex += b; }
+            Log("railway_queue: railway queue titles use %s (icon delimiter bytes %s)", m.icon, hex.c_str());
+        } else {
+            Log("railway_queue: icon delimiter not found (TRIGGER_FULLFILLED_PREFIX); railway queue titles stay unmarked");
+        }
     }
     return m.text;
 }
@@ -776,6 +810,7 @@ bool SamePath(void* line, const std::vector<int>& path) {
 }  // namespace
 
 void SetRailwayDismantleRules(RailwayRules_t rules) { g_rulesFn = rules; }
+void SetRailwayDismantleCost(RailwayCost_t cost) { g_costFn = cost; }
 
 bool HookRailwayMapIcons(RailwayIconClick_t onClick) {
     if (!HaveRailwayLines()) return false;
@@ -821,6 +856,7 @@ int QueueOrDeepenRailwayDismantle(int tag, const std::vector<int>& path) {
         void* holder = LineHolder(line);
         if (target <= 0 || !holder) return 0;  // already going down to nothing
         // One level deeper: the work for that level is added to what remains.
+        RefreshCostPercent();
         int levels;
         int64_t before = CostLeft(line, holder, &levels);
         Wr<int>(line, g_lineTarget, target - 1);
@@ -978,42 +1014,66 @@ bool RailwaySelfCheck(int* linksChecked, std::string* problem) {
     return true;
 }
 
-bool RailwayPath(int from, int to, std::vector<int>* path) {
-    path->clear();
+namespace {
+// Breadth first search over links of at least minLevel: the path with the fewest links. Neighbours
+// are visited in the engine's sorted order, so every machine finds the same path. Triggers call it
+// too (several threads, no allocation per call), so the work arrays are per thread, grow once and
+// are reset by a generation stamp instead of being cleared.
+bool FindPath(int from, int to, int minLevel, std::vector<int>* path) {
+    if (path) path->clear();
     void* m = HaveRailways() ? Manager() : nullptr;
     if (!m || from == to || !Info(m, from) || !Info(m, to)) return false;
-    // Breadth first over links with a railway: the path with the fewest links. Neighbours are
-    // visited in the engine's sorted order, so every machine finds the same path.
+    if (minLevel < 1) minLevel = 1;
+    struct Work {
+        std::vector<uint32_t> stamp;
+        std::vector<int> prev, queue;
+        uint32_t generation = 0;
+    };
+    thread_local Work w;
     int count = InfoCount(m);
-    std::vector<int> prev((size_t)count, 0);
-    std::vector<int> queue;
-    queue.push_back(from);
-    prev[from] = from;
-    for (size_t head = 0; head < queue.size() && !prev[to]; ++head) {
-        void* info = Info(m, queue[head]);
+    if ((int)w.stamp.size() < count) {
+        w.stamp.assign((size_t)count, 0);
+        w.prev.assign((size_t)count, 0);
+        w.queue.assign((size_t)count, 0);
+        w.generation = 0;
+    }
+    if (++w.generation == 0) {  // wrapped: old stamps could match again
+        std::fill(w.stamp.begin(), w.stamp.end(), 0u);
+        w.generation = 1;
+    }
+    const uint32_t gen = w.generation;
+    int head = 0, tail = 0;
+    w.queue[tail++] = from;
+    w.stamp[from] = gen;
+    w.prev[from] = from;
+    bool found = false;
+    while (head < tail && !found) {
+        int cur = w.queue[head++];
+        void* info = Info(m, cur);
         int n = 0;
         Pair* p = info ? Pairs(info, &n) : nullptr;
         for (int i = 0; p && i < n; ++i) {
             int next = p[i].neighbour;
-            if (p[i].level <= 0 || next <= 0 || next >= count || prev[next]) continue;
-            prev[next] = queue[head];
-            queue.push_back(next);
+            if (p[i].level < minLevel || next <= 0 || next >= count || w.stamp[next] == gen) continue;
+            w.stamp[next] = gen;
+            w.prev[next] = cur;
+            if (tail < count) w.queue[tail++] = next;
+            if (next == to) {
+                found = true;
+                break;
+            }
         }
     }
-    if (!prev[to]) return false;
-    for (int v = to; v != from; v = prev[v]) path->push_back(v);
+    if (!found || !path) return found;
+    for (int v = to; v != from; v = w.prev[v]) path->push_back(v);
     path->push_back(from);
     std::reverse(path->begin(), path->end());
     return true;
 }
 
-int DowngradeRailway(const std::vector<int>& path, int levels) {
-    void* m = HaveRailways() ? Manager() : nullptr;
-    void* gs = GameState();
-    void* supply = gs ? Rd<void*>(gs, g_supplyOffset) : nullptr;
-    if (!m || !supply || *(void***)supply != g_vtSupply || levels <= 0) return 0;
+// Lowers every link of `path` by `levels`; collects the provinces whose supply must refresh.
+int LowerPath(void* m, const std::vector<int>& path, int levels, std::vector<int>* dirty) {
     int changed = 0;
-    std::vector<int> dirty;
     for (size_t i = 1; i < path.size(); ++i) {
         int a = path[i - 1], b = path[i];
         void* infoA = Info(m, a);
@@ -1025,20 +1085,61 @@ int DowngradeRailway(const std::vector<int>& path, int levels) {
         bool okB = LowerEnd(infoB, a, lowered);
         if (!okA || !okB) Log("railways: link %d-%d is stored on %s end only", a, b, okA ? "one" : "the other");
         ++changed;
-        dirty.push_back(a);
-        dirty.push_back(b);
+        dirty->push_back(a);
+        dirty->push_back(b);
     }
-    // The engine's own refresh after a railway change, once per affected province.
+    return changed;
+}
+
+// The engine's own refresh after a railway change, once per affected province, then the graphics.
+void FinishChange(void* supply, const std::vector<int>& dirty, int changed) {
     auto notify = (SupplyNotify_t)(*(void***)supply)[g_notifySlot];
     std::vector<int> done;
     for (int prov : dirty) {
-        bool seen = false;
-        for (int d : done) seen |= d == prov;
-        if (seen) continue;
+        if (std::find(done.begin(), done.end(), prov) != done.end()) continue;
         done.push_back(prov);
         notify(supply, prov);
     }
     if (changed) RefreshRailwayGraphics();
+}
+
+void* Supply() {
+    void* gs = GameState();
+    void* supply = gs ? Rd<void*>(gs, g_supplyOffset) : nullptr;
+    return supply && *(void***)supply == g_vtSupply ? supply : nullptr;
+}
+}  // namespace
+
+bool RailwayPath(int from, int to, std::vector<int>* path) { return FindPath(from, to, 1, path); }
+
+bool RailwayConnected(int from, int to, int minLevel) { return FindPath(from, to, minLevel, nullptr); }
+
+int RemoveAllRailwayRoutes(int from, int to, int* routes) {
+    *routes = 0;
+    void* m = HaveRailways() ? Manager() : nullptr;
+    void* supply = Supply();
+    if (!m || !supply) return 0;
+    // Each round removes the current shortest route completely, so at least one link goes and the
+    // loop ends once nothing connects the two provinces. The cap only guards against bad data.
+    int changed = 0;
+    std::vector<int> path, dirty;
+    while (*routes < 10000 && FindPath(from, to, 1, &path)) {
+        int lowered = LowerPath(m, path, 1000, &dirty);
+        if (!lowered) break;
+        changed += lowered;
+        ++*routes;
+    }
+    FinishChange(supply, dirty, changed);
+    return changed;
+}
+
+int DowngradeRailway(const std::vector<int>& path, int levels) {
+    void* m = HaveRailways() ? Manager() : nullptr;
+    void* supply = Supply();
+    if (!m || !supply || levels <= 0) return 0;
+    std::vector<int> dirty;
+    int changed = LowerPath(m, path, levels, &dirty);
+    FinishChange(supply, dirty, changed);
     return changed;
 }
 

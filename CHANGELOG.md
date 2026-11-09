@@ -54,6 +54,23 @@ A–F; NOTES.md has the findings and test results behind each.
     on 1.19.3 they are unchecked (NOTES.md Part G).
   - Test mod: a "HOI4 Loader: Railways" category with downgrade, remove, no-path and rebuild
     decisions on the Brandenburg to West Prussia railway.
+  - `levels = all` removes the whole route; `all_routes = yes` removes route after route until no
+    railway connects the two provinces. `queue_railway_dismantle` takes `levels = all` too.
+  - Native trigger `has_railway_between = { start_province target_province min_level }`: any
+    railway route between two provinces, optionally only over links of at least `min_level`.
+    Test mod: "remove every route" and "level 3 or 4 connection?" decisions.
+  - Dismantling cost is now 30% of building by default (was a third) and follows a global flag
+    `hoi4_loader_railway_dismantle_cost_<percent>`, set from a game rule "Cost" (10 to 100%).
+  - **Rules-only mod** "HOI4 Loader Railway Rules" (`mod/hoi4_loader_railway_rules`, in the
+    release zip): the four railway game rules moved out of the test mod, so they can be used
+    without its decisions. They have their own "Dismantle Railways" group, the three territory
+    rules first and Cost last. The mod also has the dismantle entry's "Dismantling" tooltip text.
+  - **Fixed:** without a mod defining the title marker keys, railway entries showed
+    "£decrease_texticon£" as text instead of the triangle: the engine converts the "£" icon
+    delimiter when it loads localisation, so the built-in markers now take it from vanilla's
+    `TRIGGER_FULLFILLED_PREFIX` ("£trigger_yes£"); without it titles stay unmarked.
+  - Native script API: an `Int` parameter can accept words next to numbers (`ParamSpec::choices`,
+    read with `IntWordIndex`).
 - **`railway_queue` feature (engine tier, needs `railways`)** with the native effect
   `queue_railway_dismantle`: the same lowering as an entry in the scope country's construction
   queue, one level at a time, each level at a third of the cost of building it.

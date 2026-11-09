@@ -242,16 +242,22 @@ int RailwayLevel(int a, int b);
 // The existing railway path with the fewest links from `from` to `to` (both ends included);
 // false if no railway connects them. Deterministic: the same on every machine.
 bool RailwayPath(int from, int to, std::vector<int>* path);
+// True if railway links of at least minLevel connect the two provinces. Read only and safe in a
+// trigger: no allocation per call (per-thread work arrays that grow once).
+bool RailwayConnected(int from, int to, int minLevel);
 // Lowers every link along the path by `levels` (not below 0), on both ends, updates the provinces'
 // rail_way buildings and marks the provinces dirty in the supply system. Returns the links changed.
 int DowngradeRailway(const std::vector<int>& path, int levels);
+// Removes the shortest route completely, again and again, until no railway connects the two
+// provinces. Returns the links removed; *routes = the number of routes removed.
+int RemoveAllRailwayRoutes(int from, int to, int* routes);
 // Queued dismantling: a railway construction line with its target below its base level, run by
 // hooks on the line's daily step, progress and finished check (NOTES.md G3).
 bool HaveRailwayLines();   // every line field, function and vtable slot resolved
 bool HookRailwayLines();   // queues the three hooks; call from a feature's init
 // Adds a dismantle line to the country's construction queue (at the end): every link of `path`
-// above `to` is lowered one level at a time down to `to`, each level costing a third of building
-// it. `from` is the highest level on the path. Main thread (an effect).
+// above `to` is lowered one level at a time down to `to`, each level costing a share of building
+// it (SetRailwayDismantleCost). `from` is the highest level on the path. Main thread (an effect).
 bool QueueRailwayDismantle(int tag, const std::vector<int>& path, int from, int to);
 // The construction queue's tooltip for a dismantle entry uses this key (placeholders as
 // RAILWAY_UPGRADE_TOOLTIP: $START_LEVEL$, $RAILWAY_NAME$, $TARGET_LEVEL$) when the loaded
@@ -272,6 +278,11 @@ bool HookRailwayEntryTitle();
 enum : int { kRailRuleAllies = 1, kRailRuleSubjects = 2, kRailRuleOverlord = 4 };
 using RailwayRules_t = int (*)();
 void SetRailwayDismantleRules(RailwayRules_t rules);
+// What dismantling a level costs, in percent of building it (default 30). `cost` is asked once per
+// dismantle line per day and per queue change (main thread); it returns -1 for the default.
+const int kRailwayDismantleDefaultPercent = 30;
+using RailwayCost_t = int (*)();
+void SetRailwayDismantleCost(RailwayCost_t cost);
 // Railway map badges (the level circle on each segment): while Shift is held they show a red X
 // where the player may dismantle, and a Shift+click calls onClick(segment path) instead of
 // vanilla's upgrade when onClick returns true. UI thread; onClick must defer game-state changes.

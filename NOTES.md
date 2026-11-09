@@ -3295,7 +3295,11 @@ Static analysis only; nothing here was observed at runtime yet.
 ## G2: `downgrade_railway`
 
 - **Path:** breadth first over links with level > 0, neighbours in the pair order, so the path
-  with the fewest links is the same on every machine.
+  with the fewest links is the same on every machine. The search uses per-thread work arrays
+  (grown once, reset by a generation stamp), so the trigger `has_railway_between` can run it from
+  AI threads without allocating; `min_level` only skips links below that level.
+- **All routes:** `all_routes = yes` repeats "find the shortest route, remove it completely" until
+  none is left (each round removes at least one link), then refreshes supply and graphics once.
 - **Lowering one end:** `levels[NeighborIndex]` = new level; the pair updated, or erased (memmove,
   count - 1) at 0; the mirror building set to the highest remaining level of that province (so
   `has_railway_level` follows). Construction progress (+0x50) is left alone.

@@ -1,10 +1,13 @@
 // railways (engine tier): lower railway levels, which vanilla script cannot do.
 //
-//   downgrade_railway = { start_province = 6521 target_province = 3312 }             one level
-//   downgrade_railway = { start_province = 6521 target_province = 3312 levels = 5 }  remove it
+//   downgrade_railway = { start_province = 6521 target_province = 3312 }                   one level
+//   downgrade_railway = { start_province = 6521 target_province = 3312 levels = all }      remove it
+//   downgrade_railway = { start_province = 6521 target_province = 3312 all_routes = yes }  disconnect
+//   has_railway_between = { start_province = 6521 target_province = 3312 min_level = 3 }   trigger
 //
 // Follows the existing railway with the fewest links from start_province to target_province and
-// lowers every link on it by `levels` (default 1; a link at 0 has no railway). Both ends of each
+// lowers every link on it by `levels` (default 1; a link at 0 has no railway). all_routes removes
+// the shortest route completely, again and again, until no railway connects them. Both ends of each
 // link, the provinces' rail_way buildings and the supply system are updated, as the engine does
 // when it builds a railway. vanilla remove_building = { type = rail_way } only changes that
 // building, never the railway itself (NOTES.md Part G).
@@ -12,6 +15,8 @@
 // The railway_queue feature in this file adds queue_railway_dismantle: the same lowering as a
 // construction queue entry (NOTES.md G3).
 #include <atomic>
+#include <climits>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -29,9 +34,20 @@ const LocText kDowngradeText{"HOI4_LOADER_DOWNGRADE_RAILWAY",
                              "Railway from province $FROM|Y$ to province $TO|Y$ ($LINKS|Y$ links) loses $LEVELS|Y$ level(s)."};
 const LocText kNoRailwayText{"HOI4_LOADER_DOWNGRADE_RAILWAY_NONE",
                              "No railway connects province $FROM|Y$ to province $TO|Y$: nothing changes."};
+const LocText kRemoveText{"HOI4_LOADER_REMOVE_RAILWAY",
+                          "Railway from province $FROM|Y$ to province $TO|Y$ ($LINKS|Y$ links) is removed."};
+const LocText kRemoveAllText{"HOI4_LOADER_REMOVE_ALL_RAILWAYS",
+                             "Every railway route between province $FROM|Y$ and province $TO|Y$ is removed (the "
+                             "shortest has $LINKS|Y$ links)."};
 
-// Parameters: 0 start_province, 1 target_province, 2 levels.
-int Levels(const Args& a) { return a.has(2) ? a.i(2) : 1; }
+// Parameters: 0 start_province, 1 target_province, 2 levels (a number or `all`), 3 all_routes.
+// `levels = all` removes the path whatever its levels: more than any railway level.
+const int kAllLevels = 1000;
+int Levels(const Args& a) {
+    if (!a.has(2)) return 1;
+    return IntWordIndex(a.i(2)) == 0 ? kAllLevels : a.i(2);
+}
+bool AllRoutes(const Args& a) { return a.b(3); }
 
 void Exec(const Args& a, const Scope&) {
     if (!g_ok.load(std::memory_order_relaxed)) return;
@@ -42,6 +58,15 @@ void Exec(const Args& a, const Scope&) {
     }
     if (!Engine::RailwaysReady()) {
         Log("downgrade_railway: railway data unavailable; nothing changed");
+        return;
+    }
+    if (AllRoutes(a)) {
+        if (a.has(2) && levels != kAllLevels)
+            Log("downgrade_railway: all_routes = yes removes every route completely; levels = %d ignored", levels);
+        int routes = 0;
+        int changed = Engine::RemoveAllRailwayRoutes(from, to, &routes);
+        Log("downgrade_railway: provinces %d -> %d, all routes: %d route(s), %d link(s) removed", from, to, routes,
+            changed);
         return;
     }
     std::vector<int> path;
@@ -62,8 +87,44 @@ void Tooltip(const Args& a, const Scope&, TooltipText& out) {
         return;
     }
     args.push_back({"LINKS", std::to_string(path.size() - 1)});
+    if (AllRoutes(a)) {
+        out.add(native_localize(kRemoveAllText, args).c_str());
+        return;
+    }
+    if (Levels(a) == kAllLevels) {
+        out.add(native_localize(kRemoveText, args).c_str());
+        return;
+    }
     args.push_back({"LEVELS", std::to_string(Levels(a))});
     out.add(native_localize(kDowngradeText, args).c_str());
+}
+
+// --- has_railway_between: is there a railway (of at least min_level) between two provinces? ---
+// Parameters: 0 start_province, 1 target_province, 2 min_level (default 1).
+const LocText kBetweenText{"HOI4_LOADER_HAS_RAILWAY_BETWEEN",
+                           "A railway connects province $FROM|Y$ to province $TO|Y$"};
+const LocText kBetweenLevelText{"HOI4_LOADER_HAS_RAILWAY_BETWEEN_LEVEL",
+                                "A railway of level $LEVEL|Y$ or higher connects province $FROM|Y$ to province $TO|Y$"};
+const LocText kNotBetweenText{"HOI4_LOADER_HAS_NO_RAILWAY_BETWEEN",
+                              "No railway connects province $FROM|Y$ to province $TO|Y$"};
+const LocText kNotBetweenLevelText{"HOI4_LOADER_HAS_NO_RAILWAY_BETWEEN_LEVEL",
+                                   "No railway of level $LEVEL|Y$ or higher connects province $FROM|Y$ to province "
+                                   "$TO|Y$"};
+
+int MinLevel(const Args& a) { return a.has(2) && a.i(2) > 1 ? a.i(2) : 1; }
+
+bool EvalBetween(const Args& a, const Scope&) {
+    if (!g_ok.load(std::memory_order_relaxed)) return false;
+    return Engine::RailwayConnected(a.i(0), a.i(1), MinLevel(a));
+}
+
+void TooltipBetween(const Args& a, const Scope&, bool negated, TooltipText& out) {
+    std::vector<LocArg> args = {{"FROM", std::to_string(a.i(0))}, {"TO", std::to_string(a.i(1))}};
+    bool level = MinLevel(a) > 1;
+    if (level) args.push_back({"LEVEL", std::to_string(MinLevel(a))});
+    const LocText& t = negated ? (level ? kNotBetweenLevelText : kNotBetweenText)
+                               : (level ? kBetweenLevelText : kBetweenText);
+    out.add(native_localize(t, args).c_str());
 }
 
 // No C++ objects with destructors here, so SEH can contain a fault while reading.
@@ -93,7 +154,7 @@ void OnEntered(bool) {
 //
 // Country scope. Adds a line to the country's construction queue that lowers every link of the same
 // path as downgrade_railway, one level at a time, down to (highest level on the path - levels).
-// Each level costs a third of building it, so it takes a third of the time.
+// Each level costs 30% of building it by default (a game rule can change that, see ReadCostPercent).
 const char* const kQueueFeature = "railway_queue";
 
 const LocText kQueueText{"HOI4_LOADER_QUEUE_RAILWAY_DISMANTLE",
@@ -161,6 +222,31 @@ int ReadRules() {
     return mask;
 }
 
+// The cost of dismantling, in percent of building: a global flag hoi4_loader_railway_dismantle_cost_<N>
+// (N = 0..1000), which a mod sets from a game rule. With several, the most recently set one counts.
+// None: -1, the engine's default (30).
+const char kCostPrefix[] = "hoi4_loader_railway_dismantle_cost_";
+
+int ReadCostPercent() {
+    struct Best {
+        int percent = -1;
+        int date = INT_MIN;
+    } best;
+    Engine::ForEachGlobalFlag(
+        [](const Engine::FlagEntry& f, void* ctx) {
+            const char* name = Engine::TokenName(f.token);
+            if (!name || strncmp(name, kCostPrefix, sizeof(kCostPrefix) - 1) != 0) return;
+            const char* digits = name + sizeof(kCostPrefix) - 1;
+            int n = 0, len = 0;
+            for (; digits[len] >= '0' && digits[len] <= '9' && len < 5; ++len) n = n * 10 + (digits[len] - '0');
+            if (len == 0 || digits[len] != '\0' || n > 1000) return;
+            Best* b = (Best*)ctx;
+            if (f.setDate >= b->date) *b = {n, f.setDate};
+        },
+        &best);
+    return best.percent;
+}
+
 // Shift+click on a railway map badge: one more dismantle level on that segment. The click comes
 // from the UI, so the change waits for the next safe point on the main thread. Only where local
 // writes are allowed (single player): a click happens on one machine only.
@@ -209,16 +295,18 @@ bool RailwayQueueInit() {
     // Allies / subjects / overlord: the game rules' global flags.
     OnLexerReady(&InternRuleFlags);
     Engine::SetRailwayDismantleRules(&ReadRules);
+    Engine::SetRailwayDismantleCost(&ReadCostPercent);
     register_native_effect({"queue_railway_dismantle",
                             "Add dismantling a railway to the scope country's construction queue (hoi4_loader). Uses "
                             "the same path as downgrade_railway (the existing railway with the fewest links from "
                             "start_province to target_province) and lowers its links one level at a time down to the "
-                            "path's highest level minus `levels` (default 1). Each level costs a third of building it. "
-                            "Nothing is queued if no railway connects the provinces.",
+                            "path's highest level minus `levels` (default 1; `all` removes it). Each level costs 30% "
+                            "of building it, or what the global flag hoi4_loader_railway_dismantle_cost_<percent> "
+                            "says. Nothing is queued if no railway connects the provinces.",
                             Form::Block,
                             {{"start_province", ParamType::Int, true},
                              {"target_province", ParamType::Int, true},
-                             {"levels", ParamType::Int, false}},
+                             {"levels", ParamType::Int, false, ScopeDefault::None, "all"}},
                             ScopeMask::Country, &ExecQueue, &TooltipQueue, {kQueueText, kNoRailwayText}},
                            kQueueFeature);
     return true;
@@ -232,14 +320,29 @@ bool RailwaysInit() {
     register_native_effect({"downgrade_railway",
                             "Lower the railway between two provinces (hoi4_loader). Follows the existing railway with "
                             "the fewest links from start_province to target_province and lowers every link on it by "
-                            "`levels` (default 1); a link lowered to 0 is removed. Updates both ends of each link, the "
-                            "provinces' rail_way buildings and supply. Does nothing if no railway connects them.",
+                            "`levels` (default 1; `all` removes it); a link lowered to 0 is removed. `all_routes = "
+                            "yes` instead removes every route until no railway connects the two provinces, which can "
+                            "include long detours. Updates both ends of each link, the provinces' rail_way buildings "
+                            "and supply. Does nothing if no railway connects them.",
                             Form::Block,
                             {{"start_province", ParamType::Int, true},
                              {"target_province", ParamType::Int, true},
-                             {"levels", ParamType::Int, false}},
-                            ScopeMask::Any, &Exec, &Tooltip, {kDowngradeText, kNoRailwayText}},
+                             {"levels", ParamType::Int, false, ScopeDefault::None, "all"},
+                             {"all_routes", ParamType::Bool, false}},
+                            ScopeMask::Any, &Exec, &Tooltip,
+                            {kDowngradeText, kRemoveText, kRemoveAllText, kNoRailwayText}},
                            kFeature);
+    register_native_trigger({"has_railway_between",
+                             "True if a railway connects start_province to target_province (hoi4_loader), over any "
+                             "route. With `min_level`, only links of at least that level count. The same railway "
+                             "data downgrade_railway uses. Guard it with hoi4_loader_feature_railways = yes in the "
+                             "same AND block.",
+                             Form::Block,
+                             {{"start_province", ParamType::Int, true},
+                              {"target_province", ParamType::Int, true},
+                              {"min_level", ParamType::Int, false}},
+                             ScopeMask::Any, &EvalBetween, &TooltipBetween},
+                            kFeature);
     OnGameEntered(&OnEntered);
     return true;
 }
