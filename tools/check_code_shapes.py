@@ -142,6 +142,12 @@ def check(path, codes):
     results.append(('kCodeArmyDailyLoop (army.daily lea + 0x14)', ok, hex(refs[0]) if refs else '-'))
     results += check_region_scope(img, codes, text_va, text)
     results.append(check_trigger_registry(img, codes, text_va, text))
+    # Railway construction lines (railway_queue): output getter slot 14, finished slot 25, cancel
+    # slot 27 (the loader takes the cancel slot from kSigRailLineDailyHead; 27 on the checked build).
+    rail = img.vtable('.?AVCRailwayProductionLine@@')
+    for slot, code in ((14, 'kCodeRailLineOutput'), (25, 'kCodeRailLineFinished'), (27, 'kCodeRailLineCancel')):
+        ok = bool(rail) and len(rail[1]) > slot and img.match_at(rail[1][slot], codes[code])
+        results.append(('%s (railway line slot %d)' % (code, slot), ok, hex(rail[1][slot]) if ok else '-'))
     results += check_create_army(img, codes, text_va, text)
     return results
 

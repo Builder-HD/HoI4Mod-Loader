@@ -17,6 +17,9 @@ hoi4_loader_data_category = {
 # create_army tests (player only).
 hoi4_loader_army_category = {
 	icon = generic_research
+# Railways (player only).
+hoi4_loader_railway_category = {
+	icon = generic_construction
 	visible = {
 		is_ai = no
 		hoi4_loader_present = yes

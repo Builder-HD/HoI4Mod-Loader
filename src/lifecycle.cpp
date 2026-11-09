@@ -193,6 +193,15 @@ bool SessionAllowsLocalWrites(const char** reason) {
     return why == nullptr;
 }
 
+bool CurrentSessionSinglePlayer(const char** reason) {
+    const char* why = !g_session.known        ? "session type unknown (no game entered yet, or unreadable)"
+                      : g_session.hotJoin     ? "multiplayer hot join"
+                      : !g_session.singlePlayer ? "multiplayer"
+                                                : nullptr;
+    if (reason) *reason = why;
+    return why == nullptr;
+}
+
 bool MainThreadQueueAvailable() { return g_frameHooked; }
 
 void OnMainThreadFrame(void (*fn)()) { g_onFrame.push_back(fn); }

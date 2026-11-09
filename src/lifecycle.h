@@ -21,6 +21,10 @@ bool LexerReady();
 // a multiplayer session would have to do the same thing at the same tick, which a local
 // callback cannot guarantee. On false, *reason says why (for the log).
 bool SessionAllowsLocalWrites(const char** reason);
+// The session of the game running now, as classified when it was entered: true only for single
+// player (no hot join). For actions the local player starts (UI clicks) whose game-state change
+// is deferred to a safe point; on false, *reason says why.
+bool CurrentSessionSinglePlayer(const char** reason);
 
 // --- Main thread ------------------------------------------------------------------------------
 // The engine changes game state on its main thread only, but hooks into engine functions may be

@@ -44,6 +44,39 @@ A–F; NOTES.md has the findings and test results behind each.
 - **Native API:** effect blocks (`register_native_effect_block`), whose children run inside the
   plugin's execute (their tooltip callback can hide the children's lines), and a `Text`
   parameter type for free text such as army names.
+- **`railways` feature (engine tier)** with the native effect `downgrade_railway = {
+  start_province = A target_province = B levels = N }`: lowers every link of the existing railway
+  with the fewest links between A and B, on both ends, with the rail_way buildings and the supply
+  system updated as the engine does when it builds one. Vanilla script can only raise railways.
+  - A self-check on game entry compares every stored link with its other end; on any mismatch
+    the feature switches itself off.
+  - 7 new signatures (51 in total). They were found on 1.19.4.2, which is not a listed build;
+    on 1.19.3 they are unchecked (NOTES.md Part G).
+  - Test mod: a "HOI4 Loader: Railways" category with downgrade, remove, no-path and rebuild
+    decisions on the Brandenburg to West Prussia railway.
+- **`railway_queue` feature (engine tier, needs `railways`)** with the native effect
+  `queue_railway_dismantle`: the same lowering as an entry in the scope country's construction
+  queue, one level at a time, each level at a third of the cost of building it.
+  - The entry is a railway construction line whose target is below its starting level; hooks on
+    the line's daily step, progress and finished check run it. Normal railway lines are unchanged.
+  - 10 more signatures (61 in total) and 3 code shapes (20); `tools/check_code_shapes.py` checks
+    the new shapes.
+  - Test mod: "queue dismantling one level" and "queue removing it" decisions.
+  - The queue entry's tooltip says "Dismantling" when a mod defines
+    `HOI4_LOADER_RAILWAY_DISMANTLE_TOOLTIP` (hooks on the entry's tooltip builder and on
+    Localize; one more signature and one anchor), and railway entries' titles start with a red down triangle (dismantling) or a green up triangle (building, upgrading) (hooks on the entry update and SetText; two more signatures).
+  - **Shift on the railway map:** in the railway construction view, holding Shift shows a red X in
+    each railway segment's level circle; Shift+click queues one dismantle level for that segment, a
+    further click deepens it (single player only). Four more signatures.
+  - **Fixed a crash** after a railway was removed (seen after loading a save): the railway graphics
+    (pieces, trains, bridges) are now cleared and rebuilt after every removal, as the game does after
+    loading. One more signature.
+  - A queued or deepened dismantle shows in the construction queue at once (the construction view
+    gets the build command's refresh event). One more signature.
+  - **Where the player may dismantle:** every province of the segment must be controlled by the
+    player's country, or (per global flag) by a faction member, a subject or the overlord. The test
+    mod sets the flags from three game rules. A queued entry is cancelled once that no longer holds.
+    Three more signatures, 74 in total.
 
 ## 0.5.0-beta (2026-10-18), script version 3
 

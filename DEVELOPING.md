@@ -56,6 +56,8 @@ src/plugin_create_army.cpp    create_army feature (create_unit children -> army 
 src/engine_data.cpp           engine access for the data triggers (read-only game state)
 src/engine_scope.cpp          engine access for scope blocks (vanilla iterator templates, child scopes)
 src/engine_army.cpp           engine access for armies (create army, set leader, characters)
+src/plugin_railways.cpp       railways and railway_queue features (downgrade_railway, queue_railway_dismantle)
+src/engine_railway.cpp        engine access for railways (levels on both ends, supply refresh)
 src/native_script.h, .cpp     native effect/trigger API: schemas, registration, parsing, docs
 src/native_script_engine.cpp  native API engine binding (vtable clones, registries, Scope)
 src/native_scope_engine.cpp   native API engine binding of scope blocks and iterators
