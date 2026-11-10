@@ -182,11 +182,18 @@ def check_create_army(img, codes, text_va, text):
     results.append(('kCodeOrderGroupExecute / Create (same create_army)', ok, hex(create)))
 
     setcmd = img.vtable('.?AVCSetArmyLeaderCommand@@')
-    ok = bool(setcmd) and img.match_at(setcmd[1][9], codes['kCodeSetLeaderCheck'])
-    ok = ok and rel32(img, setcmd[1][9] + 0x2a) == resolve
-    can_change = rel32(img, setcmd[1][9] + 0x6d) if ok else 0
+    # Up to 1.19.3 one shape from the start; 1.19.4.2 restructured it (kCodeSetLeaderCheck1194 inside).
+    check1194 = None
+    if setcmd and img.match_at(setcmd[1][9], codes['kCodeSetLeaderCheck']):
+        shape, resolve_at, can_at = 'kCodeSetLeaderCheck', setcmd[1][9] + 0x2a, setcmd[1][9] + 0x6d
+    else:
+        check1194 = find_in(img, setcmd[1][9], 0x200, codes['kCodeSetLeaderCheck1194']) if setcmd else None
+        shape = 'kCodeSetLeaderCheck1194'
+        resolve_at, can_at = (check1194 + 0x37, check1194 + 0x16) if check1194 else (0, 0)
+    ok = bool(resolve_at) and rel32(img, resolve_at) == resolve
+    can_change = rel32(img, can_at) if ok else 0
     ok = ok and calls(img, setcmd[1][10], 0x300, set_leader)
-    results.append(('kCodeSetLeaderCheck (resolver, can change; execute calls set_leader)', ok, hex(can_change)))
+    results.append(('%s (resolver, can change; execute calls set_leader)' % shape, ok, hex(can_change)))
 
     ok = bool(set_leader) and img.match_at(set_leader, codes['kCodeSetLeaderStart'])
     name = img.d[img.va2off(set_leader + 0x51)] if ok else -1
@@ -206,6 +213,8 @@ def check_create_army(img, codes, text_va, text):
     ok = ok and i32(img, ev + 0x18) == role_type and rel32(img, ev + 0x3e) == resolve
     led = i32(img, ev + 0x27) if ok else -1
     ag = img.d[img.va2off(ev + 0x61)] if ok else -1
+    if check1194:
+        ok = ok and i32(img, check1194 + 0x27) == led  # the restructured check's led-group field
     results.append(('kCodeIsLeadingArmyEval (led group +0x%x, army group flag +0x%x)' % (led, ag), ok, hex(ev)))
 
     # can_change_leader's refusal fields (only for create_army's reason text; not fatal there).

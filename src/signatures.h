@@ -317,8 +317,9 @@ static const size_t kCodeTriggerRegisterMapAt = 0x1f, kCodeTriggerRegisterMapDis
 // --- Armies (create_army, NOTES.md G1) ----------------------------------------------------
 // Right after kSigBorderWarArmy (SigFindIn; 1.19.3 checks the army for null first, 1.19.2 does
 // not): set_leader(army, leader, true) (call at +9), then the leader's virtual refresh
-// (call [rdx+disp32], disp at +0x16).
-CODE(kCodeBorderWarSetLeader, "41 B0 01 48 8B D7 48 8B C8 E8 ?? ?? ?? ?? 48 8B 17 48 8B CF FF 92 ?? ?? ?? ??")
+// (call [reg+disp32], disp at +0x16). The registers differ by build (1.19.3: army in rax, vtable
+// in rdx; 1.19.4.2: rbx and rax), so those bytes are wildcards.
+CODE(kCodeBorderWarSetLeader, "41 B0 01 48 8B D7 48 8B ?? E8 ?? ?? ?? ?? 48 8B ?? 48 8B CF FF ?? ?? ?? ?? ??")
 static const size_t kCodeBorderWarSetLeaderCall = 9, kCodeBorderWarLeaderSlotDisp = 0x16;
 // COrderGroupCommand slot 10 (the UI's "create army"): resolves the manager handle (call at +0x31
 // = the reference-handle resolver) ...
@@ -331,6 +332,14 @@ static const size_t kCodeOrderGroupCreateCall = 0x11;
 // can_change_leader(army, nullptr) (call at +0x6d).
 CODE(kCodeSetLeaderCheck, "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 50 48 8B D9 48 83 C1 ?? 83 39 00 75 ?? 83 79 04 00 0F 84 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B F8 48 85 C0 0F 84 ?? ?? ?? ?? 33 ED 39 6B ?? 75 ?? 39 6B ?? 75 ?? 8B F5 EB ?? 48 8D 4B ?? E8 ?? ?? ?? ?? 48 8B F0 48 8B CF E8 ?? ?? ?? ?? 48 3B C6 0F 84 ?? ?? ?? ?? 33 D2 48 8B CF E8 ?? ?? ?? ??")
 static const size_t kCodeSetLeaderCheckResolveCall = 0x2a, kCodeSetLeaderCheckCanChangeCall = 0x6d;
+// 1.19.4.2 restructured that function (new checks first; the army in rsi, the general in rbx).
+// When kCodeSetLeaderCheck does not match at its start, this is searched in its first 0x200 bytes
+// (SigFindIn): the army's current leader compared with the general, can_change_leader(army,
+// nullptr) (call at +0x16), then the general's led group (add rbx,disp32, disp at +0x27) resolved
+// (call at +0x37) for the second can_change_leader.
+CODE(kCodeSetLeaderCheck1194, "48 8B CE E8 ?? ?? ?? ?? 48 3B C3 0F 84 ?? ?? ?? ?? 33 D2 48 8B CE E8 ?? ?? ?? ?? 84 C0 74 ?? 48 85 DB 74 ?? 48 81 C3 ?? ?? ?? ?? 39 3B 75 ?? 39 7B 04 74 ?? 48 8B CB E8 ?? ?? ?? ??")
+static const size_t kCodeSetLeaderCheck1194CanChangeCall = 0x16, kCodeSetLeaderCheck1194LedGroupDisp = 0x27,
+                    kCodeSetLeaderCheck1194ResolveCall = 0x37;
 // set_leader(army, leader, link) itself: its debug log reads the leader's name (std::string,
 // capacity disp8 at +0x4c, text disp8 at +0x51), then the army's current leader (disp32 at +0x76).
 CODE(kCodeSetLeaderStart, "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 30 80 3D ?? ?? ?? ?? 00 41 0F B6 E8 48 8B FA 48 8B D9 74 ?? 41 B9 05 00 00 00 48 8D 15 ?? ?? ?? ?? 41 B8 ?? ?? ?? ?? 48 8D 4C 24 20 E8 ?? ?? ?? ?? 48 85 FF 74 ?? 48 83 7F ?? 0F 4C 8D 4F ?? 76 ?? 4D 8B 09 EB ?? 4C 8D 0D ?? ?? ?? ?? 44 8B 43 ?? 48 8D 15 ?? ?? ?? ?? 48 8B C8 E8 ?? ?? ?? ?? 48 8B B3 ?? ?? ?? ??")
@@ -364,8 +373,9 @@ static const size_t kCodeIsCapturedSlotDisp = 0x27;
 // gamestate rel32 at +3 (insn 7), characters disp32 at +0xe, call at +0x12.
 CODE(kCodeCharacterLookup, "48 8B 05 ?? ?? ?? ?? 41 8B ?? 58 48 8B 88 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B D8 48 85 C0 0F 85 ?? ?? ?? ??")
 static const size_t kCodeCharacterGameStateRel = 3, kCodeCharacterManagerDisp = 0xe, kCodeCharacterFindCall = 0x12;
-// ... then the owner check: call owner_tag_address(character) (+3); cmp dword [rax],0; jle.
-CODE(kCodeCharacterOwnerCheck, "48 8B CB E8 ?? ?? ?? ?? 48 8B F0 83 38 00 0F 8E")
+// ... then the owner check: call owner_tag_address(character) (+3); mov r?,rax (rsi on 1.19.3,
+// rdi on 1.19.4.2); cmp dword [rax],0; jle.
+CODE(kCodeCharacterOwnerCheck, "48 8B CB E8 ?? ?? ?? ?? 48 8B ?? 83 38 00 0F 8E")
 static const size_t kCodeCharacterOwnerCall = 3;
 // owner_tag_address: lea rax,[rcx+disp8]; ret.
 CODE(kCodeCharacterOwnerGetter, "48 8D 41 ?? C3")

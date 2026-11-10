@@ -134,11 +134,22 @@ bool ResolveAll() {
     // The UI's set leader: can-change check, and its execute calls the same set_leader.
     uint8_t* check = Slot(".?AVCSetArmyLeaderCommand@@", 9);
     uint8_t* exec = Slot(".?AVCSetArmyLeaderCommand@@", 10);
-    if (!check || !exec || !SigMatchAt(check, kCodeSetLeaderCheck) ||
-        (Resolve_t)SigFollowRel32(check + kCodeSetLeaderCheckResolveCall) != g_resolve ||
+    // Up to 1.19.3 the check has one shape from its start; 1.19.4.2 restructured it (the part
+    // with can_change_leader is found inside it, and its led-group field is checked below).
+    uint8_t* resolveCall = nullptr;
+    uint8_t* canChangeCall = nullptr;
+    uint8_t* check1194 = nullptr;
+    if (check && SigMatchAt(check, kCodeSetLeaderCheck)) {
+        resolveCall = check + kCodeSetLeaderCheckResolveCall;
+        canChangeCall = check + kCodeSetLeaderCheckCanChangeCall;
+    } else if (check && (check1194 = SigFindIn(check, 0x200, kCodeSetLeaderCheck1194)) != nullptr) {
+        resolveCall = check1194 + kCodeSetLeaderCheck1194ResolveCall;
+        canChangeCall = check1194 + kCodeSetLeaderCheck1194CanChangeCall;
+    }
+    if (!resolveCall || !exec || (Resolve_t)SigFollowRel32(resolveCall) != g_resolve ||
         !CallsTarget(exec, 0x300, (void*)g_setLeader))
         return Fail("CSetArmyLeaderCommand does not match start_border_war's set_leader");
-    g_canChange = (CanChange_t)SigFollowRel32(check + kCodeSetLeaderCheckCanChangeCall);
+    g_canChange = (CanChange_t)SigFollowRel32(canChangeCall);
     if (!SigMatchAt((uint8_t*)g_setLeader, kCodeSetLeaderStart) ||
         Rd<uint8_t>(g_setLeader, kCodeSetLeaderNameCapDisp) != Rd<uint8_t>(g_setLeader, kCodeSetLeaderNameDisp) + 0x18)
         return Fail("set_leader has an unexpected shape");
@@ -158,6 +169,8 @@ bool ResolveAll() {
         (Resolve_t)SigFollowRel32(leading + kCodeLeadingResolveCall) != g_resolve)
         return Fail("is_leading_army disagrees with is_army_leader / the resolver");
     g_ledGroup = Rd<uint32_t>(leading, kCodeLeadingGroupDisp);
+    if (check1194 && Rd<uint32_t>(check1194, kCodeSetLeaderCheck1194LedGroupDisp) != g_ledGroup)
+        return Fail("CSetArmyLeaderCommand and is_leading_army read different led-group fields");
     g_armyGroupFlag = Rd<uint8_t>(leading, kCodeLeadingArmyGroupDisp);
     g_capturedSlot = Rd<uint32_t>(captured, kCodeIsCapturedSlotDisp);
 
