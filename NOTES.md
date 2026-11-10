@@ -3468,6 +3468,9 @@ Static analysis only; nothing here was observed at runtime yet.
    anything new in `logs\error.log`? Then once more with the loader and
    `railway_queue = 0` in `loader_config.ini` (the hooks are not installed, so the same as
    vanilla).
+   *Tested 2026-11-10 without `version.dll`: the save loads fine and the dismantle entry is gone
+   from the queue. Not yet checked: a notification, `error.log`, and the `railway_queue = 0`
+   run.*
 2. **`loader.log`:** the daily step's thread line says "the main thread".
 3. **The badge:** the cross shows while Alt+Shift is held and fits the badge.
 4. **Disallowed path:** `queue_railway_dismantle` on a path through another country's province
