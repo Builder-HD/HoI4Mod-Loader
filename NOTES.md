@@ -3000,8 +3000,9 @@ id, slot 13 = clone. The game-state work in each execute:
   - **Lifetime:** the army constructor (`FUN_140be9c10`) sets it to 0.
   - **Not found:** the store that sets it. No direct write exists in the army code or in
     `start_border_war`. It is likely a small generic setter: there are several `+0x1b0` /
-    `+0x1b8` pair setters, such as `FUN_14126c7f0`. The in-game test 15 (G2) checks it
-    end-to-end.
+    `+0x1b8` pair setters, such as `FUN_14126c7f0`. The in-game test 15 (G2) confirmed it
+    end-to-end (2026-11-10, 1.19.4.2): an army in a vanilla border war is refused as "in a border
+    war".
   - `create_army` reads these fields only to name the refusal (G2); the refusal itself is
     `FUN_140bebaa0`.
 - **Leader eligibility:** the UI lists the country's army leaders. The engine checks for:
@@ -3141,7 +3142,7 @@ earlier in the same effect block previews red but works (seen in the Italy test)
   already leads an army) show only the red line; reassign still shows its `create_unit` line;
   after the release, decision B shows its normal lines again.
 
-**Still open:** multiplayer (G3) and test 15 (border war refusal, below).
+**Still open:** multiplayer (G3). Test 15 passed (below).
 
 **Refusal while the general's army can't change leader** (checked for the PR, 2026-10-22):
 `ReadLeader` calls the engine's own check `FUN_140bebaa0(army, nullptr)` (found through
@@ -3171,7 +3172,7 @@ in the function's order, only to choose the message:
 | `HOI4_LOADER_CREATE_ARMY_BORDER_WAR` | their army $ARMY$ is in a border war | `CANNOT_CHANGE_LEADER_WAR` "Army is in a border war" |
 | `HOI4_LOADER_CREATE_ARMY_CANNOT_LEAVE` | their army $ARMY$ cannot change its general now | (fallback: fields not found) |
 
-**Test 15, border war (open, in game).** The test mod's "border war from Saxony, led by General
+**Test 15, border war (passed 2026-11-10 on 1.19.4.2).** The test mod's "border war from Saxony, led by General
 B" runs vanilla `start_border_war` (65 into 69) with a `leader_score` that picks General B. Then:
 - check that the border war army's general is General B;
 - hover "fail, General B's army is in a border war": the red line should end "their army <name>
@@ -3180,6 +3181,17 @@ B" runs vanilla `start_border_war` (65 into 69) with a `leader_score` that picks
 - "end the border war" cancels it.
 
 If another general is picked, the test is inconclusive; note who.
+
+**Result:** the border war ran with General B; it actually stopped the units ("the border war
+stops actually stuff"). loader.log: `cannot lead a new army: their army "Army 3" is in a border
+war; nothing created`. `loader_script_docs.md` lists `_DEPLOYING`, `_WITHDRAWING` and
+`_BORDER_WAR`.
+
+**1.19.4.2 in game (2026-11-10, DLL `62adfc741d48`):** `Supported hoi4.exe build:
+1.19.4.2_vanilla`; all 10 features active, no errors; every feature self-check passed; create_army
+resolved the same fields as on 1.19.3 (`leader change refused on: border war +0x1b0, deploying
++0x199 / +0x19a, withdrawing +0x19b`). Checked by the tester: army creation (30 divisions under
+General B), reassign, the refusals, the region rename.
 
 ### G3: multiplayer test plan (open)
 
