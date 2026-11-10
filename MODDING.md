@@ -839,7 +839,7 @@ parsing, and the whole block, `create_unit`s included, does nothing. Guard decis
 
 Vanilla script can build railways (`build_railway`) but never lower them:
 `remove_building = { type = rail_way }` only changes a hidden building that mirrors the level,
-not the railway itself (NOTES.md Part G). The `railways` feature adds a native effect and a
+not the railway itself (NOTES.md Part H). The `railways` feature adds a native effect and a
 trigger:
 
 ```
@@ -912,7 +912,16 @@ queue_railway_dismantle = { start_province = 6521 target_province = 6282 levels 
 - **Stops by itself:** like a railway being built, if the path is no longer usable (lost control
   of a province on it), the entry is cancelled.
 - **Saves:** the entry is saved with the game. Without the loader the game sees a railway line
-  whose target is below the railway, and finishes it the next day without changing anything.
+  whose target is below the railway, and finishes it the next day without changing anything
+  (expected from the engine's code; the in-game check is still open, NOTES.md H3).
+- **If `railways` switches itself off** (its self-check on game entry fails), `railway_queue` goes
+  off with it for the rest of the session. Entries already in the queue **pause** (no progress,
+  not finished) and stay in the queue and in the save, so they carry on in a later session where
+  the feature works. Nothing else changes railways meanwhile, and the map badges are vanilla.
+- **Where the country may not dismantle:** `queue_railway_dismantle` still adds the entry, but its
+  first daily step cancels it (see "Where the player may dismantle" below). The effect's tooltip
+  then adds a red line (`HOI4_LOADER_QUEUE_RAILWAY_DISMANTLE_NOT_ALLOWED`) and `loader.log` says so
+  when it runs.
 - **Scope:** country. **Guard:** `hoi4_loader_feature_railway_queue = yes` (ship the stub). The
   feature needs `railways` and has its own guard, so a game update that breaks only the queue
   signatures leaves `downgrade_railway` working.
@@ -927,7 +936,8 @@ queue_railway_dismantle = { start_province = 6521 target_province = 6282 levels 
   Without the key the vanilla upgrade text shows. `loader.log` says which on first use. The
   rules-only mod (`mod/hoi4_loader_railway_rules`) defines it.
 - **On the map (single player):** in the railway construction view, hold **Alt+Shift**: the
-  level circle on every railway segment you may dismantle shows a red **X**. **Alt+Shift+click**
+  level circle on every railway segment you may dismantle shows vanilla's removal cross (the one
+  on the state view's buildings; a red **X** if the text icon cannot be used). **Alt+Shift+click**
   it to add one dismantle level for that segment to the construction queue; click again for
   another level (the same entry goes one level deeper, down to 0). Vanilla reads three keys on
   those circles: Shift (upgrade to the maximum level), Ctrl (first in the queue) and Alt (last in

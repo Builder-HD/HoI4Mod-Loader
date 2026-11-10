@@ -1,4 +1,4 @@
-// Engine access for the railways feature (NOTES.md Part G): railway levels between provinces and
+// Engine access for the railways feature (NOTES.md Part H): railway levels between provinces and
 // the supply system refresh. Every railway is stored on both of its ends, in the
 // CProvinceRailwayInfo of each province: a level per neighbour index (int[]) plus a sorted list of
 // (neighbour, level) pairs holding only levels > 0. The engine itself only ever raises levels
@@ -12,12 +12,17 @@
 #include <vector>
 
 #include "engine.h"
+#include "lifecycle.h"
 #include "loader.h"
 #include "signatures.h"
 
 namespace Engine {
 
 namespace {
+
+// False once the plugin switches railways off (its self-check failed): no railway is changed any
+// more, dismantle entries pause (no progress, never finished), and the badges are vanilla again.
+volatile bool g_enabled = true;
 
 template <typename T>
 T Rd(const void* base, size_t offset) {
@@ -146,7 +151,7 @@ void ResolveRelations() {
 // The supply system's after-load refresh of the railway graphics, as the engine does it. Main
 // thread. Without it, something on the map (a train on the removed railway) can still use the
 // removed piece and the next frame crashes.
-void RefreshRailwayGraphics() {
+void RefreshRailwayGraphicsNow() {
     if (!g_ppUi || !g_gfxClear || !g_gfxRebuild) return;
     void* ui = *g_ppUi;
     if (!ui) return;
@@ -156,6 +161,27 @@ void RefreshRailwayGraphics() {
     if (!gfx) return;
     g_gfxClear(gfx);
     g_gfxRebuild(gfx);
+}
+
+// Every caller runs on the main thread (effects, and the construction line's daily step from the
+// production manager's serial daily update, NOTES.md H4), which the first daily steps log as
+// evidence. Should a call ever come from another thread, the rebuild waits for the next safe point
+// instead of touching the graphics while a frame may be drawing them.
+volatile LONG g_gfxDeferred = 0;
+void DeferredGraphics(void*) {
+    InterlockedExchange(&g_gfxDeferred, 0);
+    RefreshRailwayGraphicsNow();
+}
+void RefreshRailwayGraphics() {
+    // Without the frame hook there is no main-thread test and no queue: the callers' own thread, as
+    // before (the evidence says it is the main thread).
+    if (!MainThreadQueueAvailable() || IsMainThread()) return RefreshRailwayGraphicsNow();
+    static volatile LONG logged = 0;
+    if (!InterlockedExchange(&logged, 1))
+        Log("railways: railway graphics refresh requested off the main thread (thread %lu); deferred to the next safe point",
+            GetCurrentThreadId());
+    if (!InterlockedExchange(&g_gfxDeferred, 1) && !RunOnMainThread(&DeferredGraphics, nullptr))
+        InterlockedExchange(&g_gfxDeferred, 0);
 }
 
 struct Pair {
@@ -226,7 +252,7 @@ bool LowerEnd(void* info, int neighbour, int level) {
     return true;
 }
 
-// --- Railway construction lines (queued dismantling, NOTES.md G3) ------------------------------
+// --- Railway construction lines (queued dismantling, NOTES.md H3) ------------------------------
 // A dismantle line is an ordinary CRailwayProductionLine whose target level is below its base
 // level. The engine never makes one (the build command and SetTarget keep target >= base) and the
 // line's save keeps both as they are, so that alone marks it. The engine would see no link below the
@@ -270,7 +296,7 @@ uint32_t g_construction = 0;      // country -> construction (production lines)
 uint32_t g_lineBase = 0, g_lineTarget = 0, g_lineCurrent = 0, g_linePath = 0, g_lineCount = 0, g_lineCountry = 0;
 uint32_t g_lineTotal = 0, g_lineDone = 0, g_lineRemaining = 0, g_lineOutput = 0, g_lineCancelled = 0;
 uint32_t g_holder = 0, g_holderTag = 0;  // country -> tag holder (cost modifiers), holder -> tag
-uint32_t g_slotCancel = 0, g_slotAfterDaily = 0, g_slotRefresh = 0;
+uint32_t g_slotCancel = 0, g_slotAfterDaily = 0, g_slotRefresh = 0, g_slotOutput = 0;
 // The construction view's "changed" event, as the build command sends it after adding a line.
 using UiPost_t = void(__fastcall*)(void* target, const int* event);
 UiPost_t g_uiPost = nullptr;
@@ -409,6 +435,13 @@ void DismantleDaily(void* line) {
         remaining -= output;
         if (remaining < 0) remaining = 0;
         if (g_dailyLogged < 10) {
+            // Evidence for the thread rule (NOTES.md H4): the daily step lowers railways and rebuilds
+            // their graphics, which must happen on the main thread.
+            if (g_dailyLogged == 0)
+                Log("railway_queue: daily step on thread %lu (%s)", GetCurrentThreadId(),
+                    !MainThreadQueueAvailable() ? "main thread unknown: no frame hook"
+                    : IsMainThread()           ? "the main thread"
+                                               : "NOT the main thread");
             ++g_dailyLogged;
             Log("railway_queue: daily step: link %d-%d at level %d (target %d), progress today %.3f, remaining %.3f of "
                 "%.3f, next level costs %.3f",
@@ -442,8 +475,19 @@ volatile LONG g_faultLogged = 0;
 void LogFaultOnce(const char* where) {
     if (!InterlockedExchange(&g_faultLogged, 1)) Log("ERROR: railways: fault in the dismantle %s; the line is left as it is", where);
 }
+// While railways is off, a dismantle entry pauses: no daily work, its progress stays as it is, and
+// it never reports finished, so the engine neither runs it as a railway line nor removes it. It
+// stays in the queue (and in saves) for a later session where the feature works.
+volatile LONG g_pausedLogged = 0;
+bool Paused() {
+    if (g_enabled) return false;
+    if (!InterlockedExchange(&g_pausedLogged, 1))
+        Log("railway_queue: railways is off; dismantle entries in the queue are paused (no progress, not finished)");
+    return true;
+}
 void __fastcall DailyDetour(void* line) {
     if (!IsDismantleLine(line)) return g_dailyOrig(line);
+    if (Paused()) return;
     __try {
         DismantleDaily(line);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -452,6 +496,7 @@ void __fastcall DailyDetour(void* line) {
 }
 void __fastcall ProgressDetour(void* line) {
     if (!IsDismantleLine(line)) return g_progressOrig(line);
+    if (Paused()) return;
     __try {
         DismantleProgress(line);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -460,6 +505,7 @@ void __fastcall ProgressDetour(void* line) {
 }
 bool __fastcall FinishedDetour(void* line) {
     if (!IsDismantleLine(line)) return g_finishedOrig(line);
+    if (Paused()) return false;
     __try {
         return DismantleFinished(line);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -488,15 +534,18 @@ void ResolveRailwayLines() {
     uint8_t* head = SigFindUnique("rail_line_daily_head", kSigRailLineDailyHead);
     uint8_t* control = SigFindUnique("rail_line_control", kSigRailLineControl);
     uint8_t* afterDaily = SigFindUnique("rail_line_after_daily", kSigRailLineAfterDaily);
+    uint8_t* output = SigFindUnique("rail_line_daily_output", kSigRailLineDailyOutput);
     uint8_t* progress = SigFindUnique("rail_line_progress", kSigRailLineProgress);
     uint8_t* tail = SigFindUnique("rail_line_progress_tail", kSigRailLineProgressTail);
     uint8_t* speed = SigFindUnique("rail_line_speed", kSigRailLineSpeed);
     uint8_t* cost = SigFindUnique("rail_line_cost", kSigRailLineCost);
-    if (!daily || !head || !control || !afterDaily || !progress || !tail || !speed || !cost || !g_managerOffset) return;
+    if (!daily || !head || !control || !afterDaily || !output || !progress || !tail || !speed || !cost ||
+        !g_managerOffset)
+        return;
     // The daily parts must lie inside the daily function, the progress parts inside the progress one.
     auto inside = [](uint8_t* fn, uint8_t* part, size_t size) { return part > fn && part < fn + size; };
     if (!inside(daily, head, 0x400) || !inside(daily, control, 0x400) || !inside(daily, afterDaily, 0x1000) ||
-        !inside(progress, tail, 0x600) || !inside(progress, speed, 0x600)) {
+        !inside(daily, output, 0x1000) || !inside(progress, tail, 0x600) || !inside(progress, speed, 0x600)) {
         Log("ERROR: railways: the construction line signatures are not in the expected functions");
         return;
     }
@@ -510,6 +559,7 @@ void ResolveRailwayLines() {
     g_slotCancel = Rd<uint32_t>(head, kSigRailHeadCancelDisp) / 8;
     g_provinceUsable = (ProvinceUsable_t)SigFollowRel32(control + kSigRailControlCall);
     g_slotAfterDaily = Rd<uint8_t>(afterDaily, kSigRailAfterDailySlotDisp) / 8;
+    g_slotOutput = Rd<uint8_t>(output, kSigRailDailyOutputSlotDisp) / 8;  // the slot the daily step reads the output from
     g_lineTotal = Rd<uint8_t>(tail, kSigRailTotalDisp);
     g_lineRemaining = Rd<uint32_t>(tail, kSigRailRemainingDisp);
     g_lineDone = Rd<uint8_t>(tail, kSigRailDoneDisp);
@@ -522,14 +572,14 @@ void ResolveRailwayLines() {
                  Rd<uint8_t>(cost, kSigRailCostCountryDisp) == g_lineCountry &&
                  Rd<uint32_t>(cost, kSigRailCostHolderDisp) == g_holder &&
                  Rd<uint32_t>(control, kSigRailControlPathDisp) == g_linePath && g_lineCount == g_linePath + 0xc;
-    // The vtable: daily is slot 24, finished slot 25; the output getter and the cancel slot have the
-    // analysed shapes (cancel sets the flag finished reads).
+    // The vtable: daily is slot 24, finished slot 25; the output getter (the slot the daily step
+    // calls) and the cancel slot have the analysed shapes (cancel sets the flag finished reads).
     size_t slots = 0;
     g_vtLine = FindVtableByRtti(".?AVCRailwayProductionLine@@", &slots);
     bool vtOk = g_vtLine && slots > (size_t)kRailLineFinishedSlot && slots > g_slotCancel && slots > g_slotRefresh &&
-                slots > g_slotAfterDaily && (uint8_t*)g_vtLine[kRailLineDailySlot] == daily &&
+                slots > g_slotAfterDaily && slots > g_slotOutput && (uint8_t*)g_vtLine[kRailLineDailySlot] == daily &&
                 SigMatchAt((uint8_t*)g_vtLine[kRailLineFinishedSlot], kCodeRailLineFinished) &&
-                SigMatchAt((uint8_t*)g_vtLine[14], kCodeRailLineOutput) &&
+                SigMatchAt((uint8_t*)g_vtLine[g_slotOutput], kCodeRailLineOutput) &&
                 SigMatchAt((uint8_t*)g_vtLine[g_slotCancel], kCodeRailLineCancel);
     if (!agree || !vtOk) {
         Log("ERROR: railways: construction line call sites disagree (fields %d, vtable %d); queued dismantling off", agree,
@@ -537,7 +587,7 @@ void ResolveRailwayLines() {
         g_vtLine = nullptr;
         return;
     }
-    g_lineOutput = Rd<uint8_t>(g_vtLine[14], kCodeRailLineOutputDisp);
+    g_lineOutput = Rd<uint8_t>(g_vtLine[g_slotOutput], kCodeRailLineOutputDisp);
     g_lineCancelled = Rd<uint32_t>(g_vtLine[g_slotCancel], kCodeRailLineCancelFlagDisp);
     g_dailyFn = daily;
     g_progressFn = progress;
@@ -556,7 +606,8 @@ bool HaveRailwayLines() {
     return HaveRailways() && g_tagToCountry && g_construction && g_createLine && g_lineBase && g_lineTarget && g_vtLine &&
            g_dailyFn && g_progressFn && g_finishedFn && g_lineCurrent && g_linePath && g_lineCountry && g_holder &&
            g_holderTag && g_pathUsable && g_provinceUsable && g_lineTotal && g_lineDone && g_lineRemaining && g_lineOutput &&
-           g_lineCancelled && g_cost && g_slotCancel && g_slotAfterDaily && g_slotRefresh && g_linkSpeed && g_setSpeed;
+           g_lineCancelled && g_cost && g_slotCancel && g_slotAfterDaily && g_slotRefresh && g_slotOutput && g_linkSpeed &&
+           g_setSpeed;
 }
 
 bool HookRailwayLines() {
@@ -743,7 +794,29 @@ SetText_t g_iconSetText = nullptr;
 uint32_t g_iconPath = 0, g_iconText = 0, g_iconShowSlot = 0;
 uint32_t g_lineList = 0, g_lineListCount = 0;  // construction -> its lines
 RailwayIconClick_t g_onIconClick = nullptr;
-const uint8_t kHiddenFlag = 0x10;  // element+0x75, cleared before show (kSigRailIconText)
+// The text element's flags byte and the mask vanilla ands it with before showing it (clearing the
+// hidden flag), both read from kSigRailIconText: +0x75 and ~0x10 on the checked build.
+uint32_t g_iconFlags = 0;
+uint8_t g_iconShownMask = 0;
+
+// What the badge shows while the dismantle key is held: vanilla's removal cross (the sprite the
+// state view's cross uses) as a text icon, or a red X when the icon delimiter is unknown.
+// Resolved on first use (main thread).
+const char kBadgeIcon[] = "cancel_conversion_button";  // GFX_cancel_conversion_button
+bool g_badgeResolved = false;
+std::string g_badgeText;
+const std::string& BadgeText() {
+    if (!g_badgeResolved) {
+        g_badgeResolved = true;
+        if (std::string d = IconDelimiter(); !d.empty()) {
+            g_badgeText = d + kBadgeIcon + d;
+            Log("railway_queue: dismantle badges show GFX_%s", kBadgeIcon);
+        } else {
+            Log("railway_queue: icon delimiter not found; dismantle badges show a red X");
+        }
+    }
+    return g_badgeText;
+}
 
 // Alt+Shift. Vanilla's badge click reads Shift (to the maximum level), Ctrl (first in the queue)
 // and Alt (last in the queue); Alt+Shift costs the least: "maximum level, last in the queue".
@@ -781,20 +854,25 @@ bool IconDismantleAllowed(void* icon, const std::vector<int>& path) {
 
 void __fastcall IconUpdateDetour(void* icon) {
     g_iconUpdateOrig(icon);
-    if (!DismantleKeyHeld()) return;
+    if (!g_enabled || !DismantleKeyHeld()) return;
     std::vector<int> path;
     void* text = Rd<void*>(icon, g_iconText);
     if (!text || !IconPath(icon, &path) || PathMaxLevel(path) <= 0 || !IconDismantleAllowed(icon, path)) return;
     EngineString s;
-    TextView x{"X", 1};
-    g_colorize(&s, 'R', &x);
+    const std::string& badge = BadgeText();
+    if (!badge.empty()) {
+        ConstructEngineString(&s, badge.data(), badge.size());
+    } else {
+        TextView x{"X", 1};
+        g_colorize(&s, 'R', &x);
+    }
     g_iconSetText(text, &s);  // takes the string (frees it)
-    Wr<uint8_t>(text, 0x75, Rd<uint8_t>(text, 0x75) & ~kHiddenFlag);
+    Wr<uint8_t>(text, g_iconFlags, Rd<uint8_t>(text, g_iconFlags) & g_iconShownMask);
     ((IconFn_t)(*(void***)text)[g_iconShowSlot])(text);
 }
 
 void __fastcall IconClickDetour(void* icon) {
-    if (g_onIconClick && DismantleKeyHeld()) {
+    if (g_enabled && g_onIconClick && DismantleKeyHeld()) {
         std::vector<int> path;
         if (IconPath(icon, &path) && IconDismantleAllowed(icon, path) && g_onIconClick(path)) return;
     }
@@ -815,6 +893,21 @@ bool SamePath(void* line, const std::vector<int>& path) {
 }  // namespace
 
 void SetRailwayDismantleRules(RailwayRules_t rules) { g_rulesFn = rules; }
+
+void DisableRailways() {
+    if (g_enabled) Log("railways: switched off for this session; no railway is changed any more");
+    g_enabled = false;
+}
+
+int RailwayDismantleAllowed(int tag, const std::vector<int>& path) {
+    if (!HaveRailwayLines() || path.size() < 2 || tag <= 0) return -1;
+    if (HaveRelations()) return DismantleAllowed(tag, path.data(), path.size()) ? 1 : 0;
+    // Without the relation tests the daily step uses the engine's build permission.
+    if (!g_pathUsable(&tag, path.front(), path.back())) return 0;
+    for (size_t i = 1; i < path.size(); ++i)
+        if (!g_provinceUsable(&tag, path[i])) return 0;
+    return 1;
+}
 void SetRailwayDismantleCost(RailwayCost_t cost) { g_costFn = cost; }
 
 bool HookRailwayMapIcons(RailwayIconClick_t onClick) {
@@ -834,6 +927,14 @@ bool HookRailwayMapIcons(RailwayIconClick_t onClick) {
     g_iconSetText = (SetText_t)SigFollowRel32(text + kSigRailIconSetTextCall);
     g_iconText = Rd<uint32_t>(text, kSigRailIconTextDisp);
     g_iconShowSlot = Rd<uint8_t>(text, kSigRailIconShowSlotDisp) / 8;
+    g_iconFlags = Rd<uint8_t>(text, kSigRailIconFlagsDisp);
+    g_iconShownMask = Rd<uint8_t>(text, kSigRailIconShownMask);
+    // A flags byte inside the element and a mask that clears exactly one bit, as analysed.
+    uint8_t cleared = (uint8_t)~g_iconShownMask;
+    if (g_iconFlags < 0x10 || cleared == 0 || (cleared & (cleared - 1)) != 0) {
+        Log("railway_queue: the badge's show code does not look as analysed; no click-to-dismantle");
+        return false;
+    }
     g_lineList = Rd<uint8_t>(list, kSigRailListLinesDisp);
     g_lineListCount = Rd<uint8_t>(list, kSigRailListCountDisp);
     if (g_setTextFn && (uint8_t*)g_iconSetText != g_setTextFn) {
@@ -848,7 +949,7 @@ bool HookRailwayMapIcons(RailwayIconClick_t onClick) {
 }
 
 int QueueOrDeepenRailwayDismantle(int tag, const std::vector<int>& path) {
-    if (!g_lineList || !RailwaysReady()) return 0;
+    if (!g_enabled || !g_lineList || !RailwaysReady()) return 0;
     void* country = g_tagToCountry(&tag);
     void* construction = country ? Rd<void*>(country, g_construction) : nullptr;
     if (!construction) return 0;
@@ -878,7 +979,7 @@ int QueueOrDeepenRailwayDismantle(int tag, const std::vector<int>& path) {
 }
 
 bool QueueRailwayDismantle(int tag, const std::vector<int>& path, int from, int to) {
-    if (!HaveRailwayLines() || !g_dailyOrig || !g_progressOrig || !g_finishedOrig || path.size() < 2 || to >= from || to < 0)
+    if (!g_enabled || !HaveRailwayLines() || !g_dailyOrig || !g_progressOrig || !g_finishedOrig || path.size() < 2 || to >= from || to < 0)
         return false;
     void* country = g_tagToCountry(&tag);
     void* construction = country ? Rd<void*>(country, g_construction) : nullptr;
@@ -1121,7 +1222,7 @@ bool RailwayConnected(int from, int to, int minLevel) { return FindPath(from, to
 
 int RemoveAllRailwayRoutes(int from, int to, int* routes) {
     *routes = 0;
-    void* m = HaveRailways() ? Manager() : nullptr;
+    void* m = g_enabled && HaveRailways() ? Manager() : nullptr;
     void* supply = Supply();
     if (!m || !supply) return 0;
     // Each round removes the current shortest route completely, so at least one link goes and the
@@ -1139,7 +1240,7 @@ int RemoveAllRailwayRoutes(int from, int to, int* routes) {
 }
 
 int DowngradeRailway(const std::vector<int>& path, int levels) {
-    void* m = HaveRailways() ? Manager() : nullptr;
+    void* m = g_enabled && HaveRailways() ? Manager() : nullptr;
     void* supply = Supply();
     if (!m || !supply || levels <= 0) return 0;
     std::vector<int> dirty;

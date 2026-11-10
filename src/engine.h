@@ -229,11 +229,18 @@ bool RegionHasState(int regionId, int stateId, bool* has);
 // The region holding the state's first province (0 if none).
 int RegionOfState(int stateId);
 
-// --- Railways (railways; engine_railway.cpp, NOTES.md Part G) ---------------------------------
+// --- Railways (railways; engine_railway.cpp, NOTES.md Part H) ---------------------------------
 // Main thread only: the effect that uses them runs there, and DowngradeRailway writes game state.
 void ResolveRailways();
 bool HaveRailways();   // every railway field and function resolved (no game needed)
 bool RailwaysReady();  // HaveRailways() and a game with a railway manager exists
+// Switches railways off for the rest of the session (the plugin's self-check failed): nothing
+// changes a railway any more, dismantle entries in the queue pause (no progress, not finished,
+// kept in the queue and in saves), and the map badges are vanilla again.
+void DisableRailways();
+// May the country dismantle along the path: the game rules (or without the relation tests, the
+// engine's build permission), as a queued entry's daily step checks it. -1 if unknown.
+int RailwayDismantleAllowed(int tag, const std::vector<int>& path);
 // Read-only consistency check of the railway data as resolved: every stored link agrees with the
 // per-neighbour level and with its other end. False (with the first problem) if anything is off.
 bool RailwaySelfCheck(int* linksChecked, std::string* problem);
@@ -252,7 +259,7 @@ int DowngradeRailway(const std::vector<int>& path, int levels);
 // provinces. Returns the links removed; *routes = the number of routes removed.
 int RemoveAllRailwayRoutes(int from, int to, int* routes);
 // Queued dismantling: a railway construction line with its target below its base level, run by
-// hooks on the line's daily step, progress and finished check (NOTES.md G3).
+// hooks on the line's daily step, progress and finished check (NOTES.md H3).
 bool HaveRailwayLines();   // every line field, function and vtable slot resolved
 bool HookRailwayLines();   // queues the three hooks; call from a feature's init
 // Adds a dismantle line to the country's construction queue (at the end): every link of `path`

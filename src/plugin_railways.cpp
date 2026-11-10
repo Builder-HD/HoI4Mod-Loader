@@ -10,10 +10,10 @@
 // the shortest route completely, again and again, until no railway connects them. Both ends of each
 // link, the provinces' rail_way buildings and the supply system are updated, as the engine does
 // when it builds a railway. vanilla remove_building = { type = rail_way } only changes that
-// building, never the railway itself (NOTES.md Part G).
+// building, never the railway itself (NOTES.md Part H).
 //
 // The railway_queue feature in this file adds queue_railway_dismantle: the same lowering as a
-// construction queue entry (NOTES.md G3).
+// construction queue entry (NOTES.md H3).
 #include <atomic>
 #include <climits>
 #include <cstring>
@@ -140,10 +140,15 @@ void OnEntered(bool) {
     int links = 0;
     std::string problem = "fault while reading";
     if (!SafeCheck(&links, &problem)) {
+        // Off for the rest of the session, everything that changes railways with it: the effects
+        // (g_ok), and in the engine the queue's hooks (its entries pause) and the map badges.
         g_ok.store(false);
+        Engine::DisableRailways();
         FeatureDeactivate(kFeature, ("self-check failed: " + problem).c_str());
+        FeatureDeactivate("railway_queue", "requires railways, whose self-check failed");
         return;
     }
+    if (!g_ok.load()) return;  // switched off earlier this session: stays off
     g_ok.store(true);
     Log("railways: self-check passed (%d railway links consistent on both ends)", links);
 }
@@ -186,9 +191,19 @@ void ExecQueue(const Args& a, const Scope& s) {
     bool ok = Engine::QueueRailwayDismantle(tag, path, from, to);
     Log("queue_railway_dismantle: %s: provinces %d -> %d, %zu links, level %d down to %d: %s",
         Engine::CountryTagName(tag).c_str(), a.i(0), a.i(1), path.size() - 1, from, to, ok ? "queued" : "FAILED");
+    // The entry's daily step cancels it where the country may not dismantle (the game rules, or the
+    // build permission): say so now instead of letting it vanish silently the next day.
+    if (ok && Engine::RailwayDismantleAllowed(tag, path) == 0)
+        Log("queue_railway_dismantle: %s may not dismantle along this path (it does not control every province, or the "
+            "game rules do not allow it there); the entry will be cancelled on its first day",
+            Engine::CountryTagName(tag).c_str());
 }
 
-void TooltipQueue(const Args& a, const Scope&, TooltipText& out) {
+const LocText kQueueNotAllowedText{"HOI4_LOADER_QUEUE_RAILWAY_DISMANTLE_NOT_ALLOWED",
+                                   "\x11RThe country may not dismantle along this railway: the entry would be cancelled on "
+                                   "its first day.\x11!"};
+
+void TooltipQueue(const Args& a, const Scope& s, TooltipText& out) {
     std::vector<int> path;
     int from, to;
     std::vector<LocArg> args = {{"FROM", std::to_string(a.i(0))}, {"TO", std::to_string(a.i(1))}};
@@ -199,6 +214,8 @@ void TooltipQueue(const Args& a, const Scope&, TooltipText& out) {
     args.push_back({"LINKS", std::to_string(path.size() - 1)});
     args.push_back({"LEVEL", std::to_string(to)});
     out.add(native_localize(kQueueText, args).c_str());
+    int tag = s.countryTag();
+    if (tag > 0 && Engine::RailwayDismantleAllowed(tag, path) == 0) out.add(native_localize(kQueueNotAllowedText, {}).c_str());
 }
 
 // Where the player may dismantle besides its own provinces: global flags a mod sets at game start
@@ -307,7 +324,7 @@ bool RailwayQueueInit() {
                             {{"start_province", ParamType::Int, true},
                              {"target_province", ParamType::Int, true},
                              {"levels", ParamType::Int, false, ScopeDefault::None, "all"}},
-                            ScopeMask::Country, &ExecQueue, &TooltipQueue, {kQueueText, kNoRailwayText}},
+                            ScopeMask::Country, &ExecQueue, &TooltipQueue, {kQueueText, kNoRailwayText, kQueueNotAllowedText}},
                            kQueueFeature);
     return true;
 }

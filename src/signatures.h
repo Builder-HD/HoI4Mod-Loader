@@ -242,7 +242,7 @@ static const size_t kSigBorderWarManagerDisp = 3, kSigBorderWarNullHandle = 0xa;
 // at +0x1b. (0x140337237)
 SIG(kSigBorderWarArmy, "48 8B 05 ?? ?? ?? ?? 48 89 45 ?? 45 33 C9 4C 8D 44 24 ?? 48 8D 55 ?? 48 8D 4D ?? E8 ?? ?? ?? ?? 48 8B D8")
 static const size_t kSigBorderWarCreateCall = 0x1b;
-// --- Railways (railways, NOTES.md Part G) --------------------------------------------------
+// --- Railways (railways, NOTES.md Part H) --------------------------------------------------
 // Addresses in this section are 1.19.4.2 (v1.19.4.2.2da5), the build they were found on.
 // Gamestate setup: new CSupplySystem (E8 at +0) stored at gamestate+[disp32 +0x10] (again at
 // +0x27), then new CRailwayManager (constructor E8 at +0x42) stored at gamestate+[disp32 +0x52]
@@ -283,12 +283,12 @@ static const size_t kSigRailNotifySupplyDisp = 0xd, kSigRailNotifySlotDisp = 0x2
 // graphics; Clear(gfx) (E8 at +0x28: every railway piece, the moving trains and their entities),
 // then Rebuild(gfx) (E9 at +0x35: a piece for every province with a railway). Vanilla never
 // removes a railway; after it does, the loader runs the same pair so nothing on the map still
-// refers to a removed piece (NOTES.md G4). (0x140f46dea)
+// refers to a removed piece (NOTES.md H4). (0x140f46dea)
 SIG(kSigRailGfxRefresh, "48 8B 0D ?? ?? ?? ?? 48 85 C9 74 ?? 48 8B 01 FF 90 ?? ?? ?? ?? 48 8B 48 ?? 48 8B 99 ?? ?? ?? ?? 48 85 DB 74 ?? 48 8B CB E8 ?? ?? ?? ?? 48 8B CB 48 83 C4 20 5B E9")
 static const size_t kSigRailGfxUiRel = 3, kSigRailGfxUiSlotDisp = 0x11, kSigRailGfxViewDisp = 0x18,
                     kSigRailGfxDisp = 0x1c, kSigRailGfxClearCall = 0x28, kSigRailGfxRebuildJmp = 0x35;
 
-// --- Railway construction lines (railways: queued dismantling, NOTES.md G3) -----------------
+// --- Railway construction lines (railways: queued dismantling, NOTES.md H3) -----------------
 // End of CBuildRailwayCommand execute, for the player's country: ui (rip rel32 at +0x10, length 7)
 // -> vtable[disp32 +0x19]() -> Post(that, &event 0x11) (E8 at +0x30): the construction view
 // refreshes now instead of at its next routine update. (0x1411dcf25)
@@ -325,6 +325,10 @@ static const size_t kSigRailControlPathDisp = 3, kSigRailControlCall = 0x14;
 // (0x141a94aef)
 SIG(kSigRailLineAfterDaily, "89 4D ?? 48 89 55 ?? 3B C8 0F 8C ?? ?? ?? ?? 49 8B 06 49 8B CE FF 50 ??")
 static const size_t kSigRailAfterDailySlotDisp = 0x17;
+// In the link loop: the day's output, call [vtable+disp8 +0xf] (the output getter, slot 14 on the
+// checked build; its shape is kCodeRailLineOutput). (0x141a94822)
+SIG(kSigRailLineDailyOutput, "49 8B 06 48 8D 55 E0 45 32 E4 49 8B CE FF 50 ?? 48 8B 38")
+static const size_t kSigRailDailyOutputSlotDisp = 0xf;
 // CRailwayProductionLine progress recompute (called by Init, SetTarget and the daily refresh),
 // function start. Hooked. (0x141a961b0)
 SIG(kSigRailLineProgress, "4C 8B DC 53 56 57 41 54 41 55 48 81 EC 90 00 00 00 45 33 E4 32 DB 38 1D ?? ?? ?? ?? 4C 8B E9 41 8B F4")
@@ -363,7 +367,7 @@ static const size_t kSigRailEntryIdDisp = 0x23, kSigRailEntryLookupCall = 0x34;
 SIG(kSigRailEntryTitle, "49 8B BE ?? ?? ?? ?? 48 8D 55 ?? 48 8D 4D ?? E8 ?? ?? ?? ?? 48 8D 55 ?? 48 8B CF E8")
 static const size_t kSigRailEntryTitleDisp = 3, kSigRailEntrySetTextCall = 0x1b;
 
-// --- Who may dismantle where (railway_queue game rules, NOTES.md G5) ------------------------
+// --- Who may dismantle where (railway_queue game rules, NOTES.md H5) ------------------------
 // CIsSubjectOfTrigger evaluate: country = TagToCountry(&scope tag) (E8 at +4), its diplomacy at
 // country+[disp32 +0x17], relations diplomacy->[disp8 +0x3b][TagIndex(&target) (E8 at +0x30)],
 // IsSubject(relation) (E8 at +0x40): the scope country is a subject of the target. (0x1403fa285)
@@ -390,10 +394,11 @@ static const size_t kSigRailIconClickableCall = 0x19, kSigRailIconPathDisp = 0x2
 SIG(kSigRailIconUpdate, "48 89 5C 24 10 55 56 57 41 56 41 57 48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? 0F 29 B4 24 ?? ?? ?? ?? 48 8B F9 33 F6 89 B5 ?? ?? ?? ?? 48 39 B1 ?? ?? ?? ?? 0F 84 ?? ?? ?? ?? 48 39 B1 ?? ?? ?? ?? 0F 84")
 // In it, the level text: Colorize(std::string* out, char 'W' or 'O', string_view*) (E8 at +0x18),
 // SetText(icon->[disp32 +0x2b] (text element), that string) (E8 at +0x23), then clear the hidden
-// flag (0x10 at element+0x75) and call [vtable+disp8 +0x38] (show). (0x141993061)
-SIG(kSigRailIconText, "BA 57 00 00 00 B8 4F 00 00 00 45 3B FE 0F 4F D0 4C 8D 45 ?? 48 8D 4D ?? E8 ?? ?? ?? ?? 48 8B D0 48 8B CB E8 ?? ?? ?? ?? 48 8B 8F ?? ?? ?? ?? 80 61 75 EF 48 8B 01 FF 50 ??")
+// flag (and byte [element+disp8 +0x31], imm8 +0x32: 0x75 and ~0x10 on the checked build) and call
+// [vtable+disp8 +0x38] (show). (0x141993061)
+SIG(kSigRailIconText, "BA 57 00 00 00 B8 4F 00 00 00 45 3B FE 0F 4F D0 4C 8D 45 ?? 48 8D 4D ?? E8 ?? ?? ?? ?? 48 8B D0 48 8B CB E8 ?? ?? ?? ?? 48 8B 8F ?? ?? ?? ?? 80 61 ?? ?? 48 8B 01 FF 50 ??")
 static const size_t kSigRailIconColorizeCall = 0x18, kSigRailIconSetTextCall = 0x23, kSigRailIconTextDisp = 0x2b,
-                    kSigRailIconShowSlotDisp = 0x38;
+                    kSigRailIconFlagsDisp = 0x31, kSigRailIconShownMask = 0x32, kSigRailIconShowSlotDisp = 0x38;
 // FindRailwayLine(path, tag): country(E8 at +3)->[disp32 +0xb] (construction), its lines at
 // +[disp8 +0x12], count +[disp8 +0x16]. (0x14157d37f)
 SIG(kSigRailLineList, "48 8B CA E8 ?? ?? ?? ?? 48 8B 90 ?? ?? ?? ?? 4C 8B 72 ?? 48 63 42 ?? 4D 8D 24 C6 4D 3B F4")

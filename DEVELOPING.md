@@ -281,6 +281,16 @@ The details are in NOTES.md, "Threading model".
   write, cache or allocate ("Trigger performance" above).
 - **Example:** `region_names` does exactly this. Its flag hooks only set dirty bits; the rescan
   runs from `OnMainThreadFrame`.
+- **Global hooks (shared engine functions):** `railway_queue` hooks two functions the whole UI
+  uses, so every plugin's text goes through them:
+  - `Localize` (localisation lookup): swaps `RAILWAY_UPGRADE_TOOLTIP` for the dismantle key only
+    while a thread-local flag is set (the railway queue entry's tooltip is being built); otherwise
+    one compare and a pass-through.
+  - `SetText` (a text element's text): prefixes a marker only for the one title element recorded
+    by the railway queue entry's update (thread-local); otherwise one pointer compare.
+
+  Another plugin that hooks either one chains through these. Keep any check you add there just
+  as cheap.
 
 ## Smoke test (no game needed)
 

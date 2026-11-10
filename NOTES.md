@@ -3244,9 +3244,9 @@ the loader has been tested in multiplayer yet (README). One session also covers 
 **Pass:** steps 1-8 as described, no OOS, no crash. Then MODDING.md's "Not tested in
 multiplayer yet" for `create_army` and the README's multiplayer note can be updated.
 
-# Part G: railways (`downgrade_railway`)
+# Part H: railways (`downgrade_railway`)
 
-## G1 findings (1.19.4.2 `v1.19.4.2.2da5` in Ghidra 12.2; addresses for orientation only)
+## H1 findings (1.19.4.2 `v1.19.4.2.2da5` in Ghidra 12.2; addresses for orientation only)
 
 Static analysis only; nothing here was observed at runtime yet.
 
@@ -3292,7 +3292,7 @@ Static analysis only; nothing here was observed at runtime yet.
 - `CChangeRailwayConstructionLeveLCommand` (slot 10 0x1411df7d0 -> 0x141a93ce0) clamps the target
   to `[base, MAX]`; that is the UI's "already at current level".
 
-## G2: `downgrade_railway`
+## H2: `downgrade_railway`
 
 - **Path:** breadth first over links with level > 0, neighbours in the pair order, so the path
   with the fewest links is the same on every machine. The search uses per-thread work arrays
@@ -3324,7 +3324,7 @@ Static analysis only; nothing here was observed at runtime yet.
 
 ### In-game results (2026-11-09, 1.19.4.2 as a local test entry in `loader_config.ini`)
 
-- **Startup:** every railway field resolved to the G1 offsets; `downgrade_railway` registered;
+- **Startup:** every railway field resolved to the H1 offsets; `downgrade_railway` registered;
   self-check passed (2001 links consistent on both ends).
 - **Effect:** "lower by one" lowered the 3 links of 6521-6282 each use; "remove it" took the
   railway off the map (Berlin to Stettin); "no path" changed nothing and logged it; after a
@@ -3333,7 +3333,7 @@ Static analysis only; nothing here was observed at runtime yet.
 - **Not yet checked:** supply values before and after, `has_railway_connection` turning false,
   multiplayer, and 1.19.3 (item 6).
 
-## G3: `queue_railway_dismantle` (construction queue)
+## H3: `queue_railway_dismantle` (construction queue)
 
 ### Findings (1.19.4.2)
 
@@ -3425,23 +3425,55 @@ Static analysis only; nothing here was observed at runtime yet.
     test used `SessionAllowsLocalWrites`, which only answers inside a game-entered callback. Clicks
     now use `CurrentSessionSinglePlayer` (the session as classified when the game was entered).
 
-## G5: who may dismantle where (game rules)
+### After the PR #2 review (2026-11-10)
 
-- Relations, as the vanilla triggers evaluate them:
-  - `is_subject_of` (0x1403fa270): country = TagToCountry(tag) 0x140c07bf0, diplomacy country+0xf88,
-    relation = diplomacy->+8[TagIndex(other) 0x140c08790], `IsSubject(relation)` 0x140d87160
-    (relation+0x288 = the subject agreement, type 0x30d1, overlord tag at +0x10).
-  - `is_in_faction_with` (0x1403f90f0): diplomacy+0x2d8 = faction, same faction = same pointer.
-  - province controller: gamestate+8 is the province table (vtable[0](id)), controller tag at
-    province+0x188 (CBuildRailwayCommand compares it with the command's country).
-- The loader's check: every province of the path controlled by the country (the engine's "same
-  country" test) or, per global flag, by a faction member / subject / overlord. It replaces the
-  engine's build permission (`Clickable`, `PathUsable`/`ProvinceUsable`) for the X, the click and a
-  dismantle line's daily step; without these signatures the build permission stays.
-- Game rules can't be read from C++ here without more work; a mod sets the flags from
-  `has_game_rule` at `on_startup` (rules are fixed per game, flags are saved).
+- **When `railways` is switched off** (its self-check on game entry fails): the plugin calls
+  `Engine::DisableRailways()` and deactivates `railway_queue` as well. From then on, for the rest
+  of the session:
+  - `downgrade_railway`, `queue_railway_dismantle` and Alt+Shift+click change nothing;
+  - the badges are vanilla again (no cross, the click goes to vanilla);
+  - a dismantle entry already in the queue **pauses**: its daily step and progress update do
+    nothing and its finished check says no. So the engine neither runs it as an ordinary
+    railway line nor removes it, and it stays in the queue and in saves for a later session
+    where the feature works. `loader.log` says so once.
+  - A later game entry in the same session does not switch it back on.
+- **Thread of the daily step:** the first daily step of each session logs its thread and whether
+  it is the main thread (`railway_queue: daily step on thread N (the main thread)`). Statically
+  it runs from the production manager's serial daily update (`production.daily_serial`,
+  0x140ed8390), which the main thread runs. The graphics rebuild that `DowngradeRailway` ends with
+  now checks `IsMainThread()`: off the main thread it is deferred to the next safe point (logged
+  once). Without the frame hook (no main-thread test) it runs where it is called, as before.
+- **Fixed numbers now read from code:**
+  - the output getter's vtable slot: the daily step calls it as `call [vtable+0x70]`
+    (`kSigRailLineDailyOutput`, 0x141a94822; slot 14);
+  - the badge text's flags byte and the mask that clears its hidden flag: the and-instruction in
+    `kSigRailIconText` (`and byte [rcx+0x75],0xEF`), checked to clear exactly one bit.
+- **Badge cross:** while Alt+Shift is held, the badge shows vanilla's removal cross
+  (`GFX_cancel_conversion_button`, the sprite of the state view's cross) as a text icon. The red
+  X stays as the fallback when the icon delimiter cannot be read.
+- **`queue_railway_dismantle` where the country may not dismantle:** it still queues (the daily
+  step cancels the entry, as before), but `loader.log` now says so when the effect runs. The
+  effect's tooltip adds a red line (`HOI4_LOADER_QUEUE_RAILWAY_DISMANTLE_NOT_ALLOWED`). The test
+  is the daily step's own: the game rules, or without the relation tests the build permission.
+- **1.19.3:** no 1.19.3 copy is available here (only the current 1.19.4.2 `hoi4.exe`, and the
+  1.19.4.2 copy analysed in Ghidra). So the railway signatures are unchecked on 1.19.3. A false
+  match there would show as a failed cross-check or self-check, and the features would then stay
+  off. That is not proven until `tools/check_signatures.py` and `tools/check_code_shapes.py` run
+  on a 1.19.3 copy.
 
-## G4: crash after removing a railway (fixed)
+### To verify in game (review)
+
+1. **A save with a dismantle entry, loaded without the loader** (`version.dll` renamed): what
+   happens to the entry. Is it removed at once, and cleanly? Is there a notification? Is
+   anything new in `logs\error.log`? Then once more with the loader and
+   `railway_queue = 0` in `loader_config.ini` (the hooks are not installed, so the same as
+   vanilla).
+2. **`loader.log`:** the daily step's thread line says "the main thread".
+3. **The badge:** the cross shows while Alt+Shift is held and fits the badge.
+4. **Disallowed path:** `queue_railway_dismantle` on a path through another country's province
+   gives the log line and the red tooltip line; the entry is cancelled on its first day.
+
+## H4: crash after removing a railway (fixed)
 
 - **Seen:** save, load, a dismantle step took link 9238-9294 to level 0, and one second later the
   game crashed: access violation reading 0 in the generic mesh draw (0x1422e7544, `mov rsi,
@@ -3479,3 +3511,19 @@ Static analysis only; nothing here was observed at runtime yet.
 4. Save and load mid-way: the entry, its progress and the railway are as before.
 5. Cancel mid-way: the entry goes, the levels lowered so far stay lowered.
 6. How the entry's text and level look in the queue.
+
+## H5: who may dismantle where (game rules)
+
+- Relations, as the vanilla triggers evaluate them:
+  - `is_subject_of` (0x1403fa270): country = TagToCountry(tag) 0x140c07bf0, diplomacy country+0xf88,
+    relation = diplomacy->+8[TagIndex(other) 0x140c08790], `IsSubject(relation)` 0x140d87160
+    (relation+0x288 = the subject agreement, type 0x30d1, overlord tag at +0x10).
+  - `is_in_faction_with` (0x1403f90f0): diplomacy+0x2d8 = faction, same faction = same pointer.
+  - province controller: gamestate+8 is the province table (vtable[0](id)), controller tag at
+    province+0x188 (CBuildRailwayCommand compares it with the command's country).
+- The loader's check: every province of the path controlled by the country (the engine's "same
+  country" test) or, per global flag, by a faction member / subject / overlord. It replaces the
+  engine's build permission (`Clickable`, `PathUsable`/`ProvinceUsable`) for the X, the click and a
+  dismantle line's daily step; without these signatures the build permission stays.
+- Game rules can't be read from C++ here without more work; a mod sets the flags from
+  `has_game_rule` at `on_startup` (rules are fixed per game, flags are saved).

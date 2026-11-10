@@ -51,7 +51,7 @@ A–F; NOTES.md has the findings and test results behind each.
   - A self-check on game entry compares every stored link with its other end; on any mismatch
     the feature switches itself off.
   - 7 new signatures (51 in total). They were found on 1.19.4.2, which is not a listed build;
-    on 1.19.3 they are unchecked (NOTES.md Part G).
+    on 1.19.3 they are unchecked (NOTES.md Part H).
   - Test mod: a "HOI4 Loader: Railways" category with downgrade, remove, no-path and rebuild
     decisions on the Brandenburg to West Prussia railway.
   - `levels = all` removes the whole route; `all_routes = yes` removes route after route until no
@@ -96,6 +96,19 @@ A–F; NOTES.md has the findings and test results behind each.
     player's country, or (per global flag) by a faction member, a subject or the overlord. The test
     mod sets the flags from three game rules. A queued entry is cancelled once that no longer holds.
     Three more signatures, 74 in total.
+  - **After review (PR #2):**
+    - When `railways` switches itself off (failed self-check), `railway_queue` goes off with it.
+      Queued dismantle entries pause (no progress, not finished, kept in the queue and the save),
+      nothing changes railways any more, and the badges are vanilla.
+    - The railway graphics rebuild runs only on the main thread (deferred otherwise). The first
+      daily step logs its thread as evidence.
+    - The output getter's slot and the badge's hidden flag are read from the code (one more
+      signature; the badge signature now wildcards those bytes).
+    - The badge shows vanilla's removal cross (`GFX_cancel_conversion_button`) instead of a red X
+      (the X stays as the fallback).
+    - `queue_railway_dismantle` on a path the country may not dismantle logs it, and its tooltip
+      adds a red line (`HOI4_LOADER_QUEUE_RAILWAY_DISMANTLE_NOT_ALLOWED`).
+    - NOTES: the railway findings are now Part H (Part G is `create_army`).
 
 ## 0.5.0-beta (2026-10-18), script version 3
 
