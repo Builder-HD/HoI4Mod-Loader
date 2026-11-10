@@ -247,7 +247,7 @@ int ReadCostPercent() {
     return best.percent;
 }
 
-// Shift+click on a railway map badge: one more dismantle level on that segment. The click comes
+// Alt+Shift+click on a railway map badge: one more dismantle level on that segment. The click comes
 // from the UI, so the change waits for the next safe point on the main thread. Only where local
 // writes are allowed (single player): a click happens on one machine only.
 struct IconClick {
@@ -267,9 +267,9 @@ bool OnIconClick(const std::vector<int>& path) {
     const char* why = nullptr;
     if (!CurrentSessionSinglePlayer(&why)) {
         static bool logged = false;
-        if (!logged) Log("railway_queue: Shift+click dismantling is single player only (%s); click ignored", why);
+        if (!logged) Log("railway_queue: Alt+Shift+click dismantling is single player only (%s); click ignored", why);
         logged = true;
-        return true;  // swallowed: no surprise "upgrade to maximum" either
+        return true;  // swallowed: no surprise vanilla Alt+Shift click either
     }
     int tag = Engine::PlayerCountryTag();
     if (tag <= 0) return false;
@@ -290,7 +290,7 @@ bool RailwayQueueInit() {
     }
     // Optional: without them the queue shows the vanilla upgrade text and an unmarked title.
     if (Engine::HookRailwayTooltip()) Engine::HookRailwayEntryTitle();
-    // Optional too: Shift on the railway map badges (needs the main-thread queue to defer clicks).
+    // Optional too: Alt+Shift on the railway map badges (needs the main-thread queue to defer clicks).
     if (MainThreadQueueAvailable()) Engine::HookRailwayMapIcons(&OnIconClick);
     // Allies / subjects / overlord: the game rules' global flags.
     OnLexerReady(&InternRuleFlags);

@@ -283,8 +283,8 @@ void SetRailwayDismantleRules(RailwayRules_t rules);
 const int kRailwayDismantleDefaultPercent = 30;
 using RailwayCost_t = int (*)();
 void SetRailwayDismantleCost(RailwayCost_t cost);
-// Railway map badges (the level circle on each segment): while Shift is held they show a red X
-// where the player may dismantle, and a Shift+click calls onClick(segment path) instead of
+// Railway map badges (the level circle on each segment): while Alt+Shift is held they show a red
+// X where the player may dismantle, and a Alt+Shift+click calls onClick(segment path) instead of
 // vanilla's upgrade when onClick returns true. UI thread; onClick must defer game-state changes.
 using RailwayIconClick_t = bool (*)(const std::vector<int>& path);
 bool HookRailwayMapIcons(RailwayIconClick_t onClick);

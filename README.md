@@ -49,7 +49,7 @@ Take the `hoi4_loader-v….zip` file under **Assets**, not "Source code".
 2. Enable **HOI4 Loader Test** in the launcher playset.
 3. In a game, its decisions are in the decisions screen.
 
-**Optional: the railway rules.** Game rules for railway dismantling with Shift+click on the
+**Optional: the railway rules.** Game rules for railway dismantling with Alt+Shift+click on the
 railway map: where you may dismantle besides your own provinces (allies, subjects, overlord) and
 what it costs. It has no decisions, so it suits normal play; without it you dismantle only in
 provinces you control, at 30% of the building cost.

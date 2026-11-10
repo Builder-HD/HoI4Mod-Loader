@@ -1,5 +1,5 @@
 # HOI4 Loader Railway Rules: the railway dismantling game rules, in their own "Dismantle Railways"
-# group: first where the player may dismantle railways (Shift+click on the railway map, and the
+# group: first where the player may dismantle railways (Alt+Shift+click on the railway map, and the
 # daily check of a queued dismantle) besides provinces it controls itself, then what dismantling
 # costs. The loader reads the global flags that common/on_actions/hoi4_loader_railway_rules_on_actions.txt
 # sets from these at game start. Without the loader the rules show but do nothing.

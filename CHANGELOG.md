@@ -82,9 +82,11 @@ A–F; NOTES.md has the findings and test results behind each.
   - The queue entry's tooltip says "Dismantling" when a mod defines
     `HOI4_LOADER_RAILWAY_DISMANTLE_TOOLTIP` (hooks on the entry's tooltip builder and on
     Localize; one more signature and one anchor), and railway entries' titles start with a red down triangle (dismantling) or a green up triangle (building, upgrading) (hooks on the entry update and SetText; two more signatures).
-  - **Shift on the railway map:** in the railway construction view, holding Shift shows a red X in
-    each railway segment's level circle; Shift+click queues one dismantle level for that segment, a
-    further click deepens it (single player only). Four more signatures.
+  - **Alt+Shift on the railway map:** in the railway construction view, holding Alt+Shift shows a
+    red X in each railway segment's level circle; Alt+Shift+click queues one dismantle level for
+    that segment, a further click deepens it (single player only). Four more signatures. (First
+    Shift alone, which took over vanilla's Shift+click upgrade to the maximum level; Alt+Shift
+    only takes over vanilla's "maximum level, last in the queue".)
   - **Fixed a crash** after a railway was removed (seen after loading a save): the railway graphics
     (pieces, trains, bridges) are now cleared and rebuilt after every removal, as the game does after
     loading. One more signature.

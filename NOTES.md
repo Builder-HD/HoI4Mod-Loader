@@ -3413,9 +3413,14 @@ Static analysis only; nothing here was observed at runtime yet.
   Right click 0x141992b10 lowers a pending upgrade.
 - Update 0x141992ce0: text = `Colorize(out, 'W' or 'O', level text)` 0x140245cf0 (writes the
   engine's colour code: byte 0x11 then the letter) -> `SetText` (takes the string and frees it).
-- Loader: update hook replaces the text with a red X while Shift is held (and the player may
-  build there and the segment has a railway); click hook with Shift held calls the plugin, which
-  defers `QueueOrDeepenRailwayDismantle` to the next safe point (single player only).
+- Loader: update hook replaces the text with a red X while Alt+Shift is held (and the player
+  may build there and the segment has a railway); click hook with Alt+Shift held calls the plugin,
+  which defers `QueueOrDeepenRailwayDismantle` to the next safe point (single player only). First
+  Shift alone; changed after play testing, since vanilla's Shift+click (to the maximum) is still
+  wanted in the same view. The click's modifiers (input vtable): +0x28 Shift (to the maximum),
+  +0x38 Ctrl (queue position 0, first), +0x30 Alt (1, last), neither 2 (default); matched to keys
+  by vanilla's `INSERT_CONSTRUCTION` text ("Ctrl+Click ... beginning", "Alt+Click ... end") and
+  the check order. Alt+Shift with Ctrl up was picked as costing the least.
   - **Bug found in game (first build):** the X showed but clicks did nothing: the single-player
     test used `SessionAllowsLocalWrites`, which only answers inside a game-entered callback. Clicks
     now use `CurrentSessionSinglePlayer` (the session as classified when the game was entered).

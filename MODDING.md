@@ -926,13 +926,16 @@ queue_railway_dismantle = { start_province = 6521 target_province = 6282 levels 
   ```
   Without the key the vanilla upgrade text shows. `loader.log` says which on first use. The
   rules-only mod (`mod/hoi4_loader_railway_rules`) defines it.
-- **On the map (single player):** in the railway construction view, hold **Shift**: the level
-  circle on every railway segment you may dismantle shows a red **X**. **Shift+click** it to add
-  one dismantle level for that segment to the construction queue; click again for another level
-  (the same entry goes one level deeper, down to 0). This replaces vanilla's Shift+click on those
-  circles (upgrade to the maximum level). In multiplayer the click is ignored (a click happens on
-  one machine only; it would desync), and `loader.log` says so once.
-- **Where the player may dismantle** (the X, Shift+click, and every day for a queued entry): every
+- **On the map (single player):** in the railway construction view, hold **Alt+Shift**: the
+  level circle on every railway segment you may dismantle shows a red **X**. **Alt+Shift+click**
+  it to add one dismantle level for that segment to the construction queue; click again for
+  another level (the same entry goes one level deeper, down to 0). Vanilla reads three keys on
+  those circles: Shift (upgrade to the maximum level), Ctrl (first in the queue) and Alt (last in
+  the queue). Only Alt+Shift+click (vanilla: maximum level, last in the queue) on a circle you may
+  dismantle is taken over; every other combination, and Ctrl+Alt+Shift, stays vanilla. In
+  multiplayer the click is ignored (a click happens on one machine only; it would desync), and
+  `loader.log` says so once.
+- **Where the player may dismantle** (the X, Alt+Shift+click, and every day for a queued entry): every
   province of the segment must be controlled by the player's country, or by a country these
   global flags allow:
 
@@ -951,7 +954,7 @@ queue_railway_dismantle = { start_province = 6521 target_province = 6282 levels 
   not limited by them: script decides where it uses those.
 - **Dismantling cost:** 30% of the building cost per level by default. A global flag
   `hoi4_loader_railway_dismantle_cost_<percent>` (0 to 1000, e.g. `..._cost_50` for half) changes
-  it for every queued dismantle, Shift+click and `queue_railway_dismantle` alike; with several set,
+  it for every queued dismantle, Alt+Shift+click and `queue_railway_dismantle` alike; with several set,
   the most recently set one counts. It is read every day, so an entry already in the queue
   follows a change (its progress so far is kept, capped at the new total). The rules-only mod has
   a game rule "Cost" (10, 20, 30, 50, 75 or 100%) that sets the flag at game start; it is last in the

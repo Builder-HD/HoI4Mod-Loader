@@ -745,8 +745,13 @@ uint32_t g_lineList = 0, g_lineListCount = 0;  // construction -> its lines
 RailwayIconClick_t g_onIconClick = nullptr;
 const uint8_t kHiddenFlag = 0x10;  // element+0x75, cleared before show (kSigRailIconText)
 
+// Alt+Shift. Vanilla's badge click reads Shift (to the maximum level), Ctrl (first in the queue)
+// and Alt (last in the queue); Alt+Shift costs the least: "maximum level, last in the queue".
+// Ctrl must be up, so vanilla's Ctrl+Alt+Shift still reaches the engine.
 bool DismantleKeyHeld() {
-    if (!(GetAsyncKeyState(VK_SHIFT) & 0x8000)) return false;
+    if (!(GetAsyncKeyState(VK_SHIFT) & 0x8000) || !(GetAsyncKeyState(VK_MENU) & 0x8000) ||
+        (GetAsyncKeyState(VK_CONTROL) & 0x8000))
+        return false;
     DWORD pid = 0;
     GetWindowThreadProcessId(GetForegroundWindow(), &pid);
     return pid == GetCurrentProcessId();
