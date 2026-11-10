@@ -60,5 +60,6 @@ void* __fastcall TriggerEntryCreate(TriggerEntryObj* e);
 // native_scope_engine.cpp.
 bool BindScopeBlock(Command& c, std::string* reason);
 bool BindIterator(Command& c, std::string* reason);
+bool BindEffectBlock(Command& c, std::string* reason);
 
 }  // namespace NativeBinding

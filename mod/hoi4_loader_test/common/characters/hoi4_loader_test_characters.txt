@@ -1,0 +1,35 @@
+# Test characters for hoi4_loader's create_army (common/decisions/hoi4_loader_test_army_decisions.txt).
+# Defined for every country; the "prepare" decision recruits them. HLT_unrecruited is never
+# recruited (a failure test). Generic portraits.
+characters = {
+	HLT_general_a = {
+		name = HLT_general_a
+		portraits = { army = { large = GFX_portrait_unknown small = GFX_portrait_unknown } }
+		corps_commander = { skill = 3 attack_skill = 3 defense_skill = 3 planning_skill = 3 logistics_skill = 3 }
+	}
+	HLT_general_b = {
+		name = HLT_general_b
+		portraits = { army = { large = GFX_portrait_unknown small = GFX_portrait_unknown } }
+		corps_commander = { skill = 2 attack_skill = 2 defense_skill = 2 planning_skill = 2 logistics_skill = 2 }
+	}
+	HLT_marshal = {
+		name = HLT_marshal
+		portraits = { army = { large = GFX_portrait_unknown small = GFX_portrait_unknown } }
+		field_marshal = { skill = 4 attack_skill = 3 defense_skill = 3 planning_skill = 3 logistics_skill = 3 }
+	}
+	HLT_admiral = {
+		name = HLT_admiral
+		portraits = { navy = { large = GFX_portrait_unknown small = GFX_portrait_unknown } }
+		navy_leader = { skill = 3 attack_skill = 3 defense_skill = 3 maneuvering_skill = 3 coordination_skill = 3 }
+	}
+	HLT_unrecruited = {
+		name = HLT_unrecruited
+		portraits = { army = { large = GFX_portrait_unknown small = GFX_portrait_unknown } }
+		corps_commander = { skill = 1 attack_skill = 1 defense_skill = 1 planning_skill = 1 logistics_skill = 1 }
+	}
+	HLT_general_ai = {
+		name = HLT_general_ai
+		portraits = { army = { large = GFX_portrait_unknown small = GFX_portrait_unknown } }
+		corps_commander = { skill = 3 attack_skill = 3 defense_skill = 3 planning_skill = 3 logistics_skill = 3 }
+	}
+}

@@ -325,6 +325,20 @@ bool CountPlanesStationed(int regionId, int tag, int64_t* out) {
     return true;
 }
 
+bool HaveCountryDivisions() { return HaveCountries() && g_countryDivisions && g_countryDivisionCount && g_unitOwner; }
+
+bool CountryDivisionList(int tag, std::vector<void*>* out) {
+    out->clear();
+    void* country = HaveCountryDivisions() ? CountryByTag(tag) : nullptr;
+    if (!country) return false;
+    PtrList divisions = ListAt(country, g_countryDivisions, g_countryDivisionCount);
+    for (int d = 0; d < divisions.count; ++d)
+        if (divisions.data[d]) out->push_back(divisions.data[d]);
+    return true;
+}
+
+int UnitOwnerTag(const void* unit) { return unit && g_unitOwner ? Rd<int>(unit, g_unitOwner) : 0; }
+
 bool ForEachDivision(int tag, void (*fn)(void* division, void* ctx), void* ctx) {
     if (!HaveMilitaryCounts()) return false;
     void* country = CountryByTag(tag);

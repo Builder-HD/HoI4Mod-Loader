@@ -12,6 +12,10 @@
 // (evaluate), 23 (header); every_ / random_ 4 (item), 25 (collect), 26 (set scope), every_ 27 /
 // random_ 28 (element name), every_ 10 (tooltip per element). Each clone keeps its IteratorInfo
 // one slot past the template's last.
+//
+// Effect blocks (create_army = { leader = ... create_unit = { ... } }) are the same generic
+// effects with children, but the children stay in the current scope, only the allowed child
+// effects are read, and the plugin's execute decides when CEffect's children loop runs.
 #include <windows.h>
 #include <string.h>
 
@@ -240,6 +244,82 @@ EngineString* __fastcall SB_E_Tooltip10(void* self, EngineString* out, void* sco
         if (tmp.size) text += "\n" + Text(tmp);
         Engine::FreeEngineString(&tmp);
     }
+    return MakeTooltip(out, text);
+}
+
+// --- Effect blocks --------------------------------------------------------------------------
+// Slot 4: the block's own keys, then the allowed child effects (checked against the block's
+// scope mask); anything else is the engine's "Unexpected token" and that use does nothing.
+void __fastcall EB_Item(void* self, void* parser, int token, uint32_t mask) {
+    ParsedCommand* pc = Rec(self);
+    if (pc && NativeParamIndex(*pc->cmd, token) >= 0) return ReadItemFor(pc, parser, token);
+    if (pc && NativeIsChild(*pc->cmd, token)) return ((Factory_t)Engine::effectBase.vt[kE_Item])(self, parser, token, mask);
+    Engine::ParserUnexpected(parser);  // engine error with file and line, skips the value
+    if (!pc) return;
+    pc->parseError = true;
+    if (InterlockedExchange(&const_cast<Command*>(pc->cmd)->invalidLogged, 1) == 0)
+        Log("Native effect '%s': unexpected key '%s' (only its parameters and %s are allowed inside); this use does nothing "
+            "(first occurrence logged)",
+            pc->cmd->name.c_str(), Engine::TokenName(token), pc->cmd->childNames.empty() ? "-" : pc->cmd->childNames[0].c_str());
+}
+
+volatile long g_childFaultLogged = 0;
+
+bool SafeRunChildren(void* self, const void* scope, DWORD* code) {
+    __try {
+        ((Run_t)Engine::effectBase.vt[kE_Execute])(self, (void*)scope);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *code = GetExceptionCode();
+        return false;
+    }
+}
+
+bool RunChildren(void* self, const void* scope) {
+    DWORD code = 0;
+    if (SafeRunChildren(self, scope, &code)) return true;
+    ParsedCommand* pc = Rec(self);
+    if (InterlockedExchange(&g_childFaultLogged, 1) == 0)
+        Log("Native effect '%s': its child effects crashed (exception 0x%08lX) (logged once)", pc ? pc->cmd->name.c_str() : "?",
+            code);
+    return false;
+}
+
+void __fastcall EB_Execute(void* self, void* scope, void*, void*) {
+    NativeExecuteBlock(Rec(self), scope, EffectChildren(&RunChildren, self, scope));
+}
+
+// Slots 8 / 10: the block's own line, then the children's lines one level deeper (left out when
+// the callback hides them). An invalid use (parse error) runs nothing, so it shows nothing, its
+// children included.
+bool Invalid(void* self) { return !Rec(self) || Rec(self)->parseError; }
+
+std::string BlockLine(void* self, void* scope, int indent, bool* childrenHidden) {
+    std::string own = NativeTooltip(Rec(self), scope, false, childrenHidden);
+    return own.empty() ? std::string() : Indent(indent) + own;
+}
+
+EngineString* __fastcall EB_Tooltip8(void* self, EngineString* out, void* scope, int indent, int flag) {
+    if (Invalid(self)) return MakeTooltip(out, "");
+    bool hidden = false;
+    std::string text = BlockLine(self, scope, indent, &hidden);
+    if (hidden) return MakeTooltip(out, text);
+    EngineString tmp{};
+    ((EffectTooltip8_t)Engine::effectBase.vt[8])(self, &tmp, scope, text.empty() ? indent : indent + 1, flag);
+    if (tmp.size) text += (text.empty() ? "" : "\n") + Text(tmp);
+    Engine::FreeEngineString(&tmp);
+    return MakeTooltip(out, text);
+}
+
+EngineString* __fastcall EB_Tooltip10(void* self, EngineString* out, void* scope, int indent) {
+    if (Invalid(self)) return MakeTooltip(out, "");
+    bool hidden = false;
+    std::string text = BlockLine(self, scope, indent, &hidden);
+    if (hidden) return MakeTooltip(out, text);
+    EngineString tmp{};
+    ((EffectTooltip10_t)Engine::effectBase.vt[10])(self, &tmp, scope, text.empty() ? indent : indent + 1);
+    if (tmp.size) text += (text.empty() ? "" : "\n") + Text(tmp);
+    Engine::FreeEngineString(&tmp);
     return MakeTooltip(out, text);
 }
 
@@ -490,6 +570,25 @@ bool BindScopeBlock(Command& c, std::string* reason) {
     vt[8] = (void*)&SB_E_Tooltip8;
     vt[10] = (void*)&SB_E_Tooltip10;
     vt[kE_Execute] = (void*)&SB_E_Execute;
+    vt[kE_Scopes] = (void*)&E_Scopes;
+    auto* e = new EffectEntryObj{EntryVtable(Engine::effectTemplateEntryVtable, (void*)&EffectEntryCreate), c.help.c_str(), &c, vt};
+    return Engine::RegisterEffect(c.token, (Engine::EffectEntry*)e);
+}
+
+bool BindEffectBlock(Command& c, std::string* reason) {
+    if (!Engine::HaveScopeBlocks()) {  // FreeEngineString (tooltips) comes with the scope block pieces
+        *reason = "effect block engine functions not found on this build";
+        return false;
+    }
+    void** vt = Clone(Engine::effectTemplate);
+    vt[kE_ReadClause] = Engine::effectBase.vt[kE_ReadClause];
+    vt[kE_Item] = (void*)&EB_Item;
+    vt[kE_Validate] = (void*)&E_Validate;
+    vt[kE_Value] = (void*)&E_Value;
+    vt[kE_Tooltip] = Engine::effectBase.vt[kE_Tooltip];  // no own line here: slots 8 / 10 write it
+    vt[8] = (void*)&EB_Tooltip8;
+    vt[10] = (void*)&EB_Tooltip10;
+    vt[kE_Execute] = (void*)&EB_Execute;
     vt[kE_Scopes] = (void*)&E_Scopes;
     auto* e = new EffectEntryObj{EntryVtable(Engine::effectTemplateEntryVtable, (void*)&EffectEntryCreate), c.help.c_str(), &c, vt};
     return Engine::RegisterEffect(c.token, (Engine::EffectEntry*)e);

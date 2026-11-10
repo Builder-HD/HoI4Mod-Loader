@@ -141,6 +141,30 @@ static bool TargetWrongType(const Args&, const Scope&, ScopeTarget* out) {
     return true;
 }
 
+static int g_blockRuns = 0, g_blockBefore = 0, g_blockAfter = 0;
+static std::string g_blockLeader, g_blockName;
+static bool g_blockChildrenOk = false;
+static void ExecBlock(const Args& a, const Scope&, const EffectChildren& children) {
+    g_blockLeader = a.key(0);
+    g_blockName = a.has(1) ? a.key(1) : "";
+    g_blockBefore = g_blockRuns;
+    g_blockChildrenOk = children.run();
+    g_blockAfter = g_blockRuns;
+}
+static void ExecBlockCrash(const Args&, const Scope&, const EffectChildren&) {
+    volatile int* p = nullptr;
+    *p = 1;
+}
+static void TipBlock(const Args& a, const Scope&, TooltipText& out) {
+    out.add("Group led by ").add(a.key(0));
+    if (!a.has(1)) out.hideChildren();  // stands for "the block will not run its children"
+}
+static bool FakeChildren(void*, const void*) {
+    ++g_blockRuns;
+    return true;
+}
+static bool FakeChildrenCrash(void*, const void*) { return false; }
+
 static NativeEffect Effect(const char* name, std::vector<ParamSpec> params, Form form = Form::Block) {
     return NativeEffect{name, "Help text.", form, params, ScopeMask::Any, &Exec, nullptr};
 }
@@ -288,6 +312,37 @@ int main() {
     NativeEffect untexted = Effect("untexted_effect", kRegionName);
     untexted.texts = {{"NO_ENGLISH", ""}};
     CHECK(!register_native_effect(untexted, "feat_s"), "tooltip text without English refused");
+    // Effect blocks (checked in 12).
+    const std::vector<ParamSpec> kBlockParams = {{"leader", ParamType::Token, true}, {"name", ParamType::Text, false}};
+    CHECK(register_native_effect_block(NativeEffectBlock{"make_group", "Block.", kBlockParams, ScopeMask::Country,
+                                                         {"set_province_name"}, &ExecBlock, &TipBlock},
+                                       "feat_k"),
+          "effect block queued");
+    CHECK(register_native_effect_block(NativeEffectBlock{"crash_group", "Block.", {}, 0, {"set_province_name"}, &ExecBlockCrash,
+                                                         nullptr},
+                                       "feat_k"),
+          "effect block without parameters queued");
+    CHECK(register_native_effect_block(NativeEffectBlock{"ghost_group", "Block.", {}, 0, {"no_such_effect"}, &ExecBlock, nullptr},
+                                       "feat_g"),
+          "effect block with an unknown child queued (refused at engine registration)");
+    CHECK(!register_native_effect_block(NativeEffectBlock{"empty_group", "Block.", kBlockParams, 0, {}, &ExecBlock, nullptr},
+                                        "feat_k"),
+          "effect block without children refused");
+    CHECK(!register_native_effect_block(NativeEffectBlock{"clash_group", "Block.", kBlockParams, 0, {"leader"}, &ExecBlock,
+                                                          nullptr},
+                                        "feat_k"),
+          "child named like a parameter refused");
+    CHECK(!register_native_effect_block(NativeEffectBlock{"self_group", "Block.", {}, 0, {"self_group"}, &ExecBlock, nullptr},
+                                        "feat_k"),
+          "block containing itself refused");
+    CHECK(!register_native_effect_block(NativeEffectBlock{"noexec_group", "Block.", {}, 0, {"set_province_name"}, nullptr,
+                                                          nullptr},
+                                        "feat_k"),
+          "effect block without execute refused");
+    CHECK(!register_native_effect_block(NativeEffectBlock{"set_thing", "Block.", {}, 0, {"set_province_name"}, &ExecBlock,
+                                                          nullptr},
+                                        "feat_k"),
+          "effect block named like a loader effect refused");
     CHECK(!NativeFeatureComplete("feat_a"), "feature incomplete before engine registration");
     CHECK(NativeFeatureComplete("no_commands"), "feature without native commands counts as complete");
 
@@ -296,7 +351,9 @@ int main() {
     be.failBind.insert("bind_fails");
     document_on_action("on_test_loaded", "feat_d", "Fires in tests.");
     int n = NativeScriptFinalize(be, L"");
-    CHECK(n == 16, "16 commands registered (got %d)", n);
+    CHECK(n == 18, "18 commands registered (got %d)", n);
+    CHECK(NativeFeatureComplete("feat_k") && !NativeFeatureComplete("feat_g"), "effect block features: complete / unknown child");
+    CHECK(LogCount("the game has no effect 'no_such_effect' to allow inside") == 1, "unknown child effect logged");
     CHECK(NativeScriptFinalized(), "window closed after finalize");
     CHECK(NativeFeatureComplete("feat_a"), "feat_a complete (all registered)");
     CHECK(!NativeFeatureComplete("feat_b"), "feat_b incomplete (vanilla name refused)");
@@ -336,6 +393,16 @@ int main() {
     CHECK(!NativeSetArg(*pc, 1, "has space", &err), "key with space refused");
     CHECK(!NativeSetArg(*pc, 1, std::string(256, 'K').c_str(), &err), "256-character key refused");
     CHECK(NativeSetArg(*pc, 1, std::string(255, 'K').c_str(), &err), "255-character key accepted");
+    Command textCmd{};
+    textCmd.name = "text_thing";
+    textCmd.params = {{"title", ParamType::Text, true}};
+    ParsedCommand* tp = NativeNewParsed(textCmd);
+    CHECK(NativeSetArg(*tp, 0, "1. Panzerarmee", &err) && std::string(tp->args[0].s) == "1. Panzerarmee", "text with spaces parsed");
+    CHECK(NativeSetArg(*tp, 0, "Armee \xc3\xa4", &err), "UTF-8 text accepted");
+    CHECK(!NativeSetArg(*tp, 0, "", &err), "empty text refused");
+    CHECK(!NativeSetArg(*tp, 0, "a{b}", &err) && err.find("expects a text") != std::string::npos, "text with braces refused");
+    CHECK(!NativeSetArg(*tp, 0, "line\nbreak", &err), "text with a control character refused");
+    CHECK(!NativeSetArg(*tp, 0, std::string(256, 'x').c_str(), &err), "256-character text refused");
 
     // 5. Validation (required parameters), logged once per command.
     ParsedCommand* missing = NativeNewParsed(*setThing);
@@ -611,6 +678,53 @@ int main() {
     loc = native_localize({"K", "$H|H$, $MISSING$ and a lone $ sign"}, {{"H", "x"}});
     CHECK(loc == "\x11Yx\x11!, $MISSING$ and a lone $ sign", "highlight, unknown placeholder and lone $ kept");
     CHECK(native_localize_key("SOME_KEY") == "SOME_KEY", "missing key localises to itself");
+
+    // 12. Effect blocks.
+    const Command* group = nullptr;
+    const Command* crashGroup = nullptr;
+    for (const Command* c : NativeCommands()) {
+        if (c->name == "make_group") group = c;
+        if (c->name == "crash_group") crashGroup = c;
+    }
+    CHECK(group && crashGroup, "effect blocks found");
+    if (!group || !crashGroup) return g_fail;
+    CHECK(group->effectBlock && group->childTokens.size() == 1 && NativeIsChild(*group, be.Intern("set_province_name")) &&
+              !NativeIsChild(*group, be.Intern("leader")) && !NativeIsChild(*group, be.Intern("set_thing")),
+          "allowed child tokens");
+    ParsedCommand* g1 = NativeNewParsed(*group);
+    CHECK(NativeSetArg(*g1, 0, "GER_erwin_rommel", &err) && g1->args[0].i == be.Intern("GER_erwin_rommel") &&
+              NativeSetArg(*g1, 1, "1. Panzerarmee", &err) && NativeValidate(*g1),
+          "leader token and name parsed");
+    g_blockRuns = 0;
+    NativeExecuteBlock(g1, &regionScope, EffectChildren(&FakeChildren, nullptr, &regionScope));
+    CHECK(g_blockLeader == "GER_erwin_rommel" && g_blockName == "1. Panzerarmee" && g_blockBefore == 0 && g_blockAfter == 1 &&
+              g_blockChildrenOk,
+          "execute ran its children in between (before %d, after %d)", g_blockBefore, g_blockAfter);
+    NativeExecuteBlock(g1, &regionScope, EffectChildren(&FakeChildrenCrash, nullptr, &regionScope));
+    CHECK(!g_blockChildrenOk, "crashed children reported to the execute callback");
+    ParsedCommand* g2 = NativeNewParsed(*group);
+    g_blockLeader.clear();
+    NativeExecuteBlock(g2, &regionScope, EffectChildren(&FakeChildren, nullptr, &regionScope));
+    CHECK(!NativeValidate(*g2) && g_blockLeader.empty(), "missing leader: invalid, nothing executed");
+    bool hidden = true;
+    CHECK(NativeTooltip(g1, &regionScope, false, &hidden) == "Group led by GER_erwin_rommel" && !hidden,
+          "block tooltip line, children shown");
+    ParsedCommand* g4 = NativeNewParsed(*group);
+    CHECK(NativeSetArg(*g4, 0, "GER_erwin_rommel", &err) && NativeValidate(*g4) &&
+              NativeTooltip(g4, &regionScope, false, &hidden) == "Group led by GER_erwin_rommel" && hidden,
+          "block tooltip line, children hidden by the callback");
+    ParsedCommand* g3 = NativeNewParsed(*crashGroup);
+    NativeExecuteBlock(g3, &regionScope, EffectChildren(&FakeChildren, nullptr, &regionScope));
+    CHECK(LogCount("'crash_group': execute crashed") == 1, "crashing block execute contained and logged");
+    docs = NativeScriptDocs();
+    const char* expected12[] = {
+        "- Usage: `make_group = { leader = <name> name = <text> set_province_name = { ... } }`\n",
+        "- Effects allowed inside (any number, run in the block's scope; any other key is an error): `set_province_name`\n",
+        "  - `name`: text, optional\n",
+        "### ghost_group\n\n- Feature: feat_g\n- Status: REFUSED: the game has no effect 'no_such_effect' to allow inside\n",
+    };
+    for (const char* e : expected12)
+        CHECK(docs.find(e) != std::string::npos, "docs contain: %.70s", e);
 
     printf("%s (%d checks, %d failure(s))\n", g_fail ? "FAILED" : "PASSED", g_checks, g_fail);
     return g_fail;

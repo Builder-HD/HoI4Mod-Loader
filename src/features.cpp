@@ -28,6 +28,7 @@ static Feature g_features[] = {
     {"army_condition", Tier::Engine, &ArmyConditionInit, "lifecycle", false, 0},
     {"production_data", Tier::Engine, &ProductionDataInit, "lifecycle", false, 0},
     {"region_scope", Tier::Engine, &RegionScopeInit, "lifecycle", false, 0},
+    {"create_army", Tier::Engine, &CreateArmyInit, "lifecycle", false, 0},
 };
 static int g_presentToken = 0;
 

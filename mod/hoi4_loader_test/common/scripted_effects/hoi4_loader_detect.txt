@@ -14,4 +14,5 @@ hoi4_loader_init = {
 	clr_global_flag = hoi4_loader_plugin_army_condition
 	clr_global_flag = hoi4_loader_plugin_production_data
 	clr_global_flag = hoi4_loader_plugin_region_scope
+	clr_global_flag = hoi4_loader_plugin_create_army
 }
