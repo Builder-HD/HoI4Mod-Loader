@@ -24,6 +24,24 @@ A–F; NOTES.md has the findings and test results behind each.
 - **Game 1.19.4.2** ("Operation Postern", Steam, as distributed) is supported: its hash is in
   `loader_config.ini`. Every signature matches; three create_army code shapes changed and were
   adapted (NOTES.md "1.19.4.2 added"). 1.19.3 stays supported.
+- **`province_building_removal` feature (engine tier, single player):** the state view's province
+  buildings (supply hub, naval base, bunkers, ...) get vanilla's red removal cross, as dockyards and
+  factories have in the shared slots. A click asks with vanilla's "Remove Building" dialog, and OK
+  removes one level as vanilla's removal does: supply follows for hubs, the wartime removal cooldown
+  applies and is started, and the tooltip is vanilla's. Hidden in multiplayer.
+  - The cross is a `remove` button the loader adds to `province_building_entry` by patching
+    `interface/countrystateview.gui` as the game reads it, whichever copy (vanilla's or a mod's).
+  - New virtual file API call `register_file_patch(suffix, patcher)`: patches each existing copy
+    of a file separately instead of replacing them all with one generated file.
+  - 13 new signatures and anchors (90 in total) and 7 code shapes (45), found on 1.19.4.2 like
+    the railway ones (NOTES.md Part I). New out-of-game test `gui_patch_test` (run by
+    `run_smoke.sh`).
+  - Test mod: "HOI4 Loader: Province buildings", vanilla-only decisions that remove, damage and
+    rebuild the Berlin and West Prussia hubs.
+  - Built to the PR #2 review's rules: the hooks run under SEH and a fault switches the feature
+    off for the session; the item and window vtables are checked before use; the hooks only act
+    on the main thread (the first call logs its thread); nothing of the loader's own is saved.
+
 - **Disclaimer** at the top of the player guide: unofficial, not affiliated with or endorsed by
   Paradox Interactive, runtime only, use at your own risk. The 0.5.0-beta zip's PLAYERS.md does
   not have it yet.

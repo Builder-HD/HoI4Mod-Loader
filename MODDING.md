@@ -41,6 +41,7 @@ Current features:
 | `railways` | engine (needs `lifecycle`) | `hoi4_loader_plugin_railways` | `downgrade_railway`: lower or remove a railway; `has_railway_between` trigger, see below |
 | `railway_queue` | engine (needs `railways`) | `hoi4_loader_plugin_railway_queue` | `queue_railway_dismantle`: dismantling as a construction queue entry, see below |
 | `time_control` | engine (needs `lifecycle`) | `hoi4_loader_plugin_time_control` | `force_game_speed`, `release_game_speed`, `hide_date_display`, `hide_time_controls`, `has_forced_game_speed`: lock the game speed (and the pause) for a while, hide the top bar's date; single player, see below |
+| `province_building_removal` | engine (needs `lifecycle`) | `hoi4_loader_plugin_province_building_removal` | a removal cross on the state view's province buildings (supply hub, naval base, bunkers); no script commands, see below |
 
 On an unknown build the file tier stays on, the engine tier is off, and `loader.log` lists the
 disabled features and prints the exact line to add to `loader_config.ini`. A feature whose init
@@ -144,6 +145,7 @@ when the loader is missing or a feature is off. Without them, using a loader tri
 | `downgrade_railway`, `has_railway_between` | `scripted_triggers/hoi4_loader_feature_railways.txt` |
 | `queue_railway_dismantle` | `scripted_triggers/hoi4_loader_feature_railway_queue.txt` |
 | `force_game_speed`, `release_game_speed`, `hide_date_display`, `hide_time_controls`, `has_forced_game_speed` | `scripted_triggers/hoi4_loader_feature_time_control.txt` |
+| a check that `province_building_removal` is on (it has no script commands) | `scripted_triggers/hoi4_loader_feature_province_building_removal.txt` |
 
 - **Combinations:** a block that combines features needs each feature's stub and guard, e.g.
   `air_superiority` inside `strategic_region` needs both `region_control` and `region_scope`.
@@ -1057,3 +1059,39 @@ hidden date is ignored when it is loaded in multiplayer.
 **Without the loader:** the effects and the trigger are unknown to the game (logged once per use
 when parsing) and do nothing. Guard them with `hoi4_loader_feature_time_control = yes` (stub:
 `stubs/common/scripted_triggers/hoi4_loader_feature_time_control.txt`).
+
+## Removing province buildings (`province_building_removal`)
+
+No script commands: this feature changes the UI.
+
+- **What the player sees:** in the state view's province row (supply hub, naval base, bunker,
+  coastal bunker and the other province buildings), each building gets the same red cross that
+  vanilla shows on dockyards and factories in the shared slots. Clicking it removes one level of
+  that building in that province at once, as vanilla's removal does for state buildings.
+- **When the cross shows:** the province has a level of the building and the local player's
+  country controls the province. During a war, vanilla's removal cooldown applies: the cross is
+  greyed out and its tooltip says until when. A removal starts the cooldown, as for state
+  buildings. The tooltip is vanilla's `BUILDING_SLOT_REMOVE_BUILDING_LEVEL` ("Remove the
+  building.").
+- **Confirmation:** a click opens vanilla's "Remove Building" dialog ("Are you sure you want to
+  remove this Building?"), as on dockyards, and OK removes the level. If the building is gone, the
+  player loses the province or the cooldown starts while the dialog is open, it closes without
+  removing anything.
+- **Supply hubs:** the supply system follows the removal (the same notification
+  `remove_building` sends): the hub stops supplying at the next supply update.
+- **Single player only:** a click happens on one machine, so in multiplayer the cross stays hidden.
+- **Fail-safe:** if anything in the loader's part faults, the feature logs it and switches itself
+  off for the session. The crosses hide, clicks do nothing, and
+  `hoi4_loader_feature_province_building_removal` turns false.
+- **Saves:** nothing of the loader's own is saved. A removal changes only what vanilla's removal
+  changes (the building level, and the state's last removal date for the cooldown), so saves load
+  the same without the loader.
+- **How the cross gets there:** the loader patches `interface/countrystateview.gui` as the game
+  reads it, adding a `remove` button (`GFX_cancel_conversion_button`) at the end of
+  `province_building_entry`. It patches whichever copy the game loads, vanilla's or a mod's, so a
+  UI mod that changes that file keeps its version. If the entry already has a `remove` button, or
+  there is no `province_building_entry`, the file is left as it is. Without the loader, or with
+  the feature off, there is no button at all.
+- **Script:** use vanilla `remove_building = { type = supply_node level = 1 province = N }`; it
+  updates supply too. `hoi4_loader_feature_province_building_removal = yes` (ship the stub) tells
+  whether the cross is available, for example for a hint in a decision's description.

@@ -152,6 +152,38 @@ def check(path, codes):
     for slot, code in ((out_slot, 'kCodeRailLineOutput'), (25, 'kCodeRailLineFinished'), (27, 'kCodeRailLineCancel')):
         ok = bool(rail) and len(rail[1]) > slot and img.match_at(rail[1][slot], codes[code])
         results.append(('%s (railway line slot %d)' % (code, slot), ok, hex(rail[1][slot]) if ok else '-'))
+    # Province building removal: the item's destructor (slot 0) and, inside the update the
+    # signature finds, the picture's enable test.
+    pb = img.vtable('.?AVCProvinceBuildingItem@@')
+    ok = bool(pb) and img.match_at(pb[1][0], codes['kCodePbDtor'])
+    results.append(('kCodePbDtor (province building item slot 0)', ok, hex(pb[1][0]) if pb else '-'))
+    sigs, _ = cs.load_signatures(pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h')
+    upd = [text_va + m.start() for m in cs.compile_pattern(dict(sigs)['kSigPbUpdate']).finditer(text)]
+    ok = len(upd) == 1 and any(img.match_at(upd[0] + i, codes['kCodePbUpdateEnable']) for i in range(0x400))
+    results.append(('kCodePbUpdateEnable (in kSigPbUpdate + 0x400)', ok, hex(upd[0]) if upd else '-'))
+    # The confirmation dialog: constructor (from kSigConfirmRemoveOpen's call), RTTI vtable slots 0,
+    # 1, 16, and the state id field the constructor writes read by slots 1 and 16.
+    opn = [text_va + m.start() for m in cs.compile_pattern(dict(sigs)['kSigConfirmRemoveOpen']).finditer(text)]
+    dlg = img.vtable('.?AVCConfirmRemoveBuildingLevel@@')
+    ctor = rel32(img, opn[0] + 0x4a) if len(opn) == 1 else 0
+    ok = bool(ctor) and img.match_at(ctor, codes['kCodeConfirmCtor'])
+    state = struct.unpack_from('<I', img.d, img.va2off(ctor + 0x45))[0] if ok else -1
+    ok = ok and bool(dlg) and ctor + 0x2a + struct.unpack_from('<i', img.d, img.va2off(ctor + 0x26))[0] == dlg[0]
+    results.append(('kCodeConfirmCtor (state id +0x%x, vtable)' % state, ok, hex(ctor)))
+
+    def reads_state(fn):
+        for i in range(0x200):
+            if img.match_at(fn + i, codes['kCodeConfirmReadState']) and \
+                    struct.unpack_from('<I', img.d, img.va2off(fn + i + 3))[0] == state:
+                return True
+        return False
+
+    for slot, code, read in ((0, 'kCodeConfirmDtor', False), (1, 'kCodeConfirmValid', True),
+                             (16, 'kCodeConfirmAccept', True)):
+        fn = dlg[1][slot] if dlg and len(dlg[1]) > slot else 0
+        ok = bool(fn) and img.match_at(fn, codes[code]) and (not read or reads_state(fn))
+        results.append(('%s (confirm dialog slot %d%s)' % (code, slot, ', reads the state id' if read else ''), ok,
+                        hex(fn)))
     results += check_create_army(img, codes, text_va, text)
     results += check_time_control(img, codes, text_va, text)
     return results

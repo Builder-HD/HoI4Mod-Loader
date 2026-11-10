@@ -45,6 +45,12 @@ using ContentGenerator = std::function<std::string()>;
 // that is served (so it can reflect state that only exists later, e.g. native registration)
 // instead of at startup.
 bool register_virtual_file(const wchar_t* pathSuffix, ContentGenerator generator, bool lazy = false);
+// Patches existing files instead of replacing them: on the first read of each existing file whose
+// path ends with `pathSuffix` (vanilla's and every mod's copy separately), `patcher` gets that
+// file's bytes and returns the patched content, or an empty string to serve the original. Must be
+// called before VfsStart(). Runs on the thread that opens the file, under a lock.
+using FilePatcher = std::string (*)(const std::string& original);
+bool register_file_patch(const wchar_t* pathSuffix, FilePatcher patcher);
 
 // Generates every registered file once, writes them to %TEMP%\hoi4_loader and queues the
 // CreateFileW/A hooks (applied by main.cpp). Requires MH_Initialize() to have succeeded.
@@ -137,3 +143,4 @@ bool CreateArmyInit();        // plugin_create_army.cpp
 bool RailwaysInit();          // plugin_railways.cpp
 bool RailwayQueueInit();      // plugin_railways.cpp
 bool TimeControlInit();       // plugin_time_control.cpp
+bool ProvinceBuildingRemovalInit();  // plugin_province_buildings.cpp

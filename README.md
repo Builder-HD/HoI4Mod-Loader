@@ -58,6 +58,11 @@ provinces you control, at 30% of the building cost.
 2. Enable **HOI4 Loader Railway Rules** in the launcher playset.
 3. The rules are under "Dismantle Railways" on the game rules screen.
 
+**Removing province buildings** needs no mod. In single player, the state view's province row
+(supply hub, naval base, bunkers) shows the same red removal cross that dockyards and factories
+have. Click it to remove one level. During a war the removal cooldown applies, as for other
+buildings.
+
 ## Uninstall
 
 1. Quit the game.
