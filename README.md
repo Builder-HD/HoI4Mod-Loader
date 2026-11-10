@@ -21,6 +21,7 @@ Take the `hoi4_loader-v….zip` file under **Assets**, not "Source code".
 
 ## Supported game version
 
+- **Hearts of Iron IV 1.19.4.2** (Steam, "Operation Postern"), as distributed.
 - **Hearts of Iron IV 1.19.3** (Steam), as distributed or after the universal checksum patcher.
 - The loader knows these builds by the SHA-256 of `hoi4.exe`, listed in `loader_config.ini`.
 

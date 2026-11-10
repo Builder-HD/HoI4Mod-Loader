@@ -88,6 +88,7 @@ PLAYERS.md                    pointer to README.md (0.5.0-beta shipped it as the
 [supported_hashes]
 1.19.3_vanilla = 7dc947be34970da1e1c787bcddbe7f62b610ff258aebf8f06aa8b348f3a031d5
 1.19.3_checksum_patched = 2d939e60d31aa15aeb70a9f6d4abd88b568b2f657990f0eeb9020e04f55221f8
+1.19.4.2_vanilla = bccc62909b6a1ec2c1d5a46ef18608e4d0c7cdc89ad341b7402a23c40f7a8037
 ```
 
 The label is free text and is printed in `loader.log` when it matches. Before adding a new build,

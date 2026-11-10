@@ -45,6 +45,7 @@ Addresses below are for orientation in the named build only. Code uses the signa
 | 1.19.2 | checksum-patched (game folder 22:54 to 23:01) | `0de7bdfa278347209fe67c134b9b321f2beab38dd107bc5397f1ab1f6e8d0998` |
 | 1.19.3 | checksum-patched (game folder until 22:54) | `2d939e60d31aa15aeb70a9f6d4abd88b568b2f657990f0eeb9020e04f55221f8` |
 | **1.19.3** | **vanilla, from Steam "Verify integrity" at 23:01** | `7dc947be34970da1e1c787bcddbe7f62b610ff258aebf8f06aa8b348f3a031d5` |
+| **1.19.4.2** | **vanilla (`v1.19.4.2.2da5`), Steam update of 2026-11-05** | `bccc62909b6a1ec2c1d5a46ef18608e4d0c7cdc89ad341b7402a23c40f7a8037` |
 
 **Vanilla 1.19.3 verified (2026-10-12 23:01):**
 - After Steam's "Verify integrity", `hoi4.exe` is `v1.19.3.0.c01a`, the same size as the
@@ -54,6 +55,28 @@ Addresses below are for orientation in the named build only. Code uses the signa
 - The patch pattern `E8 ?? ?? ?? ?? 31 C0 0F 94 C3` has 0 matches in it.
 - Added to `loader_config.ini` as `1.19.3_vanilla`; the patched hash stays as
   `1.19.3_checksum_patched`.
+
+**1.19.4.2 added (2026-11-10):**
+- Steam updated the game to `v1.19.4.2.2da5` ("Operation Postern") on 2026-11-05. The copy has
+  no checksum patch (`E8 ?? ?? ?? ?? 31 C0 0F 94 C3`: 0 matches), so it is vanilla.
+- `tools/check_signatures.py`: all 46 signatures and anchors match exactly once.
+- `tools/check_code_shapes.py`: everything from before create_army passed unchanged. Three
+  create_army shapes did not, and were adapted (NOTES Part G1):
+  - `kCodeBorderWarSetLeader`: same instructions, other registers (army in rbx, vtable in rax);
+    the register bytes are now wildcards.
+  - `kCodeCharacterOwnerCheck`: `mov rdi,rax` instead of `mov rsi,rax`; wildcard.
+  - `CSetArmyLeaderCommand` slot 9 (can execute) was restructured: new checks first, then the
+    same two `can_change_leader` calls (the target army, then the general's current army via
+    `+0x1048`). New `kCodeSetLeaderCheck1194`, searched inside the function when the old shape
+    does not match at its start; its led-group field must equal is_leading_army's.
+  - `set_leader` (`0x140c4b460`) and `can_change_leader` (`0x140c41310`) themselves are
+    unchanged, and so are all fields read: army leader +0x88, border war +0x1b0, deploying
+    +0x199/+0x19a, withdrawing +0x19b, characters +0x6a8, owner +0x68.
+- After that: 31 of 31 shapes ok. The wildcarded shapes still accept the old bytes and the old
+  check shape is tried first, so 1.19.3 and 1.19.2 resolve as before; they could not be
+  re-run there (the copies are gone).
+- Added to `loader_config.ini` as `1.19.4.2_vanilla`. A checksum-patched 1.19.4.2 is not listed
+  (no copy); the loader prints its line in `loader.log` if one is used.
 
 Tools: Ghidra 12.1.4 headless (full auto-analysis of the 1.19.3 copy, then read-only xref and
 decompile scripts), a Python PE parser, and `tools/check_signatures.py`.

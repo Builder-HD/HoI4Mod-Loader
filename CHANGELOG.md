@@ -6,6 +6,9 @@ A–F; NOTES.md has the findings and test results behind each.
 
 ## Unreleased
 
+- **Game 1.19.4.2** ("Operation Postern", Steam, as distributed) is supported: its hash is in
+  `loader_config.ini`. Every signature matches; three create_army code shapes changed and were
+  adapted (NOTES.md "1.19.4.2 added"). 1.19.3 stays supported.
 - **Disclaimer** at the top of the player guide: unofficial, not affiliated with or endorsed by
   Paradox Interactive, runtime only, use at your own risk. The 0.5.0-beta zip's PLAYERS.md does
   not have it yet.
@@ -36,8 +39,8 @@ A–F; NOTES.md has the findings and test results behind each.
     `HOI4_LOADER_CREATE_ARMY_DEPLOYING`, `_WITHDRAWING` and `_BORDER_WAR`.
     `HOI4_LOADER_CREATE_ARMY_CANNOT_LEAVE` is now only the fallback ("their army ... cannot change
     its general now"); it used to cover deploying and withdrawing together.
-  - No command power is charged. It works on 1.19.3 vanilla and checksum-patched, and its
-    signatures also match 1.19.2.
+  - No command power is charged. It works on 1.19.4.2 and on 1.19.3 vanilla and checksum-patched,
+    and its signatures also match 1.19.2.
 - **Native API:** effect blocks (`register_native_effect_block`), whose children run inside the
   plugin's execute (their tooltip callback can hide the children's lines), and a `Text`
   parameter type for free text such as army names.
