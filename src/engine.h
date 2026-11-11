@@ -374,6 +374,23 @@ std::string ArmyName(const void* army);
 // its tag, and its divisions' handles resolve back to them. False and *why on a mismatch.
 bool ArmySelfCheck(int tag, int* divisions, const char** why);
 
+// --- Joining an army (add_to_army; engine_army.cpp, NOTES.md G4) -------------------------------
+uint32_t UnitOwnerOffset();  // engine_data.cpp: unit -> owner tag (cross-check)
+// The game's move into an existing army and its cleanup of emptied armies (as the UI's "assign
+// to army" command uses them), the division getter of division scopes, and the border war field.
+bool HaveJoinArmy();
+// The land division (CArmy) of a division scope, or null (no unit, or not a land division).
+void* ScopeDivision(const void* engineScope);
+void* DivisionArmy(const void* division);  // the army it belongs to, or null
+bool ArmyInBorderWar(const void* army);
+// Moves the division into `army` of its own country, as the UI's assignment does: it leaves its
+// old army, which is deleted if left without divisions (*oldDeleted). The old army's name is read
+// first (*oldName). False if refused (army group, other country) or if the move did not happen.
+bool JoinArmy(void* army, void* division, std::string* oldName, bool* oldDeleted);
+// The layout add_to_army relies on: each of the country's divisions that has an army is in that
+// army's member list, and the army carries the division's tag. False and *why on a mismatch.
+bool JoinSelfCheck(int tag, int* armies, const char** why);
+
 // --- Time control (time_control; engine_time.cpp, NOTES.md Part K) -----------------------------
 void ResolveTimeControl();
 bool HaveGameSpeed();    // game speed field, its only writer, the speed request, the in-game idler
