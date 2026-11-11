@@ -1,0 +1,61 @@
+# Province building decisions (NOTES.md Part I, I0): vanilla removal of supply hubs, to compare
+# with the province_building_removal cross in the state view. Vanilla script only: they need no
+# loader feature.
+#
+# Berlin (province 6521, state 64) and West Prussia (province 6282, state 63) have a supply hub in 1936
+# (map/supply_nodes.txt). Check the logistics (supply) map mode before and after each decision;
+# the game log (logs/game.log) gets a line with the country's supply hub count from each.
+hoi4_loader_province_building_category = {
+
+	# I0 question 1: does vanilla remove_building take the hub off the supply system, or only lower
+	# the building (as it does for rail_way)? Watch: the hub icon on the map, supply flow from it,
+	# the hub count in the log, and whether units around Berlin lose supply.
+	hoi4_pb_test_remove_hub_berlin = {
+		icon = generic_construction
+		cost = 0
+		available = { num_of_supply_nodes > 0 }
+		complete_effect = {
+			log = "hoi4_pb_test_remove_hub_berlin: [ROOT.GetTag] supply hubs before: [?ROOT.num_of_supply_nodes]"
+			remove_building = { type = supply_node level = 1 province = 6521 }
+			log = "hoi4_pb_test_remove_hub_berlin: [ROOT.GetTag] supply hubs after: [?ROOT.num_of_supply_nodes]"
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# The same in West Prussia, for a hub that is not the capital's (the capital's hub may be special).
+	hoi4_pb_test_remove_hub_west_prussia = {
+		icon = generic_construction
+		cost = 0
+		available = { num_of_supply_nodes > 0 }
+		complete_effect = {
+			log = "hoi4_pb_test_remove_hub_west_prussia: [ROOT.GetTag] supply hubs before: [?ROOT.num_of_supply_nodes]"
+			remove_building = { type = supply_node level = 1 province = 6282 }
+			log = "hoi4_pb_test_remove_hub_west_prussia: [ROOT.GetTag] supply hubs after: [?ROOT.num_of_supply_nodes]"
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# I0 question 2: damage_building on a hub (vanilla's bombing path). If a damaged hub stops
+	# working until repaired, the engine already has a "hub off" state to reuse.
+	hoi4_pb_test_damage_hub_berlin = {
+		icon = generic_construction
+		cost = 0
+		complete_effect = {
+			damage_building = { type = supply_node damage = 1 province = 6521 }
+			log = "hoi4_pb_test_damage_hub_berlin: [ROOT.GetTag] supply hubs: [?ROOT.num_of_supply_nodes]"
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# Rebuilds both hubs after the probes (vanilla, instant).
+	hoi4_pb_test_rebuild_hubs = {
+		icon = generic_construction
+		cost = 0
+		complete_effect = {
+			64 = { add_building_construction = { type = supply_node level = 1 province = 6521 instant_build = yes } }
+			63 = { add_building_construction = { type = supply_node level = 1 province = 6282 instant_build = yes } }
+			log = "hoi4_pb_test_rebuild_hubs: [ROOT.GetTag] supply hubs: [?ROOT.num_of_supply_nodes]"
+		}
+		ai_will_do = { base = 0 }
+	}
+}

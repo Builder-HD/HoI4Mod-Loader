@@ -49,6 +49,11 @@ Take the `hoi4_loader-v….zip` file under **Assets**, not "Source code".
 2. Enable **HOI4 Loader Test** in the launcher playset.
 3. In a game, its decisions are in the decisions screen.
 
+**Removing province buildings** needs no mod. In single player, the state view's province row
+(supply hub, naval base, bunkers) shows the same red removal cross that dockyards and factories
+have. Click it to remove one level. During a war the removal cooldown applies, as for other
+buildings.
+
 ## Uninstall
 
 1. Quit the game.

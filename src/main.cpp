@@ -229,6 +229,11 @@ bool HookQueue(void* target, void* detour, void** original, const char* name) {
     return true;
 }
 
+// Init only (before the queue is applied): takes a hook queued with HookQueue out again.
+void HookUnqueue(void* target) {
+    if (target && MH_RemoveHook(target) == MH_OK) Log("Hook unqueued at %p", target);
+}
+
 // No C++ objects here, so SEH can catch anything Init throws at the OS level.
 static void SafeInit(HMODULE self) {
     __try {

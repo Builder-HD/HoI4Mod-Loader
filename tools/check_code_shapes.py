@@ -78,6 +78,23 @@ class Image:
         return cs.compile_pattern(pattern).match(self.d, off) is not None
 
 
+CONST_ITEM = re.compile(r'\b(k\w+)\s*=\s*(0x[0-9A-Fa-f]+|\d+)\b')
+
+
+def load_constants(header):
+    """The numeric `static const ... kName = value, ...;` constants of signatures.h, by name, so the
+    offsets here come from the same place the loader reads them."""
+    consts, stmt = {}, ''
+    for line in header.read_text(encoding='utf-8').splitlines():
+        if re.match(r'^\s*static const ', line) or stmt:
+            stmt += line
+            if ';' in line:
+                for name, value in CONST_ITEM.findall(stmt):
+                    consts[name] = int(value, 0)
+                stmt = ''
+    return consts
+
+
 def load_codes(header):
     codes = {}
     for line in header.read_text(encoding='utf-8').splitlines():
@@ -152,6 +169,43 @@ def check(path, codes):
     for slot, code in ((out_slot, 'kCodeRailLineOutput'), (25, 'kCodeRailLineFinished'), (27, 'kCodeRailLineCancel')):
         ok = bool(rail) and len(rail[1]) > slot and img.match_at(rail[1][slot], codes[code])
         results.append(('%s (railway line slot %d)' % (code, slot), ok, hex(rail[1][slot]) if ok else '-'))
+    # Province building removal: the item's destructor (slot 0) and, inside the update the
+    # signature finds, the picture's enable test.
+    # Offsets, ranges and slots as the resolver uses them (engine_province_buildings.cpp).
+    k = load_constants(pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h')
+    pb = img.vtable('.?AVCProvinceBuildingItem@@')
+    ok = bool(pb) and img.match_at(pb[1][0], codes['kCodePbDtor'])
+    results.append(('kCodePbDtor (province building item slot 0)', ok, hex(pb[1][0]) if pb else '-'))
+    sigs, _ = cs.load_signatures(pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h')
+    upd = [text_va + m.start() for m in cs.compile_pattern(dict(sigs)['kSigPbUpdate']).finditer(text)]
+    rng = k['kCodePbUpdateEnableRange']
+    ok = len(upd) == 1 and any(img.match_at(upd[0] + i, codes['kCodePbUpdateEnable']) for i in range(rng))
+    results.append(('kCodePbUpdateEnable (in kSigPbUpdate + 0x%x)' % rng, ok, hex(upd[0]) if upd else '-'))
+    # The confirmation dialog: constructor (from kSigConfirmRemoveOpen's call), RTTI vtable slots
+    # (dtor, valid, accept), and the state id field the constructor writes read by valid and accept.
+    opn = [text_va + m.start() for m in cs.compile_pattern(dict(sigs)['kSigConfirmRemoveOpen']).finditer(text)]
+    dlg = img.vtable('.?AVCConfirmRemoveBuildingLevel@@')
+    ctor = rel32(img, opn[0] + k['kSigConfirmCtorCall']) if len(opn) == 1 else 0
+    ok = bool(ctor) and img.match_at(ctor, codes['kCodeConfirmCtor'])
+    state = struct.unpack_from('<I', img.d, img.va2off(ctor + k['kCodeConfirmStateDisp']))[0] if ok else -1
+    lea = ctor + k['kCodeConfirmCtorVtableLea']
+    ok = ok and bool(dlg) and lea + 7 + struct.unpack_from('<i', img.d, img.va2off(lea + 3))[0] == dlg[0]
+    results.append(('kCodeConfirmCtor (state id +0x%x, vtable)' % state, ok, hex(ctor)))
+
+    def reads_state(fn):
+        for i in range(k['kCodeConfirmReadRange']):
+            if img.match_at(fn + i, codes['kCodeConfirmReadState']) and \
+                    struct.unpack_from('<I', img.d, img.va2off(fn + i + 3))[0] == state:
+                return True
+        return False
+
+    for slot, code, read in ((k['kConfirmDtorSlot'], 'kCodeConfirmDtor', False),
+                             (k['kConfirmValidSlot'], 'kCodeConfirmValid', True),
+                             (k['kConfirmAcceptSlot'], 'kCodeConfirmAccept', True)):
+        fn = dlg[1][slot] if dlg and len(dlg[1]) > slot else 0
+        ok = bool(fn) and img.match_at(fn, codes[code]) and (not read or reads_state(fn))
+        results.append(('%s (confirm dialog slot %d%s)' % (code, slot, ', reads the state id' if read else ''), ok,
+                        hex(fn)))
     results += check_create_army(img, codes, text_va, text)
     results += check_add_to_army(img, codes, text_va, text)
     results += check_time_control(img, codes, text_va, text)

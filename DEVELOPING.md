@@ -60,6 +60,9 @@ src/engine_army.cpp           engine access for armies (create army, set leader,
 src/plugin_railways.cpp       railways and railway_queue features (downgrade_railway, queue_railway_dismantle)
 src/engine_railway.cpp        engine access for railways (levels on both ends, supply refresh)
 src/engine_time.cpp           engine access for time_control (game speed, pause, top bar date) and its hooks
+src/plugin_province_buildings.cpp  province_building_removal feature (removal cross, deferred click)
+src/engine_province_buildings.cpp  engine access for it (state view item hooks, button binding, removal)
+src/gui_patch.cpp             the countrystateview.gui patch that adds the cross (pure text, tested)
 src/native_script.h, .cpp     native effect/trigger API: schemas, registration, parsing, docs
 src/native_script_engine.cpp  native API engine binding (vtable clones, registries, Scope)
 src/native_scope_engine.cpp   native API engine binding of scope blocks and iterators
@@ -292,6 +295,17 @@ The details are in NOTES.md, "Threading model".
 
   Another plugin that hooks either one chains through these. Keep any check you add there just
   as cheap.
+- **File patches run inside the global `CreateFileW`/`CreateFileA` hooks** (the virtual file API
+  has always hooked them). A `register_file_patch` patcher runs on whichever thread first opens a
+  matching file, under the VFS lock, once per original file; every other open costs a suffix
+  compare. Keep patchers pure text work: no game state, no engine calls, no logging loops.
+  `province_building_removal`'s patcher (`gui_patch.cpp`) is one, and it is covered by
+  `gui_patch_test`.
+- **Patched copies are cached for the session.** Each original file is patched on its first open
+  and the copy in `%TEMP%\hoi4_loader` is served from then on. A modder who edits that file (for
+  example `countrystateview.gui`) and reloads the interface in game keeps getting the first patched
+  version; restart the game to see the edit. ANSI paths (`CreateFileA`) are converted with the
+  ANSI code page before the file is read.
 
 ### Global hooks
 
@@ -332,6 +346,10 @@ gives the number of checks. It covers:
 - effect blocks (allowed children, before/after execution, crashes);
 - free text parameters;
 - translatable tooltip texts.
+
+Then `gui_patch_test`: the countrystateview.gui patch on hand-written GUI snippets (where the
+button goes, files left alone, comments, CRLF). Given file paths as arguments it also patches real
+files, e.g. the game's `interface\countrystateview.gui`.
 
 Next come repository checks:
 - the test mod's stub clears every feature flag;

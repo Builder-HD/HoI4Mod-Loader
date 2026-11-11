@@ -3774,6 +3774,412 @@ Static analysis only; nothing here was observed at runtime yet.
 - Game rules can't be read from C++ here without more work; a mod sets the flags from
   `has_game_rule` at `on_startup` (rules are fixed per game, flags are saved).
 
+# Part I: province building removal (supply hubs first)
+
+The railway work (Part H) carried over to province buildings. It started with supply hubs and
+widened to every building in the state view's province row: a removal cross as vanilla shows on
+state buildings (I4), single player. I0 to I3 are the findings and decisions on the way there.
+
+## I0: what vanilla already does (to test first, no loader code)
+
+Unlike a railway, a hub is a plain province building (`map/supply_nodes.txt`, `supply_node` in
+`map/buildings.txt`), and vanilla has `remove_building = { type = supply_node level = 1 province =
+N }`. For `rail_way` that only lowered the mirror building (H1). Whether it is enough for a hub is
+the first question, because it decides how much engine work is needed:
+
+1. **`remove_building` on a hub:** does the hub leave the supply system (map icon gone, no supply
+   flow from it, `num_of_supply_nodes` one lower, units around it lose supply), or does only the
+   building level change?
+2. **`damage_building` on a hub:** does a damaged hub stop supplying until repaired? If so, the
+   engine already has a "hub off" state the loader could reuse.
+3. **Save and load** after each: is the result the same after loading?
+4. **Rebuild:** does `add_building_construction` with `instant_build` restore it cleanly?
+
+The test mod's category "HOI4 Loader: Province buildings"
+(`hoi4_loader_test_province_building_decisions.txt`) runs these on Berlin (6521, state 64) and West
+Prussia (6282, state 63), both hubs in 1936, and logs the hub count to `logs/game.log`.
+
+## I1 findings (1.19.4.2 `v1.19.4.2.2da5`, the H1 Ghidra project; addresses for orientation only)
+
+Static analysis only. The analysed copy has the same SHA-256 as the game folder's hoi4.exe
+(`bccc6290…`).
+
+### A hub is the province building, and the supply system follows it
+
+- **Storage:** no separate hub object. Loading `map/supply_nodes.txt` (0x140f386f0) looks up each
+  province (`gamestate+8` vtable[1](id)), takes its building of the supply_node type
+  (`FUN_140332260()+0x3a0`) from the province's building list (+400) and calls
+  `CBuilding::SetLevel(building, level, 0)` (0x141163f20). A hub is that building's level.
+- **Supply cache:** `CSupplySystem` (gamestate+0x3d8) keeps a 0x20-byte entry per province (+0x10,
+  count +0x1c). The OOS checksum (0x140f42ad0) names its fields: +0x10 `controller_index`, +0x14
+  `supply_node_level`, +0x15 `naval_base_level`, +0x18 bits `has_temp_node` / `has_rail` /
+  `province_dirty` / `province_dirty_railway`. Per country (0x78-byte entries at +0x40) it keeps
+  sorted province lists: +0x40 the country's hubs, +0x28 its naval bases.
+- **Refill** (0x140f48e50, per province): walks the province's buildings; type token 0x4cbe
+  (supply_node) gives `min(level +0x40, 1)` or the building's +0x42 if higher; 0x31f6 is the naval
+  base. When the value changes, the province is added to or removed from the controller's hub
+  list. The update (0x140f49f10) runs this only for provinces on the dirty lists (+0x58, +0x70);
+  the after-load refresh (0x140f46dc0 -> 0x140f45d20) runs it for every province.
+- **Building changes reach it:** `SetLevel` with its notify argument set (and gamestate+0xa39 set)
+  calls the supply system's building-changed handler (0x140f46b50 -> 0x140f44ef0). For a province
+  building of type 0x4cbe whose +0x42 differs from the cached `supply_node_level`, it marks the
+  province and its railway neighbours dirty (0x140f41950), the same marking railways get from
+  `CSupplySystem` slot 3.
+- **`remove_building`** (CRemoveBuildingEffect slot 13, 0x140327740) calls
+  `SetLevel(level - 1, notify = 1)` once per level. So, unlike `rail_way` (H1), vanilla
+  `remove_building = { type = supply_node level = 1 province = N }` should take the hub out of the
+  supply system at the next supply update. I0 still has to confirm it in game, including the
+  map icon and a save/load.
+- Building listeners: `SetLevel` also calls the per-type `CBuildingListener` list (0x1412055e0,
+  vtable +0x18 (building, old level)) and the country/state hooks (0x14074c4c0, 0x140a261b0,
+  0x140bbb6a0, 0x140ab7f40). Which of them update the hub's map icon is not checked.
+
+### Vanilla building removal in the state view (for the GUI)
+
+- The state view's building slot (`countrystateview.gui`, ~line 580) has a `remove` button
+  (`GFX_cancel_conversion_button`, the cross) that removes one level. The slot code (0x141e42720)
+  handles state buildings (state+0x120) and province buildings (province+400) alike. Its tooltip is
+  `BUILDING_SLOT_REMOVE_BUILDING_LEVEL` ("Remove the building."), or the construction / conversion
+  variants.
+- Permission (0x140a25c50): in wartime a removal cooldown applies
+  (`BUILDING_SLOT_REMOVE_COOLDOWN`, the **state's** last removal date at state+0x870); otherwise
+  allowed.
+- The button is not chosen per building type. The slot (0x141e44b50 hover, 0x141e44c60 show,
+  0x141e47400 update/hide) shows `remove` only while the slot is hovered (+0x40), enables it when
+  the viewer owns the state and the cooldown check (0x140a25c50) passes, and hides it
+  otherwise. The slots are filled by the state view update (0x1417e5000, `state_building_entries` /
+  `state_shared_slot_building_entries`).
+- The ownership test in the show (0x141e44d69): the player's tag from gamestate +0x520 (or +0x524),
+  the state's owner tag at state+0xcc turned into the country (0x140c07bf0), then 0x140748490
+  (country, player tag): the same tag, or the same tag group (0x140c08790), else 0x140748500.
+  Without it the cross is not shown at all. The loader reads +0xcc from there
+  (`kSigStateOwnerCheck`, checked: the view's state field is the tooltip's +0x608).
+- **So:** a building that has a slot in the state view should already get the cross. If the hub
+  has none, it is because the hub is not listed in the state view, not because the cross is
+  denied. Which buildings are listed (0x1417e5000 onwards) is not checked yet.
+
+### Why the hub has no cross (screenshots 2026-11-10)
+
+- The state view shows the hub in the province row at the bottom (`province_building_entries`,
+  entries `province_building_entry`), next to naval base and bunkers. The cross the player sees on
+  dockyards is in the shared slot row (`state_shared_slot_building_entry`).
+- `countrystateview.gui` defines `remove` only in `state_shared_slot_building_entry`. And only
+  `CStateSharedSlotBuildingItem::Setup` (0x141e41360) binds it: lambda_1 the picture, lambda_2
+  (`_Do_call` 0x141e47cb0) the cross. `CProvinceBuildingItem` (vtable 0x142aeec50, 19 slots) binds
+  none, so a `remove` button added to the entry by a mod would do nothing.
+- The cross's click opens `CConfirmRemoveBuildingLevel` (0x1190 bytes) with the state id, the
+  building type (+0x2e0) and a mode (0 remove a level, 1 a construction level, 3 a conversion).
+  Confirming posts `CRemoveBuildingLevelCommand` (vtable 0x142a10dc8; execute slot 10,
+  0x1411e2bb0): state id +0x28, building type +0x2c, flags +0x30 / +0x31 (construction /
+  conversion). Execute looks the building up in the **state's** list only (state+0x120,
+  0x141202610), then `SetLevel(level - 1, notify = 1)` or a construction-queue change. It has no
+  province id, so it cannot remove a province building.
+- **So the loader is needed:** vanilla has no UI path that removes a province building.
+
+### Still to find
+
+Mirroring H1 and H3:
+
+- **Storage:** where the supply system keeps its hubs (`CSupplySystem` at gamestate+0x3d8, H1)
+  and how a hub relates to the `supply_node` building: an object per hub, a flag per province, or
+  derived from the building level each recompute.
+- **Removal path:** what vanilla does when a hub's province is lost or the building is destroyed,
+  and whether `CSupplySystem` slot 3 (the per-province refresh railways already call) also
+  rebuilds hubs, or a full recompute is needed.
+- **Graphics:** the hub's map entity; whether removing it can leave a stale pointer, as the
+  railway graphics did (H4).
+- **Construction:** the province building production line class for `supply_node`
+  (`CBuildingProductionLine`, vtable 0x1429f8268, 28 slots; not the railway line), its daily step, finished check, cost (`supply_node` `base_cost` in
+  `common/buildings`) and save fields, to see whether the H3 marker idea (target below base)
+  carries over.
+- **Map UI:** the hub badge or construction click in the logistics view, for an Alt+Shift
+  dismantle like railways.
+
+## I2: proposed script side (for approval after I0/I1)
+
+**Superseded** by the decisions below and I4: no new script commands (vanilla `remove_building`
+already updates supply), no queue, and the scope widened to all province buildings. Kept for the
+record:
+
+- `remove_supply_hub = { province = 6521 }`: removes the hub at once, with the supply system and
+  graphics refreshed. Any scope. If I0 shows `remove_building` already does everything, this
+  becomes a thin wrapper or is dropped, and only the queue below needs the engine.
+- `has_supply_hub = { province = 6521 }`: trigger, the same data the effect uses.
+- `queue_supply_hub_dismantle = { province = 6521 }`: country scope, a construction queue entry
+  that removes the hub when paid. Cost: a share of building one, default 30%, from a global flag
+  `hoi4_loader_supply_hub_dismantle_cost_<percent>`, like railways.
+- Where the player may dismantle: own provinces, plus faction members / subjects / overlord per
+  global flags, sharing the railway game rules or with their own. One feature per tier, as with
+  railways: `supply_hubs` (effect and trigger), `supply_hub_queue` (needs `supply_hubs`).
+
+### Scope widened (2026-11-10): all province buildings
+
+Instead of hubs only: a removal cross for **every province building** in the state view's province
+row (supply hub, naval base, bunker, coastal bunker, and so on), since they share
+`CProvinceBuildingItem`. Hubs stay the main case (the supply system follows, I1). The other types
+are to be checked one by one for engine state outside the building, as rail_way had.
+
+Proposed shape (for approval):
+- **Mod side:** a `remove` button (`GFX_cancel_conversion_button`) added to
+  `province_building_entry` in a companion mod's `countrystateview.gui`. Without the loader it
+  stays hidden or inert.
+- **Loader feature `province_building_removal`:** hook `CProvinceBuildingItem`'s setup (bind the
+  button) and update (show it on hover when the viewer controls the province and the building has
+  a level, using the vanilla permission and cooldown check 0x140a25c50 and the same tooltip key
+  `BUILDING_SLOT_REMOVE_BUILDING_LEVEL`). A click removes one level instantly:
+  `SetLevel(level - 1, notify = 1)` on the province's building, at the next main-thread safe
+  point.
+- **Multiplayer:** the click is UI on one machine. **Decided (2026-11-10):** single player only
+  in v1, as with railway badge clicks. An MP version needs a synced command carrying the province id. Options to find: a
+  vanilla command that can carry it, or a script effect run through one.
+- **Script side** (optional, same feature): `remove_province_building = { province = N type =
+  supply_node }` is just vanilla `remove_building`, so no new effect is needed unless I0 shows a
+  gap.
+
+## I3: the province row's item (`CProvinceBuildingItem`), for the hooks
+
+- **Construction:** `CProvinceBuildingItem(gui, stateView)` 0x141e40dd0 (called from the state
+  view's province row fill 0x1417e1f10). It loads `province_building_entry` (0x1423434a0),
+  sets the vtables (0x142aeec50 / 0x142aeecf0), builds a `CLegacyButtonObserverGlue` (0x141e40290)
+  with one handler, `FUN_141e45310` (the picture's left click: opens building), and registers it
+  on the child `building_picture` (window vtable +0x68 finds a button by name; observer list at
+  button+0x80). Destructor: vtable slot 0, 0x141e41a20. Tooltip: second vtable slot 0, 0x141e41e80.
+- **Fields:** +0x10 the entry window, +0x20 the state view (+0x600 the selected province, +0x608 the
+  state), +0x28 the building type (+0x2e0 type index, +0x2e4 picture frame, +700 > 0 for province
+  buildings). The province's building of that type: `FUN_141202610(province+400, type)`.
+- **Update:** 0x141e462a0 (from the province row update 0x1417e44b0). It sets the picture frame,
+  enables the picture when the province may build it (0x141201580; enable vtable +0x298, disable
+  +0x2a0, state +0x218), writes the level text (`CAPACITY`) and the damage bar.
+- **How the shared slot binds its cross:** `FUN_142359ed0(CButtonWrapper* out (0x5d8 bytes),
+  button, std::function<void()>* click, std::function<void()>* other)` builds a `CButtonWrapper`
+  (its own `CButtonObserverGlue`) on the button. The functions are MSVC `std::function`s (impl
+  pointer at qword 7, `_Copy` called through it), so the loader can pass its own.
+
+Hook plan (feature `province_building_removal`, single player):
+1. **Bind:** hook the constructor. After the original, if the entry window has a child `remove`
+   (only when the companion mod's .gui adds it), build a `CButtonWrapper` for it in loader-owned
+   memory with `FUN_142359ed0` and a click function that remembers the item. Free it in the
+   destructor hook (0x141e41a20) before the original runs.
+2. **Show:** hook the update. After the original, show `remove` when the province has a level of
+   that building, the viewer controls the province, and the vanilla permission and cooldown check
+   (0x140a25c50) passes; otherwise hide it. Vanilla shows its cross only on hover. v1 shows it
+   always and adds hover once the hover handler is mapped (the shared slot's is 0x141e44b50).
+3. **Tooltip:** hook the tooltip (0x141e41e80). For the `remove` element, return
+   `BUILDING_SLOT_REMOVE_BUILDING_LEVEL`, or the cooldown text 0x140a25c50 writes.
+4. **Click:** single player only (as `railway_queue`'s badge clicks), deferred with
+   `RunOnMainThread`: look up the province's building again, then `SetLevel(level - 1, notify = 1)`
+   (0x141163f20), exactly as `remove_building` does. Vanilla's dockyard cross asks for confirmation
+   (`CConfirmRemoveBuildingLevel`). Its dialog only carries a state and a type, so v1 removes
+   without asking. (Since built: the confirmation dialog, I4.)
+- **Signatures to make:** the constructor, destructor, update, tooltip, `FUN_142359ed0`,
+  `FUN_141202610`, `SetLevel` (railways may already resolve it), the permission check 0x140a25c50;
+  RTTI check on the `CProvinceBuildingItem` vtable before each use.
+- **Risks:** the `std::function` ABI shared with the game (MSVC STL; checked at bind time by
+  reading back the impl pointer); the window's find-by-name logging when `remove` is missing (find
+  how vtable +0x68 behaves on a missing name before calling it, or use the non-logging lookup);
+  building types with engine state outside the building (check each type in game: supply hub,
+  naval base, bunker, coastal bunker, others in `common/buildings`).
+
+### GUI (requested 2026-11-10)
+
+A cross next to the supply hub icon, as vanilla shows next to removable buildings such as fuel
+depots in the state view's building slots: the same `remove` button
+(`GFX_cancel_conversion_button`) and the same click behaviour. Preferred path, given I1: make the
+engine's own slot logic offer `remove` for the hub instead of drawing a new element. The vanilla
+removal (and its wartime cooldown) then applies, and `SetLevel` keeps supply in step. A hook is
+only needed where vanilla hides the button for the hub (to find). If the dismantle should go
+through the construction queue instead of being instant, the click is redirected to
+`queue_supply_hub_dismantle`. Optionally the same cross on the logistics map's hub badge
+(`CSupplyNodeMapIcon`, `supply_node_map_icon`), with Alt+Shift as for railways.
+
+**Decided (2026-11-10):** the cross removes the hub instantly, as vanilla does for the other
+buildings (vanilla removal, wartime cooldown included). No construction queue entry for the cross.
+
+Open decisions: own game rules or the railway ones; whether the capital's hub may be dismantled;
+whether a hub's connecting railway should be left alone (assumed: yes). With the scope widened
+and vanilla's rules applied (I4), none of these needed an answer for v1: the cross follows
+vanilla's removal (controller, cooldown) and leaves railways alone.
+
+## I4: implementation (2026-11-10)
+
+Built as planned in I3, with these changes found while building it:
+
+- **No companion mod: a file patch.** The virtual file API got `register_file_patch(suffix,
+  patcher)`. On the first read of each existing file with that suffix (vanilla's and every mod's
+  copy separately), the patcher gets the bytes and returns the patched content; the copy is written
+  to `%TEMP%\hoi4_loader\patchNN_MM_<path>` and served instead. `gui_patch.cpp` adds the `remove`
+  button (x 42, y 34: the shared slot's offset from its picture) before the closing brace of
+  `province_building_entry`. A file that already has `remove` there, or no such entry, is left as
+  it is. The patch is registered only if the feature's hooks were queued.
+- **Bind in the update, not the constructor.** The first update of an item looks the button up
+  without logging: `Lookup(window+0x12a0, name)` (0x142331d90), which returns null for a missing
+  name. The finder at window vtable +0x68 logs "Could not find" only with its flag set, and with
+  the flag clear it returns a shared placeholder, not null. Items whose window has no `remove`
+  (patch not applied) are remembered and left alone. So the constructor needs no hook.
+- **Hooks:** update (`kSigPbUpdate`), tooltip (`kSigPbTooltip`), destructor (item vtable slot 0,
+  shape `kCodePbDtor`; its second `lea` is the tooltip sub-object's vtable, whose slot 0 must be
+  the tooltip signature's address).
+- **Button wrapper:** `CButtonWrapper` constructor (`kSigButtonWrapperCtor`, checked against the
+  RTTI vtable it stores) into loader-owned 16-aligned storage. The size (0x5d8) comes from the
+  distance between the two wrapper members in `CStateSharedSlotBuildingItem`'s destructor
+  (`kSigSharedSlotDtor`, which also yields the wrapper destructor 0x14235a680). The wrapper copies
+  the passed `std::function` and clears the caller's (`_Delete_this`, then impl = null), so the
+  loader's copy is not destroyed twice. `static_assert` on the 64-byte layout.
+  - **ABI assumption:** the loader's `std::function<void()>` is handed to the game's code as is. That
+    holds only while the loader and the game use the same MSVC STL layout: 64 bytes, the impl
+    pointer in the last qword, and `_Copy` / `_Delete_this` as the impl's virtual functions. Only
+    the size is checked (`static_assert`). Both are built with MSVC, but a change of the STL's
+    `std::function` (a new ABI generation) would break this without a compile error.
+- **Show:** the cross shows when the province has a level, the local player's country owns the
+  state (owner tag state+0xcc, `kSigStateOwnerCheck`: vanilla's shared slot condition) and controls
+  the province (the controller offset `kSigRailController` gives), and the session is single
+  player. Before the PR #3 review only control was checked, so the cross showed in occupied enemy
+  provinces. It is enabled when vanilla's permission check (`kSigRemovePermission`, 0x140a25c50)
+  passes, greyed out during the wartime cooldown. Element calls: hide vtable +0x80 then hidden bit
+  0x10 at +0x75, show clears it then +0x78 (`kSigGuiHideShow`, from the shared slot's cross);
+  IsEnabled +0x218, Enable +0x298, Disable +0x2a0 (`kCodePbUpdateEnable`, searched inside the
+  update: the custom icon item has the same code, so it is not unique as a signature).
+  Always visible, not hover-only like vanilla's.
+- **Tooltip:** `BUILDING_SLOT_REMOVE_BUILDING_LEVEL`, or the cooldown text the permission check
+  writes.
+- **Cooldown start (new finding):** vanilla's `CRemoveBuildingLevelCommand` stamps today
+  (gamestate +0x468) into the state's last removal date (+0x870) before it removes the level
+  (0x1411e2e77, `kSigRemoveCooldownStamp`). The loader's removal does the same, so the wartime
+  cooldown applies to province buildings as to state buildings.
+- **Click:** deferred to the next safe point (single player). It carries the province, the type
+  and the state, not the item, and a generation number that changes on every game start or load.
+  There the building is looked up again, and level, owner, controller and permission are checked
+  again.
+  Then come the stamp and `SetLevel(level - 1, notify = 1)` (`kSigRemoveBuildingLoop`, cross-checked
+  with the railway code's SetLevel).
+- **UI refresh (found in the first game test):** the level dropped at the click, but the state view
+  showed it only once the game ticked. Vanilla's command ends by posting event 0 to the UI target
+  `ui->vtable[0xb8]()` (`kSigRemoveUiRefresh`, 0x1411e2ead; the same UI global, slot and post
+  function as the railway construction view refresh, which posts 0x11). The loader's removal now
+  does the same.
+- **Signatures:** 12 new and 1 anchor, 7 code shapes, all unique on 1.19.4.2 (then 90 in total;
+  after the rebase onto `time_control` and the PR #3 owner check, 13 signatures and 1 anchor of
+  98).
+  A static dry run of every resolver cross-check on the analysed copy passes: item window +0x10,
+  type +0x28, tooltip sub-object +0x18 (view +0x8), view province +0x600 / state +0x608, buildings
+  +0x190, level +0x40, button map +0x12a0, wrapper 0x5d8 bytes.
+
+### Confirmation dialog (requested after the first game test, 2026-11-10)
+
+- **Vanilla's dialog:** `CConfirmRemoveBuildingLevel` (0x1190 bytes; vtables 0x142b15440 /
+  0x142b154d8 / 0x142b15500).
+  - The shared slot cross's click (0x141e47cb0) allocates it with the engine's allocator
+    (0x1425a01dc). It constructs it with `(ui, state id (state+0x58), building type index
+    (type+0x2e0), mode)` (0x141fe6290: fields +0x1180 / +0x1184 / +0x1188; mode 0 remove a level, 1
+    a construction level, 2 / 3 conversions, each with its own title and text keys
+    `CONFIRM_REMOVE_BUILDING_LEVEL_TITLE` / `_DESC` and so on).
+  - It is handed to the dialog manager `view+0x5f0->+0x4f8` with `Open` (0x140b95180), and the
+    dialog frees itself when closed (slot 0, delete with size 0x1190).
+- **Its slots:**
+  - Slot 1 (0x141fe6bf0) is the "still valid" check. It looks the building up in the **state's**
+    list (state+0x120) and fails for a province building, so the dialog would close at once.
+  - Slot 16 (0x141fe6380) is OK. It posts `CRemoveBuildingLevelCommand` for the state building
+    (or the construction / conversion variants).
+- **The loader:**
+  - The province cross opens the same dialog in mode 0, from the same pieces
+    (`kSigConfirmRemoveOpen`: allocator, size, constructor, manager offsets, ui global, field
+    offsets; the view is the item's +0x20, the same object the shared slot item keeps at +0x38).
+    It remembers the dialog with its province, building type and state.
+  - Three hooks, all three or none: slot 1, slot 16 and slot 0 (the destructor, which forgets the
+    dialog). For the loader's dialogs, slot 1 answers whether the removal could still happen: the
+    province still has a level, the player controls it, and the cooldown allows it. Slot 16 hands
+    the removal to the plugin (deferred, single player) and closes. Every other dialog goes
+    straight to vanilla.
+  - Checks: the constructor's shape and the vtable it stores against RTTI; the three slots' shapes;
+    the destructor's vtable; slots 1 and 16 read the state id field the constructor writes
+    (`kCodeConfirmCtor` / `Dtor` / `Valid` / `Accept` / `ReadState`). If anything is missing, the
+    cross removes without asking, as before. Faults in the hooks fall under the fail-safe below; a
+    fault in the check answers "not valid", which closes the dialog.
+
+### The PR #2 review points, applied here (2026-11-10)
+
+The railway review (H3, "After the PR #2 review") asked the same questions of this feature:
+
+- **Fail-safe:** the loader's part of each hook (update, tooltip, click, removal) runs under SEH.
+  A fault is logged once and switches the feature off for the session (the engine side's
+  `g_enabled`, and the plugin clears the feature's flag). After that, every cross hides on its
+  entry's next update (bound or not: see "After the PR #3 review"), nothing new is bound, clicks
+  and removals do nothing, and the tooltip is vanilla's. The destructor hook keeps freeing the button bindings, so
+  closing the state view stays safe. There is no game-entry self-check like railways' because the
+  feature keeps no data of its own to check. Instead, before any read, the item's vtable is
+  compared with `CProvinceBuildingItem`'s (RTTI), and the window's with `CContainerWindow`'s.
+- **Threads:** the update, tooltip, destructor and click run in the UI on the main thread. The
+  first call logs its thread (`province_building_removal: first entry update on thread N (the
+  main thread)`). A call from any other thread leaves the entry as vanilla made it. The removal
+  itself is deferred to the next main-thread safe point.
+- **Fixed numbers:** every offset, slot and flag comes from the signatures and code shapes listed
+  in I4. The only constants are the button's name (`remove`), its position in the patched GUI
+  file, and a 0x40-byte margin on the button wrapper's storage beyond the size the shared slot
+  item implies.
+- **Saves:** the feature saves nothing of its own. A removal changes only what vanilla's removal
+  changes: the building level and the state's last removal date. So a save made with it loads
+  the same without the loader. The patched GUI file is not part of any save.
+- **Global hooks:** the GUI patch runs inside the virtual file API's `CreateFileW`/`CreateFileA`
+  hooks (DEVELOPING.md, "Threads and hooks"). The three item hooks are specific to
+  `CProvinceBuildingItem` and touch nothing else.
+- **1.19.3:** unchecked, as for railways (no copy here). A false match would fail one of the
+  resolver's cross-checks, and the feature would then stay off.
+
+### After the PR #3 review (2026-11-11)
+
+- **Crosses after a fault:** the switched-off branch of the update hid only buttons bound before
+  the fault. The patched file is still served, and a buttonType is visible by default, so a state
+  view opened after the fault showed working-looking crosses that did nothing. Now, while off, the
+  update looks the entry's `remove` button up (the same non-logging lookup, no binding) and hides
+  it.
+- **Ownership:** the cross, the dialog's validity check and the removal require that the player
+  owns the state (vanilla's condition, `kSigStateOwnerCheck`, see "Vanilla building removal in the
+  state view") as well as controls the province. Before, an occupied enemy province's naval base,
+  bunkers and hub could be removed.
+- **Partial init:** the three item hooks are queued all or none. If a later one fails, the ones
+  already queued are taken out (`HookUnqueue`, MinHook `MH_RemoveHook` before the queue is
+  applied). The same happens if the file patch cannot be registered. The dialog's three hooks are
+  handled the same way, independently (without them the cross removes without asking).
+  `DisableProvinceBuildingRemoval` (never called) became `UnhookProvinceBuildingRemoval`.
+- **`CreateFileA` paths:** the file patch widened each byte of an ANSI path. It now converts with
+  `MultiByteToWideChar(CP_ACP)`, as CreateFileA does, so a path with non-ASCII characters in a
+  non-Western code page is read and patched (before, it failed safe: the original was served).
+- **VFS caching:** each patched copy is made once per session (DEVELOPING.md says so).
+- **Docs:** the "at once" in MODDING.md, the state's (not the country's) removal date at +0x870,
+  the `std::function` ABI assumption (I4).
+- **Code shape checker:** `tools/check_code_shapes.py` reads the province and dialog offsets from
+  `signatures.h` instead of repeating them.
+
+### To verify in game
+
+1. `loader.log`: `Province buildings: ...` with the values above, the feature active, and
+   `File patch 'interface\countrystateview.gui': ... -> ...` on the first state view.
+2. A state with a supply hub: the province row's hub shows the cross (bottom right of the entry);
+   its tooltip says "Remove the building."; provinces without the building show none.
+3. Click: the hub level drops to 0 and the entry updates; the logistics map mode shows no hub
+   there and supply around it changes as with the I0 probe; `loader.log` says one level removed.
+4. Naval base (level 3 to 2 per click), bunker, coastal bunker: one level per click, no crash,
+   save and load keep it.
+5. At war: after one removal the cross is greyed out and its tooltip gives the cooldown date
+   (vanilla's dockyard cross does the same in that state).
+6. **Ownership:** an occupied enemy province (the player controls it, the enemy owns the state):
+   no cross. A province of the player's own state that the enemy occupies: no cross. The player's
+   own, controlled provinces: the cross as before.
+   *Tested 2026-11-11 after the PR #3 review fixes: as described.*
+7. Multiplayer: no cross.
+8. A UI mod that replaces countrystateview.gui: its copy is patched (`loader.log` names its path).
+   *Tested 2026-11-11 with KaiserreduX (Workshop 2076426030, a heavily changed 258 KB copy): the
+   cross shows and removes as in vanilla. The patch also applies offline (`gui_patch_test <file>`)
+   to The Road to 56, The Great War Redux and The Fire Rises.*
+9. Destroying the state view (close, reopen, switch states quickly): no crash (the destructor
+   hook frees the wrapper first).
+10. **Confirmation:** the cross opens "Remove Building"; Cancel leaves the level; OK removes one
+    level; with two crosses clicked in a row only the confirmed one goes; a building lost while
+    the dialog is open closes it (or OK does nothing).
+    *Tested 2026-11-10: the dialog opens from the province row, Cancel and OK behave as described.*
+11. **After a fault** (not reproducible on purpose; check by reading `loader.log` if one ever
+    happens): state views opened afterwards show no cross.
+
 # Part K: game speed and date display (`time_control`)
 
 Branch `feature/time-control` (from main). Static analysis of vanilla 1.19.4.2 (v1.19.4.2.2da5)

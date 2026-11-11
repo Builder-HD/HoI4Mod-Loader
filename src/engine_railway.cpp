@@ -1079,6 +1079,8 @@ bool HaveRailways() {
 
 bool RailwaysReady() { return HaveRailways() && Manager() != nullptr; }
 
+uint32_t ProvinceControllerOffset() { return g_provController; }
+
 int RailwayLevel(int a, int b) {
     void* m = HaveRailways() ? Manager() : nullptr;
     void* info = m ? Info(m, a) : nullptr;

@@ -1,0 +1,4 @@
+# hoi4_loader stub, used when hoi4_loader is absent or its province_building_removal feature is not available.
+# The loader serves "hidden_trigger = { always = yes }" when the feature is active and all
+# its commands registered.
+hoi4_loader_feature_province_building_removal = { always = no }

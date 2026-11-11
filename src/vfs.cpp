@@ -24,6 +24,20 @@ static std::vector<VirtualFile> g_files;
 static bool g_started = false;
 static SRWLOCK g_genLock = SRWLOCK_INIT;
 
+// Patched files: each existing file with the suffix (vanilla or any mod's copy) is read, patched and
+// served from its own generated copy, so mods that change the same file keep their version.
+struct PatchedCopy {
+    std::wstring original;  // folded full path of the original
+    std::wstring served;    // empty: serve the original (patch declined or failed)
+};
+struct FilePatch {
+    std::wstring suffix;    // folded like VirtualFile::suffix
+    FilePatcher patcher;
+    std::vector<PatchedCopy> copies;  // under g_genLock
+};
+static std::vector<FilePatch> g_patches;
+static std::wstring g_tempDir;
+
 static wchar_t FoldChar(wchar_t c) {
     if (c == L'/') return L'\\';
     if (c >= L'A' && c <= L'Z') return (wchar_t)(c - L'A' + L'a');
@@ -81,6 +95,40 @@ bool register_virtual_file(const wchar_t* pathSuffix, ContentGenerator generator
         }
     }
     g_files.push_back({s, generator, lazy, L"", 0});
+    return true;
+}
+
+static bool FoldSuffix(const wchar_t* pathSuffix, std::wstring* out) {
+    if (!pathSuffix) return false;
+    std::wstring s;
+    for (const wchar_t* p = pathSuffix; *p; ++p) s += FoldChar(*p);
+    size_t start = s.find_first_not_of(L'\\');
+    s = start == std::wstring::npos ? L"" : s.substr(start);
+    if (s.empty() || s.back() == L'\\' || s.find(L':') != std::wstring::npos || s.find(L"\\\\") != std::wstring::npos ||
+        s.find(L"..") != std::wstring::npos)
+        return false;
+    *out = s;
+    return true;
+}
+
+bool register_file_patch(const wchar_t* pathSuffix, FilePatcher patcher) {
+    std::wstring s;
+    if (g_started || !patcher || !FoldSuffix(pathSuffix, &s)) {
+        Log("ERROR: register_file_patch(%ls): %s", pathSuffix ? pathSuffix : L"(null)",
+            g_started ? "called after start" : "invalid arguments");
+        return false;
+    }
+    for (const VirtualFile& f : g_files)
+        if (f.suffix == s) {
+            Log("ERROR: register_file_patch: '%ls' is already a virtual file", pathSuffix);
+            return false;
+        }
+    for (const FilePatch& p : g_patches)
+        if (p.suffix == s) {
+            Log("ERROR: register_file_patch: '%ls' is already patched", pathSuffix);
+            return false;
+        }
+    g_patches.push_back({s, patcher, {}});
     return true;
 }
 
@@ -150,9 +198,98 @@ static const VirtualFile* FindVirtualFile(const Ch* name, DWORD access, DWORD di
     return nullptr;
 }
 
+static bool ReadWholeFile(const std::wstring& path, std::string* out) {
+    HANDLE f = g_origCreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                                 FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return false;
+    LARGE_INTEGER size;
+    bool ok = GetFileSizeEx(f, &size) && size.QuadPart >= 0 && size.QuadPart < (64LL << 20);
+    if (ok) {
+        out->resize((size_t)size.QuadPart);
+        DWORD read = 0;
+        ok = out->empty() || (ReadFile(f, &(*out)[0], (DWORD)out->size(), &read, nullptr) && read == out->size());
+    }
+    CloseHandle(f);
+    return ok;
+}
+
+// The path as UTF-16: a CreateFileA name is in the ANSI code page (CP_ACP), as CreateFileA reads it.
+static std::wstring WidePath(const wchar_t* name) { return name; }
+static std::wstring WidePath(const char* name) {
+    int n = MultiByteToWideChar(CP_ACP, 0, name, -1, nullptr, 0);
+    if (n <= 1) return std::wstring();
+    std::wstring w((size_t)n, L'\0');
+    MultiByteToWideChar(CP_ACP, 0, name, -1, &w[0], n);
+    w.resize((size_t)n - 1);
+    return w;
+}
+
+// The patched copy to serve for this open, or nullptr (not patched, or serve the original).
+template <typename Ch>
+static const wchar_t* FindPatchedFile(const Ch* name, DWORD access, DWORD disposition) {
+    if (!name || disposition != OPEN_EXISTING || (access & (GENERIC_WRITE | FILE_WRITE_DATA | FILE_APPEND_DATA)) ||
+        g_tempDir.empty())
+        return nullptr;
+    for (FilePatch& p : g_patches) {
+        if (!EndsWithPath(name, p.suffix) || !FileExists(name)) continue;
+        const std::wstring path = WidePath(name);
+        if (path.empty()) return nullptr;
+        std::wstring full;
+        for (wchar_t c : path) full += FoldChar(c);
+        AcquireSRWLockExclusive(&g_genLock);
+        const wchar_t* served = nullptr;
+        bool known = false;
+        for (const PatchedCopy& c : p.copies)
+            if (c.original == full) {
+                known = true;
+                served = c.served.empty() ? nullptr : c.served.c_str();
+                break;
+            }
+        if (!known) {
+            // Each original gets its own copy: vanilla and every mod's version are patched separately.
+            PatchedCopy copy{full, L""};
+            std::string original, patched;
+            bool read = ReadWholeFile(path, &original);
+            try {
+                patched = read ? p.patcher(original) : std::string();
+            } catch (...) {
+                patched.clear();
+                Log("ERROR: file patch for '%ls' threw; serving the original", p.suffix.c_str());
+            }
+            if (!read) {
+                Log("ERROR: file patch: cannot read %ls; serving the original", path.c_str());
+            } else if (patched.empty()) {
+                Log("File patch '%ls': %ls left as it is", p.suffix.c_str(), path.c_str());
+            } else {
+                wchar_t prefix[24];
+                swprintf_s(prefix, L"patch%02zu_%02zu_", (size_t)(&p - g_patches.data()), p.copies.size());
+                std::wstring flat = p.suffix;
+                for (wchar_t& c : flat)
+                    if (c == L'\\') c = L'_';
+                std::wstring out = g_tempDir + L"\\" + prefix + flat;
+                if (WriteWholeFile(out, patched)) {
+                    copy.served = out;
+                    Log("File patch '%ls': %ls (%zu -> %zu bytes) -> %ls", p.suffix.c_str(), path.c_str(), original.size(),
+                        patched.size(), out.c_str());
+                } else {
+                    Log("ERROR: cannot write %ls (error %lu); serving the original", out.c_str(), GetLastError());
+                }
+            }
+            p.copies.push_back(copy);
+            served = p.copies.back().served.empty() ? nullptr : p.copies.back().served.c_str();
+        }
+        ReleaseSRWLockExclusive(&g_genLock);
+        return served;
+    }
+    return nullptr;
+}
+
 static HANDLE WINAPI Hook_CreateFileW(LPCWSTR name, DWORD access, DWORD share, LPSECURITY_ATTRIBUTES sa,
                                       DWORD disposition, DWORD flags, HANDLE templ) {
-    if (const VirtualFile* f = FindVirtualFile(name, access, disposition, "CreateFileW")) name = f->servedPath.c_str();
+    if (const VirtualFile* f = FindVirtualFile(name, access, disposition, "CreateFileW"))
+        name = f->servedPath.c_str();
+    else if (const wchar_t* patched = FindPatchedFile(name, access, disposition))
+        name = patched;
     return g_origCreateFileW(name, access, share, sa, disposition, flags, templ);
 }
 
@@ -161,6 +298,8 @@ static HANDLE WINAPI Hook_CreateFileA(LPCSTR name, DWORD access, DWORD share, LP
                                       DWORD disposition, DWORD flags, HANDLE templ) {
     if (const VirtualFile* f = FindVirtualFile(name, access, disposition, "CreateFileA"))
         return g_origCreateFileW(f->servedPath.c_str(), access, share, sa, disposition, flags, templ);
+    if (const wchar_t* patched = FindPatchedFile(name, access, disposition))
+        return g_origCreateFileW(patched, access, share, sa, disposition, flags, templ);
     return g_origCreateFileA(name, access, share, sa, disposition, flags, templ);
 }
 
@@ -187,6 +326,8 @@ bool VfsStart() {
     }
     std::wstring dir = std::wstring(tmp) + L"hoi4_loader";
     CreateDirectoryW(dir.c_str(), nullptr);
+    g_tempDir = dir;
+    for (const FilePatch& p : g_patches) Log("File patch '%ls' registered (each copy patched on its first read)", p.suffix.c_str());
 
     // Eager files are generated now, exactly once; lazy ones on their first served read. A file
     // that fails is simply not served.

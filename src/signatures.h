@@ -446,6 +446,79 @@ SIG(kSigTopBarHideWindow, "48 8B 46 ?? 48 8D 4E ?? FF 90 ?? ?? ?? ?? 80 8E ?? ??
 static const size_t kSigHideWindowWidgetDisp = 3, kSigHideWindowWidgetDisp2 = 7, kSigHideWindowHideDisp = 0xa,
                     kSigHideWindowFlagsDisp = 0x10, kSigHideWindowBit = 0x14, kSigHideWindowRootDisp = 0x18;
 
+// --- Province building removal (province_building_removal, NOTES.md Part I3) ----------------
+// CProvinceBuildingItem update (0x141e462a0), function start, hooked: window = item+[disp8 +0x31],
+// its button finder is window vtable +[disp8 +0x5f] ("building_picture"), building type =
+// item+[disp8 +0x70].
+SIG(kSigPbUpdate, "48 89 5C 24 18 48 89 74 24 20 55 57 41 55 41 56 41 57 48 8D 6C 24 80 48 81 EC 80 01 00 00 4C 8B E9 45 33 FF 41 8B F7 44 89 BD B8 00 00 00 48 8B 49 10 48 8B 01 48 8D 15 ?? ?? ?? ?? 48 89 54 24 30 48 C7 44 24 38 10 00 00 00 0F 28 44 24 30 66 0F 7F 44 24 30 41 B0 01 48 8D 54 24 30 FF 50 68 48 8B D8 48 8B 08 4C 8B 81 B0 00 00 00 49 8B 4D 28 8B 91 E4 02 00 00")
+static const size_t kSigPbUpdateWindowDisp = 0x31, kSigPbUpdateFinderSlotDisp = 0x5f, kSigPbUpdateTypeDisp = 0x70;
+// CProvinceBuildingItem tooltip (second vtable slot 0, 0x141e41e80), hooked. `this` is the tooltip
+// sub-object: type = this+[disp8 +0x2d], state view = this+[disp8 +0x31]; the type is a province
+// building if type+[disp32 +0x34] > 0; then province = view+[disp32 +0x3e], its buildings at
+// province+[disp32 +0x45]; else state = view+[disp32 +0x4e]. Window = this+[disp8 +0x5c] (-8).
+SIG(kSigPbTooltip, "48 89 5C 24 10 48 89 74 24 18 55 57 41 56 48 8D 6C 24 C0 48 81 EC 40 01 00 00 4D 8B F0 48 8B F2 48 8B F9 C7 45 60 00 00 00 00 48 8B 41 10 48 8B 59 08 83 B8 BC 02 00 00 00 7E 10 48 8B 9B 00 06 00 00 48 81 C3 90 01 00 00 EB 0E 48 8B 9B 08 06 00 00 48 81 C3 20 01 00 00 48 8B 49 F8 48 8B 01")
+static const size_t kSigPbTipTypeDisp = 0x2d, kSigPbTipViewDisp = 0x31, kSigPbTipProvinceFlagDisp = 0x34,
+                    kSigPbTipProvinceDisp = 0x3e, kSigPbTipBuildingsDisp = 0x45, kSigPbTipStateDisp = 0x4e,
+                    kSigPbTipWindowDisp = 0x5c;
+// CContainerWindow's button finder (window vtable slot 13 forwards to it; 0x142332250): looks the
+// name up in window+[disp32 +0x21] with Lookup (E8 at +0x32), which returns null for a missing name
+// and logs nothing. "Could not find" is logged only with the flag set (line 0x3d1 at +0x4e).
+SIG(kSigPbButtonFind, "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 48 83 EC 60 41 0F B6 D8 48 8B F2 48 8B F9 48 81 C1 ?? ?? ?? ?? 0F 10 02 0F 29 44 24 30 48 8D 54 24 30 E8 ?? ?? ?? ?? 48 85 C0 0F 85 ?? ?? ?? ?? 84 DB 0F 84 ?? ?? ?? ?? 41 B9 00 10 00 00 41 B8 D1 03 00 00")
+static const size_t kSigPbButtonMapDisp = 0x21, kSigPbButtonLookupCall = 0x32;
+// CButtonWrapper(out, button, std::function<void()>* click, std::function<void()>* other)
+// (0x142359ed0), function start; stores its vtable (lea rip rel32 at +0x37) at out+0.
+SIG(kSigButtonWrapperCtor, "4C 89 4C 24 20 4C 89 44 24 18 48 89 4C 24 08 55 53 56 57 41 54 41 56 41 57 48 8D AC 24 D0 FA FF FF 48 81 EC 30 06 00 00 49 8B F1 4D 8B F0 4C 8B FA 48 8B F9 48 8D 05 ?? ?? ?? ?? 48 89 01 45 33 E4 4C 89 61 08 48 8D 59 10 48 89 5C 24 20 33 D2 41 B8 80 05 00 00")
+static const size_t kSigButtonWrapperVtableLea = 0x34;
+// CStateSharedSlotBuildingItem destructor (0x141e41b00): its two CButtonWrapper members at
+// this+[disp32 +0x27] and this+[disp8 +0x33], each destroyed by the same function (E8 at +0x2b and
+// +0x34). The members' distance is the wrapper's size (0x5d8).
+SIG(kSigSharedSlotDtor, "48 89 5C 24 08 57 48 83 EC 20 48 8D 05 ?? ?? ?? ?? 48 8B F9 48 89 01 8B DA 48 8D 05 ?? ?? ?? ?? 48 89 41 18 48 81 C1 28 06 00 00 E8 ?? ?? ?? ?? 48 8D 4F 50 E8")
+static const size_t kSigSharedSlotSecondDisp = 0x27, kSigSharedSlotFirstDisp = 0x33, kSigSharedSlotDtorCall1 = 0x2b,
+                    kSigSharedSlotDtorCall2 = 0x34;
+// Building container lookup by type (0x141202610), the whole function: the province's or state's
+// building of a type, or null.
+SIG(kSigBuildingLookup, "80 7A 20 00 74 24 83 79 2C 00 74 1E 48 63 92 E0 02 00 00 48 8B 41 20 4C 63 04 90 41 83 F8 FF 74 09 48 8B 41 38 4A 8B 04 C0 C3 33 C0 C3")
+// Building removal permission (0x140a25c50): (state, building, std::string* why or null) -> true
+// if a level may be removed now (false during the wartime removal cooldown; then *why says until
+// when). Function start; BUILDING_SLOT_REMOVE_COOLDOWN is referenced inside.
+SIG(kSigRemovePermission, "48 89 5C 24 08 48 89 7C 24 10 4C 89 74 24 18 55 48 8D AC 24 70 FF FF FF 48 81 EC 90 01 00 00 49 8B F8 48 8B D9 C7 44 24 34 00 00 00 00 48 8B CA E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ?? 48 8D 8B C8 00 00 00 E8")
+ANCHOR(kAnchorRemoveCooldown, "BUILDING_SLOT_REMOVE_COOLDOWN")
+// CRemoveBuildingLevelCommand execute (0x1411e2e77), before it removes a level: the state's last
+// removal date state+[disp32 +0xf] = gamestate (rip rel32 at +3)->[disp32 +9] (today), which the
+// permission check's wartime cooldown counts from.
+SIG(kSigRemoveCooldownStamp, "48 8B 05 ?? ?? ?? ?? 8B 88 68 04 00 00 89 8E 70 08 00 00 0F B7 53 40 66 85 D2 7E")
+static const size_t kSigStampGameStateRel = 3, kSigStampDateDisp = 9, kSigStampStateDisp = 0xf;
+// CRemoveBuildingLevelCommand execute, last: when the player's country controls the state, ui (rip
+// rel32 at +3, length 7) -> vtable[disp32 +0x3e]() -> Post(that, &event imm32 +0x5c) (E8 at +0x63):
+// the state view shows the change now instead of at the next tick. (0x1411e2ead)
+SIG(kSigRemoveUiRefresh, "48 8B 1D ?? ?? ?? ?? 48 8B CB 48 8D 78 08 48 8B 03 FF 90 A0 00 00 00 44 8B 07 8B 10 44 3B C2 74 15 45 85 C0 74 42 85 D2 74 3E 48 8B CF E8 ?? ?? ?? ?? 84 C0 74 32 48 8B 03 48 8B CB FF 90 B8 00 00 00 48 85 C0 74 21 48 8B 03 48 8B CB FF 90 B8 00 00 00 48 8D 54 24 50 C7 44 24 50 00 00 00 00 48 8B C8 E8")
+static const size_t kSigRemoveUiRel = 3, kSigRemoveUiSlotDisp = 0x3e, kSigRemoveUiEventDisp = 0x5c,
+                    kSigRemoveUiPostCall = 0x63;
+// The shared slot cross's click (0x141e47d3e): the confirmation dialog. Dialog manager =
+// view+[disp8 +3]->[disp32 +7]->[disp32 +0xe]; dialog = new(imm32 +0x13 bytes) (E8 at +0x17);
+// CConfirmRemoveBuildingLevel(dialog, ui (rip rel32 at +0x43, length 7), state->[disp8 +0x3f]
+// (state id), type->[disp32 +0x38] (type index), mode) (E8 at +0x4a); Open(manager, dialog) (E8
+// at +0x58).
+SIG(kSigConfirmRemoveOpen, "48 8B 43 38 48 8B 88 F0 05 00 00 4C 8B B1 F8 04 00 00 B9 90 11 00 00 E8 ?? ?? ?? ?? 48 89 44 24 70 48 85 C0 74 2C 48 8B 4B 20 48 8B 91 08 06 00 00 89 74 24 20 44 8B 8F E0 02 00 00 44 8B 42 58 48 8B 15 ?? ?? ?? ?? 48 8B C8 E8 ?? ?? ?? ?? 48 8B E8 48 8B D5 49 8B CE E8")
+static const size_t kSigConfirmViewDisp = 3, kSigConfirmMgrDisp1 = 7, kSigConfirmMgrDisp2 = 0xe, kSigConfirmSizeImm = 0x13,
+                    kSigConfirmAllocCall = 0x17, kSigConfirmTypeIndexDisp = 0x38, kSigConfirmStateIdDisp = 0x3f,
+                    kSigConfirmUiRel = 0x43, kSigConfirmCtorCall = 0x4a, kSigConfirmOpenCall = 0x58;
+// remove_building's loop: level = building+[disp8 +3] (short), then SetLevel(building, level - 1,
+// notify = 1) (E8 at +0x12).
+SIG(kSigRemoveBuildingLoop, "0F B7 57 40 66 3B F2 7D 14 66 FF CA 41 B0 01 48 8B CF E8 ?? ?? ?? ?? FF CB 85 DB 7F E3")
+static const size_t kSigRemoveLevelDisp = 3, kSigRemoveSetLevelCall = 0x12;
+// The shared slot's cross, shown and hidden (0x141e4774c): Hide = vtable +[disp32 +2], then
+// or byte [element+disp8 +8],imm8 +9 (the hidden flag); Show = and that byte, then vtable +[disp8
+// +0x3e].
+SIG(kSigGuiHideShow, "FF 92 80 00 00 00 80 4F 75 10 48 8D 4D E0 E8 ?? ?? ?? ?? 41 03 C4 49 8B 0E 4C 8B 81 B0 00 00 00 39 46 34 41 0F 9E C7 41 8D 57 01 49 8B CE 41 FF D0 41 80 66 75 EF 49 8B 06 49 8B CE FF 50 78")
+static const size_t kSigGuiHideDisp = 2, kSigGuiFlagsDisp = 8, kSigGuiHiddenBit = 9, kSigGuiShowDisp = 0x3e;
+// The shared slot's hover (0x141e44d69): the player's tag (gamestate +0x520 or +0x524), state =
+// view+[disp32 +0x1e], then owner = TagToCountry(state+[disp32 +0x2e]) (E8 at +0x32), checked
+// against the player before the cross shows. The state's owner tag is read from here; the view's
+// state field must be the one the tooltip reads.
+SIG(kSigStateOwnerCheck, "BB ?? ?? ?? ?? B9 ?? ?? ?? ?? 83 B8 ?? ?? ?? ?? 00 0F 4F D9 48 03 D8 48 8B 47 ?? 4C 8B B0 ?? ?? ?? ?? 4D 85 F6 0F 84 ?? ?? ?? ?? 49 8D 8E ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B F0 8B 0B")
+static const size_t kSigOwnerViewStateDisp = 0x1e, kSigOwnerStateOwnerDisp = 0x2e;
+
 // --- Code shapes at RTTI-found addresses (numeric triggers, NOTES.md E2) -------------------
 // CODE(name, "..."): checked with SigMatchAt at an address reached through an RTTI vtable, not
 // scanned (so not required to be unique). tools/check_code_shapes.py checks them on exe copies.
@@ -508,6 +581,35 @@ CODE(kCodeTargetEffectLimit, "83 B9 8C 00 00 00 00 0F 84")
 // CEveryStateEffect scalar deleting destructor: operator delete(this, size), E8 at +0x21.
 CODE(kCodeScalarDeletingDtor, "48 89 5C 24 08 57 48 83 EC 20 8B DA 48 8B F9 E8 ?? ?? ?? ?? F6 C3 01 74 ?? BA ?? ?? ?? ?? 48 8B CF E8")
 static const size_t kCodeDtorDeleteCall = 0x21;
+// CProvinceBuildingItem scalar deleting destructor (its vtable slot 0, 0x141e41a20), hooked: stores
+// the vtable (lea rel32 at +0xd) and the tooltip sub-object's vtable (lea at +0x19) at this+[disp8
+// +0x23].
+CODE(kCodePbDtor, "48 89 5C 24 08 57 48 83 EC 20 48 8D 05 ?? ?? ?? ?? 48 8B F9 48 89 01 8B DA 48 8D 05 ?? ?? ?? ?? 48 89 41 18 48 83 C1 38 E8")
+static const size_t kCodePbDtorVtableLea = 0xa, kCodePbDtorTipVtableLea = 0x19, kCodePbDtorTipSubDisp = 0x23;
+// Inside the CProvinceBuildingItem update (kSigPbUpdate, within 0x400 bytes; the custom icon item
+// has the same code): the picture's enable test. IsEnabled = vtable +[disp32 +6], Enable +[disp32
+// +0x16], Disable +[disp32 +0x2e] (the GUI element's vtable).
+CODE(kCodePbUpdateEnable, "84 C0 74 18 FF 92 18 02 00 00 84 C0 ?? ?? 48 8B 03 48 8B CB FF 90 98 02 00 00 EB 16 FF 92 18 02 00 00 84 C0 ?? ?? 48 8B 03 48 8B CB FF 90 A0 02 00 00")
+static const size_t kCodePbIsEnabledDisp = 6, kCodePbEnableDisp = 0x16, kCodePbDisableDisp = 0x2e,
+                    kCodePbUpdateEnableRange = 0x400;
+// CConfirmRemoveBuildingLevel (the "Remove Building" dialog), reached through kSigConfirmRemoveOpen
+// and its RTTI vtable (NOTES.md I4):
+// constructor (0x141fe6290): vtable lea rel32 at +0x26; state id at this+[disp32 +0x45], type
+// index at this+[disp32 +0x4b], mode at this+[disp32 +0x55].
+CODE(kCodeConfirmCtor, "48 89 5C 24 10 48 89 74 24 18 48 89 4C 24 08 57 48 83 EC 20 41 8B F9 41 8B D8 48 8B F1 E8 ?? ?? ?? ?? 90 48 8D 05 ?? ?? ?? ?? 48 89 06 48 8D 05 ?? ?? ?? ?? 48 89 46 10 48 8D 05 ?? ?? ?? ?? 48 89 46 38 89 9E ?? ?? ?? ?? 89 BE ?? ?? ?? ?? 8B 44 24 50 89 86 ?? ?? ?? ??")
+static const size_t kCodeConfirmCtorVtableLea = 0x23, kCodeConfirmStateDisp = 0x45, kCodeConfirmTypeDisp = 0x4b,
+                    kCodeConfirmModeDisp = 0x55;
+// vtable slot 0, scalar deleting destructor (0x141fe6320), hooked: stores the vtable (lea at +0xa).
+CODE(kCodeConfirmDtor, "48 89 5C 24 08 57 48 83 EC 20 48 8D 05 ?? ?? ?? ?? 8B DA 48 89 01 48 8B F9")
+static const size_t kCodeConfirmDtorVtableLea = 0xa;
+// vtable slot 1, still valid (0x141fe6bf0; the dialog goes when it says no), hooked.
+CODE(kCodeConfirmValid, "48 89 5C 24 20 57 41 54 41 57 48 83 EC 30 80 3D ?? ?? ?? ?? 00 48 8B D9 41 BC E8 20 00 00")
+// vtable slot 16, OK (0x141fe6380; posts CRemoveBuildingLevelCommand for the state building), hooked.
+CODE(kCodeConfirmAccept, "48 89 5C 24 10 48 89 6C 24 18 56 57 41 54 41 56 41 57 48 83 EC 30 48 8B F1 41 BC E8 20 00 00 41 BF 10 00 00 00 44 8B 35")
+// Both read the state id the constructor stores: movsxd rax,[reg+disp32] within 0x200 bytes.
+CODE(kCodeConfirmReadState, "48 63 ?? ?? ?? 00 00")
+static const int kConfirmDtorSlot = 0, kConfirmValidSlot = 1, kConfirmAcceptSlot = 16;
+static const size_t kCodeConfirmReadRange = 0x200;
 
 // CRailwayProductionLine slot 14 (shared getter): *out = this->[disp8 +3], the construction output
 // assigned to the line today (fixed point). (0x140c17400)

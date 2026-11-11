@@ -49,6 +49,9 @@ add_library(hoi4_loader SHARED
     src/engine_army.cpp
     src/engine_railway.cpp
     src/engine_time.cpp
+    src/engine_province_buildings.cpp
+    src/gui_patch.cpp
+    src/plugin_province_buildings.cpp
     src/engine.h
     src/lifecycle.cpp
     src/lifecycle.h
@@ -105,4 +108,10 @@ if(HOI4_LOADER_BUILD_TESTS)
     target_compile_features(native_script_test PRIVATE cxx_std_17)
     target_compile_definitions(native_script_test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
     set_target_properties(native_script_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/$<0:>)
+
+    # The countrystateview.gui patch (province_building_removal), pure text, against vanilla-shaped input.
+    add_executable(gui_patch_test tests/gui_patch_test.cpp src/gui_patch.cpp)
+    target_compile_features(gui_patch_test PRIVATE cxx_std_17)
+    target_compile_definitions(gui_patch_test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    set_target_properties(gui_patch_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/$<0:>)
 endif()

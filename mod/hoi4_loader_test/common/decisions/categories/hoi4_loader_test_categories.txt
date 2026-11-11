@@ -41,6 +41,14 @@ hoi4_loader_time_category = {
 	}
 }
 
+# Province buildings (player only; vanilla script, no loader feature needed).
+hoi4_loader_province_building_category = {
+	icon = generic_construction
+	visible = {
+		is_ai = no
+	}
+}
+
 # AI cost measurement: visible to every country while the loader is present.
 hoi4_loader_ai_cost_category = {
 	icon = generic_research

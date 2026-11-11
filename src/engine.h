@@ -301,6 +301,40 @@ bool HookRailwayMapIcons(RailwayIconClick_t onClick);
 // Returns 2 deepened, 1 queued, 0 nothing to do. Main thread, at a safe point.
 int QueueOrDeepenRailwayDismantle(int tag, const std::vector<int>& path);
 
+// The province object's controller tag offset (kSigRailController; 0 if unresolved). Resolved by
+// ResolveRailways, also used by province building removal.
+uint32_t ProvinceControllerOffset();
+
+// --- Province building removal (province_building_removal; engine_province_buildings.cpp, I3) ---
+// A cross on the state view's province building entries (supply hub, naval base, bunkers, ...):
+// the entry's `remove` button, which the loader adds to countrystateview.gui through a file patch.
+// Resolved after ResolveRailways (needs the controller offset).
+void ResolveProvinceBuildings();
+bool HaveProvinceBuildingRemoval();  // every function, field and vtable resolved (no game needed)
+// UI thread. `allowed`: may the cross show at all (the plugin: single player only). `onClick`: the
+// player clicked the cross of `type` (a CBuildingType*) in `province` (a province object) of `state`;
+// must defer the change (RemoveProvinceBuildingLevel) and return true if it did.
+using ProvinceRemoveAllowed_t = bool (*)();
+using ProvinceRemoveClick_t = bool (*)(void* province, void* type, void* state);
+// `onFault`: a fault inside the loader's part of a hook or the removal (contained) has switched
+// the feature off for the session; `where` names the hook. Main thread.
+using ProvinceRemoveFault_t = void (*)(const char* where);
+// Queues the update, tooltip and destructor hooks. Call from a feature's init.
+bool HookProvinceBuildingRemoval(ProvinceRemoveAllowed_t allowed, ProvinceRemoveClick_t onClick,
+                                 ProvinceRemoveFault_t onFault);
+// Init only: takes out every hook HookProvinceBuildingRemoval queued (a later init step failed),
+// so nothing of the feature is applied.
+void UnhookProvinceBuildingRemoval();
+// Main thread, at a safe point: removes one level of the province's building of `type` as
+// remove_building does (SetLevel with notify, so supply follows), if it still has a level, the local
+// player controls the province and the removal cooldown allows it. Returns the new level, or -1
+// (and *why) if nothing was removed.
+int RemoveProvinceBuildingLevel(void* province, void* type, void* state, std::string* why);
+// The patch that adds the `remove` button to province_building_entry (countrystateview.gui). Empty
+// if the file has no such entry or already has the button. Pure text; tests call it directly.
+std::string PatchCountryStateViewGui(const std::string& original);
+const char kProvinceBuildingRemoveTooltipKey[] = "BUILDING_SLOT_REMOVE_BUILDING_LEVEL";
+
 // --- Scope blocks and iterators (region_scope; engine_scope.cpp, NOTES.md F5) -----------------
 // The vanilla state iterators the region iterators are cloned from. keys: the block keys the
 // vanilla item handler reads itself (decoded from its compare chain); limitKey: the one whose
