@@ -6,6 +6,21 @@ A–F; NOTES.md has the findings and test results behind each.
 
 ## Unreleased
 
+- **New feature `time_control`** (engine tier, single player; guard
+  `hoi4_loader_feature_time_control`; script version unchanged). NOTES.md Part K.
+  - `force_game_speed = { speed = 1-5 days = <n> hours = <n> until = "y.m.d.h" lock_pause = yes }`
+    locks the game speed: every speed change (buttons, keys, console) gives that speed, for a
+    time, until a date, or until `release_game_speed = yes`. With `lock_pause` (default yes) the
+    player cannot pause meanwhile; automatic pauses and the Esc menu still pause. When the lock
+    ends, the speed from before comes back. Trigger `has_forced_game_speed`.
+  - `hide_date_display = yes / no` hides or shows the date and time in the top bar.
+  - `hide_time_controls = yes / no` hides or shows the whole time panel (date, pause button,
+    speed buttons and steps).
+  - Saved as global flags `hoi4_loader_time_lock`, `hoi4_loader_date_hidden` and
+    `hoi4_loader_time_controls_hidden`; a save loads without the loader at normal speeds with
+    everything shown. Effects do nothing in multiplayer.
+  - Hooks four engine functions (DEVELOPING.md "Global hooks"); seven new signatures (53 in all).
+    Checked on 1.19.4.2 only; 1.19.3 is unchecked.
 - **Game 1.19.4.2** ("Operation Postern", Steam, as distributed) is supported: its hash is in
   `loader_config.ini`. Every signature matches; three create_army code shapes changed and were
   adapted (NOTES.md "1.19.4.2 added"). 1.19.3 stays supported.

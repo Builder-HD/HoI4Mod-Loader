@@ -134,3 +134,4 @@ bool ArmyConditionInit();     // plugin_army_condition.cpp
 bool ProductionDataInit();    // plugin_production_data.cpp
 bool RegionScopeInit();       // plugin_region_scope.cpp
 bool CreateArmyInit();        // plugin_create_army.cpp
+bool TimeControlInit();       // plugin_time_control.cpp

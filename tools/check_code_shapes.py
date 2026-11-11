@@ -143,6 +143,77 @@ def check(path, codes):
     results += check_region_scope(img, codes, text_va, text)
     results.append(check_trigger_registry(img, codes, text_va, text))
     results += check_create_army(img, codes, text_va, text)
+    results += check_time_control(img, codes, text_va, text)
+    return results
+
+
+def check_time_control(img, codes, text_va, text):
+    """time_control (NOTES.md Part K): the pieces engine_time.cpp resolves, with its cross-checks."""
+    sigs, _ = cs.load_signatures(pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h')
+    sigs = dict(sigs)
+    at = {}
+    for name in ('kSigConsoleSpeedPause', 'kSigConsoleSpeedSet', 'kSigSetGameSpeed', 'kSigIncreaseSpeedTail',
+                 'kSigTopBarUpdateDate', 'kSigTopBarPauseClick', 'kSigTopBarHideWindow'):
+        m = [x.start() for x in cs.compile_pattern(sigs[name]).finditer(text)]
+        if len(m) != 1:
+            return [('time_control signature %s' % name, False, '%d matches' % len(m))]
+        at[name] = text_va + m[0]
+    cp, cset, ss, inc = (at['kSigConsoleSpeedPause'], at['kSigConsoleSpeedSet'], at['kSigSetGameSpeed'],
+                         at['kSigIncreaseSpeedTail'])
+    ud, pc = at['kSigTopBarUpdateDate'], at['kSigTopBarPauseClick']
+
+    def u8(va):
+        return img.d[img.va2off(va)]
+
+    def rip(insn):
+        return insn + 7 + i32(img, insn + 3)
+
+    results = []
+    idlers = {rip(cp + 0x13), rip(cp + 0x2f), rip(cset + 4), rip(cset + 0x22)}
+    toggle, paused = i32(img, cp + 0x40), i32(img, cp + 0x1f)
+    speeds, top = u8(cp + 0xc), i32(img, ss + 0x14)
+    field = i32(img, ss + 0x1f)
+    request = rel32(img, cset + 0x29)
+    ok = (len(idlers) == 1 and toggle == i32(img, cset + 0x15) == i32(img, pc + 0x17) and top == speeds - 1 and
+          field == i32(img, inc + 0xc) and rel32(img, inc + 0x27) == ss and img.match_at(request, codes['kCodeGameSpeedRequest']))
+    results.append(('time_control speed sites (%d speeds, field +0x%x)' % (speeds, field), ok, hex(min(idlers))))
+    idler = img.vtable('.?AVCInGameIdler@@')
+    ok = bool(idler) and len(idler[1]) > max(toggle, paused) // 8
+    tfn = idler[1][toggle // 8] if ok else 0
+    pfn = idler[1][paused // 8] if ok else 0
+    ok = (ok and img.match_at(tfn, codes['kCodeIdlerTogglePause']) and img.match_at(pfn, codes['kCodeIdlerIsPaused']) and
+          i32(img, request + 0x1d) == i32(img, tfn + 0x1e))
+    results.append(('kCodeIdlerTogglePause / IsPaused (slots %d / %d, paused +0x%x)' %
+                    (toggle // 8, paused // 8, i32(img, pfn + 3) if ok else -1), ok, hex(tfn)))
+    tail = find_in(img, ud, 0x180, codes['kCodeTopBarDateTail'])
+    fmt = rel32(img, tail + 0xa) if tail else 0
+    ok = bool(tail) and img.match_at(fmt, codes['kCodeGameDateFormat'])
+    base = i32(img, fmt + 0x21) if ok else -1
+    hours = i32(img, tail + 3) + u8(fmt + 0x1a) if ok else -1
+    results.append(('kCodeTopBarDateTail / GameDateFormat (date +0x%x, base %d)' % (hours, base),
+                    ok and base > 0 and base % 8760 == 0, hex(fmt)))
+    refresh = rel32(img, pc + 0x23)
+    hide = find_in(img, refresh, 0x200, codes['kCodeWidgetHide'])
+    show = find_in(img, refresh, 0x200, codes['kCodeWidgetShow'])
+    ok = bool(hide and show) and u8(show + 2) == u8(hide + 0xb) and u8(show + 3) == (~u8(hide + 0xc)) & 0xff
+    results.append(('kCodeWidgetHide / Show (slots %d / %d)' % (i32(img, hide + 5) // 8 if hide else -1,
+                                                                u8(show + 0x18) // 8 if show else -1), ok, hex(refresh)))
+    m = [x.start() for x in cs.compile_pattern(sigs['kSigTopBarHideWindow']).finditer(text)]
+    hw = text_va + m[0] if len(m) == 1 else 0
+    ok = bool(hw and hide) and img.match_at(refresh, codes['kCodeTopBarPauseRefresh'])
+    if ok:
+        name_va = rip(refresh + 0x18)
+        name = img.d[img.va2off(name_va):img.va2off(name_va) + 20]
+        widget = u8(hw + 3)
+        ok = (name == b'time_control_window\0' and u8(refresh + 0x14) == 19 and widget == u8(hw + 7) and
+              i32(img, hw + 0xa) == i32(img, hide + 5) and i32(img, hw + 0x10) == widget + u8(hide + 0xb) and
+              u8(hw + 0x14) == u8(hide + 0xc) and u8(hw + 0x18) == u8(refresh + 0x2a))
+    results.append(('kSigTopBarHideWindow / kCodeTopBarPauseRefresh (find slot %d, widget +0x%x)' %
+                    (i32(img, refresh + 0x43) // 8 if ok else -1, u8(hw + 3) if hw else -1), ok, hex(hw)))
+    bar = img.vtable('.?AVCTopBar@@')
+    ok = bool(bar) and img.match_at(bar[1][0], codes['kCodeScalarDeletingDtor'])
+    results.append(('kCodeScalarDeletingDtor (CTopBar slot 0; DateText +0x%x)' % i32(img, ud + 0x10), ok,
+                    hex(bar[1][0]) if bar else '-'))
     return results
 
 

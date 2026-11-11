@@ -38,6 +38,7 @@ Current features:
 | `production_data` | engine (needs `lifecycle`) | `hoi4_loader_plugin_production_data` | `factories_assigned` |
 | `region_scope` | engine (needs `lifecycle`) | `hoi4_loader_plugin_region_scope` | `strategic_region`, `any_`/`every_`/`random_strategic_region` and the region identity triggers, see below |
 | `create_army` | engine (needs `lifecycle`) | `hoi4_loader_plugin_create_army` | `create_army`: spawn divisions as an army under a chosen general, see below |
+| `time_control` | engine (needs `lifecycle`) | `hoi4_loader_plugin_time_control` | `force_game_speed`, `release_game_speed`, `hide_date_display`, `hide_time_controls`, `has_forced_game_speed`: lock the game speed (and the pause) for a while, hide the top bar's date; single player, see below |
 
 On an unknown build the file tier stays on, the engine tier is off, and `loader.log` lists the
 disabled features and prints the exact line to add to `loader_config.ini`. A feature whose init
@@ -138,6 +139,7 @@ when the loader is missing or a feature is off. Without them, using a loader tri
 | `factories_assigned` | `scripted_triggers/hoi4_loader_feature_production_data.txt` |
 | `strategic_region`, `any_`/`every_`/`random_strategic_region`, `strategic_region_id`, `is_sea_region`, `region_has_state` | `scripted_triggers/hoi4_loader_feature_region_scope.txt` |
 | `create_army` | `scripted_triggers/hoi4_loader_feature_create_army.txt` |
+| `force_game_speed`, `release_game_speed`, `hide_date_display`, `hide_time_controls`, `has_forced_game_speed` | `scripted_triggers/hoi4_loader_feature_time_control.txt` |
 
 - **Combinations:** a block that combines features needs each feature's stub and guard, e.g.
   `air_superiority` inside `strategic_region` needs both `region_control` and `region_scope`.
@@ -831,3 +833,81 @@ loaded without the loader keeps them (they are ordinary armies).
 **Without the loader:** `create_army` is an unknown effect. The game logs it once per use when
 parsing, and the whole block, `create_unit`s included, does nothing. Guard decisions with
 `hoi4_loader_feature_create_army = yes` (stub: `stubs/common/scripted_triggers/hoi4_loader_feature_create_army.txt`).
+
+## Game speed and the date display (`time_control`)
+
+Lock the game speed from script for a while, optionally without pause, and hide the date in the
+top bar. **Single player only.**
+
+```
+force_game_speed = {
+    speed = 2                 # 1-5, as the speed buttons count (required)
+    days = 2                  # optional: for this long, days and/or hours ...
+    hours = 12
+    until = "1940.5.10.12"    # ... or until this date: year.month.day or year.month.day.hour
+    lock_pause = no           # optional; default yes: the player cannot pause meanwhile
+}
+release_game_speed = yes      # ends the lock now
+hide_date_display = yes       # hides the date and time in the top bar; `= no` shows it again
+hide_time_controls = yes      # hides the whole time panel; `= no` shows it again
+has_forced_game_speed = yes   # trigger: a lock is running (`= no`: none)
+```
+
+- **The lock:** while it runs, every speed change gives the locked speed. That covers the speed
+  buttons, the +/- keys and the console's `gamespeed`. The buttons still click; the speed stays.
+- **How long:** `until` a date, or `days` and/or `hours` from now, or without them until
+  `release_game_speed = yes`. `until` must be in the future. The hour is 1-24 as the top bar
+  shows it ("12:00"); without it the lock ends at the start of that day. When the time is up the
+  lock ends by itself.
+- **When it ends** (time up or released), the speed the player had before the lock comes back. A
+  new `force_game_speed` while one runs replaces it and keeps that original speed.
+- **Pause:** with `lock_pause = yes` (the default) the player's pause is refused: the pause button,
+  Space and the console. Still allowed:
+  - unpausing, always;
+  - the game's own automatic pauses (event popups with "pause on event" in the settings);
+  - the Esc menu, which pauses as usual.
+- **If the game is paused** when `force_game_speed` runs (for example a decision taken while
+  paused), it is unpaused.
+- **Date display:** `hide_date_display = yes` hides the date and time text in the top bar (the
+  pause button and the speed steps stay). It changes at once, also while paused.
+- **Time panel:** `hide_time_controls = yes` hides the whole panel: the date, the pause button,
+  the −/+ buttons and the five speed steps. The top bar's empty frame stays. It is independent of
+  `hide_date_display`, and a running `force_game_speed` holds either way. Whether the panel's
+  keys (Space, numpad +/−) still act while it is hidden is not tested yet; the lock refuses them
+  anyway.
+- **Tooltips:** "The game speed is locked at **2** for **2** days. Meanwhile the game cannot be
+  paused.", "The date is hidden." The texts can be translated with the keys in
+  `loader_script_docs.md` (`HOI4_LOADER_FORCE_GAME_SPEED`, `_UNTIL`, `_DAYS`, `_HOURS`,
+  `_NO_PAUSE`, `HOI4_LOADER_RELEASE_GAME_SPEED`, `HOI4_LOADER_HIDE_DATE_DISPLAY`,
+  `HOI4_LOADER_SHOW_DATE_DISPLAY`, `HOI4_LOADER_HIDE_TIME_CONTROLS`, `HOI4_LOADER_SHOW_TIME_CONTROLS`).
+
+```
+my_mod_operation_weserubung = {
+    visible = { hoi4_loader_feature_time_control = yes }
+    available = { has_forced_game_speed = no }
+    complete_effect = {
+        force_game_speed = { speed = 1 days = 7 }   # a week at the slowest speed, no pause
+    }
+}
+```
+
+**Saves:** saved with the game as global flags:
+- `hoi4_loader_time_lock`: the lock;
+- `hoi4_loader_date_hidden`: the hidden date;
+- `hoi4_loader_time_controls_hidden`: the hidden time panel.
+
+A mod may test the last two with `has_global_flag`. After loading, all three come back; a loaded game stays paused until the
+player unpauses. A timed lock's end is rounded to whole days after loading (it may end up to a
+day later than it would have). A save loaded without the loader runs at normal speeds with the
+date shown; the flags do nothing there.
+
+**Not from `on_startup`:** it runs before the loader has checked that the game is single player,
+so the effects do nothing there (logged). Fire an event from `on_startup` with `hours = 1` (or use
+a decision or focus) and run them in that event.
+
+**Multiplayer:** not supported. The effects do nothing there (logged once), and a save's lock or
+hidden date is ignored when it is loaded in multiplayer.
+
+**Without the loader:** the effects and the trigger are unknown to the game (logged once per use
+when parsing) and do nothing. Guard them with `hoi4_loader_feature_time_control = yes` (stub:
+`stubs/common/scripted_triggers/hoi4_loader_feature_time_control.txt`).

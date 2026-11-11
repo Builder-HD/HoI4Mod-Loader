@@ -3244,3 +3244,219 @@ the loader has been tested in multiplayer yet (README). One session also covers 
 **Pass:** steps 1-8 as described, no OOS, no crash. Then MODDING.md's "Not tested in
 multiplayer yet" for `create_army` and the README's multiplayer note can be updated.
 
+# Part K: game speed and date display (`time_control`)
+
+Branch `feature/time-control` (from main). Static analysis of vanilla 1.19.4.2 (v1.19.4.2.2da5)
+in Ghidra; addresses are for orientation only. **1.19.3 is unchecked.** The loader finds
+everything through `src/signatures.h` (seven SIGs, eight CODE shapes) and RTTI, with the
+cross-checks below; `tools/check_signatures.py` and `tools/check_code_shapes.py` pass on 1.19.4.2.
+
+## K1 findings
+
+### K1.1 Game speed
+
+- **Storage:** `CGameState +0x4bc`, an int 0..4 (the UI's speeds 1..5).
+- **Only writer:** `CGameState::SetGameSpeed(int)` (0x140203f10). It clamps to 0..4, stores the
+  value, asserts `ThreadIsMainThread()`, and queues a UI notification. Its three callers are the
+  `Execute` of the synced speed commands:
+  - `CSetGameSpeedCommand` (0x140f85bc0, speed at `cmd+0x28`);
+  - `CIncreaseGameSpeedCommand` (0x140f859a0, speed + 1);
+  - `CDecreaseGameSpeedCommand` (0x140f85460, speed − 1).
+- **Requests:** `RequestGameSpeed(idler, speed0, bool fromPlayer)` (0x140e4c490):
+  1. refuses for observers / game over (`FUN_140bbb0f0(idler+0x6b8)`);
+  2. refuses for multiplayer non-hosts;
+  3. stores the player's preference (0x14021a230);
+  4. posts a `CSetGameSpeedCommand`.
+
+  Its callers:
+  - the top bar's speed steps (0x14192c6f0);
+  - the console `gamespeed <0-5>` (0x140274800; 0 = pause);
+  - `pause_in_hours` (0x140286900);
+  - game start (0x140e47560, the remembered speed).
+
+  The +/- keys and buttons post the increase / decrease commands.
+- **Multiplayer:** commands are synced, and `CanExecute` says "only the host may change the game
+  speed". So a lock that script decides would hold on every machine. The feature is still single
+  player only (pause is local, below).
+
+### K1.2 Pause
+
+- **Where it lives:** in the in-game idler, not in the game state: `CInGameIdler +0x6c1`
+  (`IsPaused`, vtable slot 94, 0x140e46300).
+- **`TogglePause(int mode)`** (slot 72, 0x140e4e0b0):
+  - single player: flips the byte (and +0x6c2 = "paused by the player" when mode == 1);
+  - multiplayer: posts `CPauseGame`, whose `Execute` calls slot 83 with the player's name.
+- **Callers by mode** (virtual calls `[rax+0x240]` found by byte scan):
+  - mode 1: the top bar's pause button and its Space shortcut (0x14192efc0), the console, the
+    idler's own input handling (0x140e3cb90, 0x1402b7eb0), one UI (0x14156e9c0);
+  - mode 0: `CAutomaticPause` (0x14199e050, the event popups' "pause on event") and 0x1401e5660.
+- **The Esc menu** pauses through another slot (95, 0x140e4e440, called by 0x140bbc540 when the
+  menu opens). The loader does not hook it.
+- Other direct writers of +0x6c1: game start, slots 7, 79 and 107. Engine pauses, left alone.
+
+### K1.3 Top bar date
+
+- `interface/topbar.gui`: `time_control_window` holds `pause_button_date(_paused)`,
+  `button_speeddown/up`, `button_speedstep1..5` and the `instantTextBoxType` **`DateText`**.
+- **`CTopBar` setup** (0x14192c720) keeps the widgets:
+  - `+0x80` `DateText`;
+  - `+0x68` the idler;
+  - `+0xb850..` the five speed steps;
+  - listener members for the buttons.
+- **`CTopBar::UpdateDate`** (0x14192f460) does
+  `SetText(DateText, FormatDate(&gamestate->date))`. Callers: the top bar's game state listener
+  (vtable 0x142a8ac90 slot 6) on a date change, and the setup.
+- **`FormatDate`** (0x14057a230): `CGameDate { vtable, int hours @+8 }` at `CGameState +0x460`
+  (so hours at +0x468, the loader's `kSigGameDate` field).
+  - Format: `" %d:00, %d %s, %d"`, with hour = `(h − 43800000) % 24 + 1` and
+    year = `(h − 43800000) / 8760`. 43800000 = 5000 × 8760, so the count is hours since year 0,
+    365-day years.
+  - The loader reads the base from the code.
+- **Widget hide/show idiom** (the pause button refresh 0x1419301d0):
+  - hide: `w->vtable[0x80/8]()`, then `w[+0x75] |= 0x10`;
+  - show: `w[+0x75] &= ~0x10`, then `w->vtable[0x78/8]()`.
+- **The whole time panel:** the pause button refresh starts with
+  `root->FindWindow(&{"time_control_window", 19}, true)`: root window `CTopBar +0x78`, find slot
+  55 (vtable +0x1b8). A window's widget part is at window +0x30. The setup hides the music
+  player's window with the same idiom on that part (0x14192d487: `Hide` at +0x80,
+  `or byte [win+0xa5],0x10`, i.e. +0x30 + 0x75). `hide_time_controls` hides `time_control_window`
+  this way: date, pause buttons, −/+ and the speed steps; the top bar background keeps its empty
+  frame.
+- `CInGameClock` (0x141842bf0) is the optional real-world clock (`localtime`, "%R"), not the game
+  date. Left alone.
+
+## K2 design (agreed with the user, 2026-11-11)
+
+**Script commands** (MODDING.md "Game speed and the date display"):
+
+```
+force_game_speed = { speed = 1-5 days = <n> hours = <n> until = "y.m.d[.h]" lock_pause = yes }
+release_game_speed = yes
+hide_date_display = yes/no
+has_forced_game_speed = yes/no
+```
+
+**Engine hooks, no `.gui` patch.** A `.gui` change cannot be switched at runtime from script.
+
+| Hook | What it does |
+|---|---|
+| `SetGameSpeed` | while locked, any value becomes the locked speed: one choke point for buttons, keys, console and commands |
+| `TogglePause` | while locked with `lock_pause`, a mode-1 call that would pause returns; unpausing, mode 0 (automatic pauses) and the Esc menu pass |
+| `UpdateDate` | after the original, hides or shows `DateText` with the idiom above |
+| `CTopBar` destructor | (RTTI slot 0, `kCodeScalarDeletingDtor`) forgets the top bar |
+
+The loader's own actions run in `OnMainThreadFrame`:
+- the speed request (the console's `RequestGameSpeed`);
+- the unpause (`TogglePause(1)`);
+- the date refresh (re-run `UpdateDate` on the live top bar, so a change shows while paused);
+- the expiry check against the game date.
+
+**Pause and timing:**
+- A lock started while paused unpauses (default 1). A save loaded with a lock stays paused.
+- At the end the speed from before comes back (default 2).
+- Automatic pauses pass (default 3).
+
+**Saves** (default 4): global flags `hoi4_loader_time_lock` and `hoi4_loader_date_hidden`, which
+do nothing without the loader.
+- The lock flag's value = speed + 10 × previous speed + 100 × lock_pause.
+- Its engine day countdown = ⌈remaining hours / 24⌉ + 1. After loading, the end is
+  now + max(1, days − 1) days, so it is rounded to whole days.
+
+**Single player only** (default 5): the effects check `SessionAllowsLocalWrites` taken at game
+entry. A save's flags are ignored in multiplayer. `on_startup` fires inside the original
+game-entered function, before that check, so the effects do nothing there (documented: use an
+event an hour later).
+
+**Cross-checks** (`engine_time.cpp`, the same in `check_code_shapes.py`):
+- **The idler global:** the same in four loads (both console sites), and its object must have the
+  `CInGameIdler` RTTI vtable at use.
+- **TogglePause's slot:** the same in the console's two sites and the top bar's pause click.
+  `TogglePause` and `RequestGameSpeed` read the same observer-check member (+0x6b8).
+- **The speed field:** the same in `SetGameSpeed` and the increase command's tail. That tail
+  reads the loader's gamestate global and jumps to `SetGameSpeed`.
+- **The speed count:** the console's bound (5) = `SetGameSpeed`'s clamp + 1.
+- **The date:** the date field + `FormatDate`'s hours member = `kSigGameDate`'s field (0x468).
+  The base is a multiple of 8760.
+- **The widget idiom:** hide and show agree on the flags byte and the bit (mask = ~bit).
+
+**Thread evidence:** each hook logs once on which thread it runs
+(`time_control: SetGameSpeed runs on thread ...`, also `TogglePause`, `CTopBar::UpdateDate`, and
+the script effects). `SetGameSpeed` asserts the main thread itself. The widget calls happen only
+inside `UpdateDate` (after the game's own `SetText`) or from the frame callback.
+
+## K3 in-game test (to do, single player, 1.19.4.2)
+
+Test mod decisions in the category "hoi4_loader test", guarded by
+`hoi4_loader_feature_time_control`:
+
+1. **Log.** `loader.log` has:
+   - "Time control: 5 speeds, speed +0x4bc, ... TogglePause slot 72, IsPaused slot 94";
+   - the top bar line (DateText +0x80, hide slot 16 / show slot 15, date +0x468, base 43800000);
+   - "Feature time_control (engine tier): active".
+2. **Lock for 2 days at speed 1.**
+   - Speed 1 at once; the speed buttons and +/- don't change it ("speed N refused" logged once).
+   - Space and the pause button don't pause ("the player's pause refused" logged once).
+   - Unpausing after an event popup's automatic pause works.
+   - After 2 in-game days the speed from before comes back ("ended (its time is up)").
+3. **Lock until a date**, set a few days ahead with the decision's date. It ends at that date
+   and hour; compare with the top bar.
+4. **Lock with `lock_pause = no`.** Pausing works; the speed stays.
+5. **Taken while paused.** The game unpauses and runs at the locked speed.
+6. **Release.** Speed from before, pausing works.
+7. **Hide the date.**
+   - The date text disappears, at once also while paused.
+   - It stays hidden as the hours pass.
+   - "Show" brings it back.
+8. **Save and load** with a lock and a hidden date.
+   - Both come back; the game stays paused until unpaused.
+   - "restored from the save" in the log.
+9. **Save without the loader.** The same save, game started without `version.dll`: it loads, runs
+   at normal speeds, the date shows.
+10. **Thread evidence.** The four "runs on thread" lines all say "the main thread".
+
+### K3 results (2026-11-11, first run, new 1936 game as single player)
+
+- **Passed:**
+  - **Step 1.** Both resolver lines are as expected (5 speeds, speed +0x4bc, slots 72 / 94, paused
+    +0x6c1; DateText +0x80, hide 16 / show 15, flags +0x75 bit 0x10, date +0x468, base 43800000).
+    The feature is active, all four commands registered, and the guard says yes.
+  - **Step 4.** `speed = 3 hours = 36 lock_pause = no` (taken at 1936.1.2.4):
+    - locked until 1936.1.3.16;
+    - "speed 2 refused" when the player tried to slow down;
+    - ended at that hour ("its time is up"), back to the previous speed 4.
+  - **Step 7, partly.** The date text is hidden and shown again at once. The black slot, the
+    pause / −/+ buttons and the speed steps stay (screenshot from the user).
+  - **Step 10.** UpdateDate, TogglePause, SetGameSpeed and the script effects all run on the
+    main thread (thread 20656, the frame hook's).
+- **Not run yet:** steps 2, 3, 5, 6, 8 and 9 (pause blocking, until a date, force while paused,
+  release, save/load, save without the loader).
+- **User request after the test:** cover the time panel too. Added `hide_time_controls`
+  (2026-11-11, K1.3 "The whole time panel"; one more SIG, one more CODE shape; global flag
+  `hoi4_loader_time_controls_hidden`). To test:
+  - "Time: hide the time panel": the whole panel goes, at once, also while paused, and stays
+    hidden as the hours pass;
+  - "show" brings it back;
+  - save/load keeps it;
+  - whether Space and numpad +/− still act while it is hidden.
+
+  A cover graphic over the empty frame would need the `.gui` patch API of PR #3 (later).
+
+### K3 results (2026-11-11, second run, with `hide_time_controls`)
+
+- **`hide_time_controls`:** the whole panel hides and shows at once (user: OK).
+- **Step 2, passed.** `speed = 5` until released, pausing blocked (taken at 1936.1.1.13, speed
+  was 1):
+  - the speed buttons and numpad +/− were refused ("speed 4 refused");
+  - pausing was refused ("the player's pause refused").
+- **Step 8, passed for the lock.**
+  - The save loaded with "restored from the save: speed locked at 5".
+  - After loading, the speed change and the pause were refused again.
+  - The panel was shown when saved. Save/load with it hidden: user OK.
+- **Thread evidence again:** everything on the main thread (thread 24192).
+- **Still open:**
+  - step 3 (until a date);
+  - step 5 (force while paused);
+  - step 6 (release; the trigger `has_forced_game_speed`);
+  - step 9 (the save without the loader);
+  - whether Space / numpad +/− act while the panel is hidden *without* a lock.
+

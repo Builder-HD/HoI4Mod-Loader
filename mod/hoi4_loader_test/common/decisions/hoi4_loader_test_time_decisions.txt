@@ -1,0 +1,98 @@
+# Test decisions for hoi4_loader's time_control (MODDING.md "Game speed and the date display",
+# NOTES.md K3). Single player. The "until" decision assumes a new 1936 game (start 1936.1.1.12).
+#
+# Every decision is guarded with hoi4_loader_feature_time_control = yes, so without the loader they
+# are hidden (the game still logs the effects as unknown when parsing this file). Hover a decision
+# to see the effect's tooltip line.
+
+hoi4_loader_time_category = {
+
+	# --- Speed locks -------------------------------------------------------------------------------
+	hoi4_loader_time_lock_days = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_time_control = yes }
+		complete_effect = { force_game_speed = { speed = 1 days = 2 } }
+		ai_will_do = { base = 0 }
+	}
+
+	hoi4_loader_time_lock_until = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_time_control = yes }
+		available = { date < 1936.1.5.18 }
+		complete_effect = { force_game_speed = { speed = 2 until = "1936.1.5.18" } }
+		ai_will_do = { base = 0 }
+	}
+
+	hoi4_loader_time_lock_hours_pause_ok = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_time_control = yes }
+		complete_effect = { force_game_speed = { speed = 3 hours = 36 lock_pause = no } }
+		ai_will_do = { base = 0 }
+	}
+
+	hoi4_loader_time_lock_open = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_time_control = yes }
+		complete_effect = { force_game_speed = { speed = 5 } }
+		ai_will_do = { base = 0 }
+	}
+
+	hoi4_loader_time_release = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_time_control = yes }
+		available = { has_forced_game_speed = yes }
+		complete_effect = { release_game_speed = yes }
+		ai_will_do = { base = 0 }
+	}
+
+	# --- Date display ------------------------------------------------------------------------------
+	hoi4_loader_time_hide_date = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_time_control = yes
+			NOT = { has_global_flag = hoi4_loader_date_hidden }
+		}
+		complete_effect = { hide_date_display = yes }
+		ai_will_do = { base = 0 }
+	}
+
+	hoi4_loader_time_show_date = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_time_control = yes
+			has_global_flag = hoi4_loader_date_hidden
+		}
+		complete_effect = { hide_date_display = no }
+		ai_will_do = { base = 0 }
+	}
+
+	# --- Whole time panel ------------------------------------------------------------------------
+	hoi4_loader_time_hide_controls = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_time_control = yes
+			NOT = { has_global_flag = hoi4_loader_time_controls_hidden }
+		}
+		complete_effect = { hide_time_controls = yes }
+		ai_will_do = { base = 0 }
+	}
+
+	hoi4_loader_time_show_controls = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_time_control = yes
+			has_global_flag = hoi4_loader_time_controls_hidden
+		}
+		complete_effect = { hide_time_controls = no }
+		ai_will_do = { base = 0 }
+	}
+}

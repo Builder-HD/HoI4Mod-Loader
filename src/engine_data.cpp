@@ -689,4 +689,6 @@ int GameDateHours() {
     return gs && g_gameDate ? Rd<int>(gs, g_gameDate) : 0;
 }
 
+uint32_t GameDateOffset() { return g_gameDate; }
+
 }  // namespace Engine

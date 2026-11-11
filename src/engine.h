@@ -209,6 +209,7 @@ bool HaveDivisionCondition();  // CArmy strength / organisation getters
 bool DivisionRatios(void* unit, int64_t* strength, int64_t* org);
 
 int GameDateHours();  // current game date in hours (0 without a game); for diagnostics
+uint32_t GameDateOffset();  // CGameState -> that hour count (0 if unresolved; cross-checks)
 void ResolveProduction();
 bool HaveProduction();  // production lines, equipment database
 // Equipment type or archetype by name token (null if unknown or not loaded yet).
@@ -301,6 +302,44 @@ std::string ArmyName(const void* army);
 // The layout create_army relies on, checked with a country's own data: its army manager carries
 // its tag, and its divisions' handles resolve back to them. False and *why on a mismatch.
 bool ArmySelfCheck(int tag, int* divisions, const char** why);
+
+// --- Time control (time_control; engine_time.cpp, NOTES.md Part K) -----------------------------
+void ResolveTimeControl();
+bool HaveGameSpeed();    // game speed field, its only writer, the speed request, the in-game idler
+bool HavePause();        // the idler's pause toggle and paused getter
+bool HaveDateDisplay();  // the top bar's date update, widget hide/show, the top bar destructor
+bool HaveGameCalendar(); // the game date's hour count and its base (year 0)
+bool HaveTimePanel();    // the top bar's time_control_window (date, pause, speed buttons) can be hidden
+// Queues the four hooks (top bar destructor, date update, speed writer, pause toggle). Call from
+// the feature's init. False if a part is unresolved or a hook could not be queued.
+bool HookTimeControl();
+// Speeds as the UI shows them: 1..GameSpeedCount(). 0 = unknown / no game.
+int GameSpeedCount();
+int GameSpeed();
+bool IsPaused();  // false without a game
+// Main thread, in game: what the speed buttons / the pause button do (single player: applied at
+// once or by the next command run). False if not possible now.
+bool RequestGameSpeed(int speed);
+bool TogglePause();
+// Policies the hooks apply (any thread may set them; main thread reads them):
+//   lock 1..n: every speed change sets this speed instead (0 = off);
+//   blockPause: the player's pause (mode 1: button, Space, console) is refused while running;
+//   automatic pauses (event popups, mode 0) and the Esc menu still pause;
+//   dateHidden: the top bar's date text is hidden;
+//   timePanelHidden: the whole time panel (date, pause and speed buttons) is hidden.
+void SetSpeedLock(int speed, bool blockPause);
+void SetDateHidden(bool hidden);
+void SetTimePanelHidden(bool hidden);
+// Main thread: re-runs the live top bar's date update now (so a change shows while paused).
+bool RefreshDateDisplay();
+// A detour faulted (logged once); the hooks then do what the game does. The feature switches off.
+bool TimeHooksFaulted();
+// Game date in hours <-> year.month.day.hour (365-day years as the game counts, hour 1..24 as the
+// top bar shows it). False on an invalid date or without the calendar.
+bool DateToHours(int year, int month, int day, int hour, int* out);
+bool HoursToDate(int hours, int* year, int* month, int* day, int* hour);
+// Global flag with a value and an engine countdown in days (0 = none). Main/game thread.
+bool SetGlobalFlagValue(int token, short value, short days);
 
 // Fires the on_action like the engine fires on_startup: synced-RNG seed, events, random events
 // and effect. countryTag > 0: ROOT = that country; 0: no scope. name: at most 15 characters.
