@@ -412,7 +412,6 @@ hoi4_loader_army_category = {
 		visible = { hoi4_loader_feature_add_to_army = yes has_country_flag = hoi4_loader_join_prepared }
 		complete_effect = {
 			random_country_division = {
-				limit = { has_template = "Loader Test Infantry" }
 				add_to_army = { leader = HLT_general_c name = "Loader Test Army J" }
 			}
 		}
@@ -425,7 +424,6 @@ hoi4_loader_army_category = {
 		visible = { hoi4_loader_feature_add_to_army = yes has_country_flag = hoi4_loader_join_prepared }
 		complete_effect = {
 			every_country_division = {
-				limit = { has_template = "Loader Test Infantry" }
 				random_select_amount = 3
 				add_to_army = { leader = HLT_general_c }
 			}
@@ -433,6 +431,8 @@ hoi4_loader_army_category = {
 		ai_will_do = { base = 0 }
 	}
 	# Every division in Nassau (Army A's divisions at Frankfurt) joins General B's army (Army B).
+	# Vanilla has no division trigger for a template name (has_template is a country trigger), so
+	# the tests pick any of the country's divisions.
 	# Army A, left without divisions, is disbanded.
 	hoi4_loader_join_nassau = {
 		icon = generic_research
@@ -441,7 +441,6 @@ hoi4_loader_army_category = {
 		complete_effect = {
 			55 = {
 				every_state_division = {
-					limit = { has_template = "Loader Test Infantry" }
 					add_to_army = { leader = HLT_general_b }
 				}
 			}
@@ -455,7 +454,6 @@ hoi4_loader_army_category = {
 		visible = { hoi4_loader_feature_add_to_army = yes has_country_flag = hoi4_loader_join_prepared }
 		complete_effect = {
 			random_country_division = {
-				limit = { has_template = "Loader Test Infantry" }
 				add_to_army = { leader = HLT_no_such_character }
 			}
 		}
@@ -467,7 +465,6 @@ hoi4_loader_army_category = {
 		visible = { hoi4_loader_feature_add_to_army = yes has_country_flag = hoi4_loader_join_prepared }
 		complete_effect = {
 			random_country_division = {
-				limit = { has_template = "Loader Test Infantry" }
 				add_to_army = { leader = HLT_admiral }
 			}
 		}
@@ -479,7 +476,6 @@ hoi4_loader_army_category = {
 		visible = { hoi4_loader_feature_add_to_army = yes has_country_flag = hoi4_loader_join_prepared }
 		complete_effect = {
 			random_country_division = {
-				limit = { has_template = "Loader Test Infantry" }
 				add_to_army = { leader = FRA_jean_de_lattre_de_tassigny }
 			}
 		}
@@ -496,7 +492,6 @@ hoi4_loader_army_category = {
 		}
 		complete_effect = {
 			random_country_division = {
-				limit = { has_template = "Loader Test Infantry" }
 				add_to_army = { leader = HLT_general_b }
 			}
 		}
@@ -514,7 +509,6 @@ hoi4_loader_army_category = {
 		}
 		complete_effect = {
 			random_country_division = {
-				limit = { has_template = "Loader Test Infantry" }
 				add_to_army = { leader = HLT_general_c }
 				add_to_army = { leader = HLT_general_b }
 			}
