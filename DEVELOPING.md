@@ -54,11 +54,13 @@ src/plugin_region_control.cpp, plugin_military_counts.cpp, plugin_army_condition
 src/plugin_production_data.cpp   data trigger features (numeric triggers)
 src/plugin_region_scope.cpp   region_scope feature (strategic region scope blocks, iterators)
 src/plugin_create_army.cpp    create_army feature (create_unit children -> army under a general)
+src/plugin_time_control.cpp   time_control feature (speed lock, pause block, hidden date; saved as flags)
 src/engine_data.cpp           engine access for the data triggers (read-only game state)
 src/engine_scope.cpp          engine access for scope blocks (vanilla iterator templates, child scopes)
 src/engine_army.cpp           engine access for armies (create army, set leader, characters)
 src/plugin_railways.cpp       railways and railway_queue features (downgrade_railway, queue_railway_dismantle)
 src/engine_railway.cpp        engine access for railways (levels on both ends, supply refresh)
+src/engine_time.cpp           engine access for time_control (game speed, pause, top bar date) and its hooks
 src/native_script.h, .cpp     native effect/trigger API: schemas, registration, parsing, docs
 src/native_script_engine.cpp  native API engine binding (vtable clones, registries, Scope)
 src/native_scope_engine.cpp   native API engine binding of scope blocks and iterators
@@ -291,6 +293,23 @@ The details are in NOTES.md, "Threading model".
 
   Another plugin that hooks either one chains through these. Keep any check you add there just
   as cheap.
+
+### Global hooks
+
+Hooks on engine functions that the whole game calls, not just one class. Each detour calls the
+original unchanged while no policy is set; a fault in the loader's part is caught (SEH), logged
+once, and from then on the hooks do what the game does and the feature switches itself off.
+
+| Feature | Function hooked | Called by | What the loader changes |
+|---|---|---|---|
+| `time_control` | `CGameState::SetGameSpeed(speed)` (0x140203f10 in 1.19.4.2) | the set / increase / decrease speed commands, main thread (the game asserts it) | while `force_game_speed` runs: any value becomes the locked speed; otherwise one atomic load |
+| `time_control` | `CInGameIdler::TogglePause(mode)` (vtable slot read from the console command; 0x140e4e0b0) | the pause button and Space (mode 1), the console, `CAutomaticPause` (mode 0); main thread | while the lock blocks pausing: a mode-1 call that would pause returns without doing anything; mode 0 and unpausing pass |
+| `time_control` | `CTopBar::UpdateDate()` (0x14192f460) | the top bar's game state listener on a date change, its setup | after the original: hides or shows the `DateText` widget, and the whole `time_control_window` (found by name through the top bar's root window), with the engine's own hide/show calls (UI, main thread) |
+| `time_control` | `CTopBar` scalar deleting destructor (RTTI vtable slot 0) | the top bar's end | forgets the top bar pointer before the original runs |
+
+The loader's own speed request, unpause and date refresh run from `OnMainThreadFrame`, outside
+the tick. Each hook logs once which thread it runs on (`time_control: ... runs on thread`), the
+evidence that the UI parts stay on the main thread.
 
 ## Smoke test (no game needed)
 

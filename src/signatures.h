@@ -404,6 +404,48 @@ static const size_t kSigRailIconColorizeCall = 0x18, kSigRailIconSetTextCall = 0
 SIG(kSigRailLineList, "48 8B CA E8 ?? ?? ?? ?? 48 8B 90 ?? ?? ?? ?? 4C 8B 72 ?? 48 63 42 ?? 4D 8D 24 C6 4D 3B F4")
 static const size_t kSigRailListConstructionDisp = 0xb, kSigRailListLinesDisp = 0x12, kSigRailListCountDisp = 0x16;
 
+// --- Time control (time_control, NOTES.md Part K; addresses 1.19.4.2, 1.19.3 unchecked) --------
+// Console `gamespeed <0-5>`: n = atoi(arg); if (n > 5) error; paused = idler->IsPaused();
+// if (n == 0) { if (!paused) idler->TogglePause(1); ... }. The bound is the number of speeds.
+// imm8 at +0xc: speeds; +0x13: mov rcx,[rip+idler] (rel32 at +0x16, insn 7); +0x1f: IsPaused
+// vtable disp32; +0x2f: the same idler load again; +0x40: TogglePause vtable disp32. (0x140274878)
+SIG(kSigConsoleSpeedPause, "48 8B 0A E8 ?? ?? ?? ?? 8B F0 83 F8 ?? 0F 87 ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ?? 48 8B 01 FF 90 ?? ?? ?? ?? 85 F6 0F 85 ?? ?? ?? ?? 84 C0 75 ?? 48 8B 0D ?? ?? ?? ?? 48 8B 01 BA 01 00 00 00 FF 90 ?? ?? ?? ??")
+static const size_t kSigConsoleSpeedCountImm = 0xc, kSigConsoleIdlerLoad = 0x13, kSigConsoleIsPausedDisp = 0x1f,
+                    kSigConsoleIdlerLoad2 = 0x2f, kSigConsoleToggleDisp = 0x40;
+// Same command, n > 0: if (paused) idler->TogglePause(1); RequestGameSpeed(idler, n - 1, true).
+// +4: idler load (rel32 at +7); +0x15: TogglePause disp32; +0x22: idler load; E8 at +0x29: the
+// request (refuses for observers / game over and for MP clients, then posts CSetGameSpeedCommand).
+// (0x140274a25)
+SIG(kSigConsoleSpeedSet, "84 C0 74 ?? 48 8B 0D ?? ?? ?? ?? 48 8B 01 BA 01 00 00 00 FF 90 ?? ?? ?? ?? 8D 56 FF 41 B8 01 00 00 00 48 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ??")
+static const size_t kSigConsoleSetIdlerLoad = 4, kSigConsoleSetToggleDisp = 0x15, kSigConsoleSetIdlerLoad2 = 0x22,
+                    kSigConsoleSetRequestCall = 0x29;
+// void CGameState::SetGameSpeed(int speed): clamp to 0..max (imm32 at +0x14), store (disp32 at
+// +0x1f), notify the UI. The only writer of the field; the three speed commands call it on the
+// main thread (ThreadIsMainThread assert). Function start. (0x140203f10)
+SIG(kSigSetGameSpeed, "40 55 48 83 EC 40 4C 89 74 24 30 85 D2 79 04 33 D2 EB 0A B8 ?? 00 00 00 3B D0 0F 4F D0 89 91 ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ?? 48 8B 01 FF 90")
+static const size_t kSigSetGameSpeedMaxImm = 0x14, kSigSetGameSpeedFieldDisp = 0x1f;
+// CIncreaseGameSpeedCommand::Execute tail: SetGameSpeed(gamestate, gamestate->speed + 1) as a
+// tail jmp. +3: gamestate rel32 (insn 7); +0xc: speed field disp32; E9 at +0x27. (0x140f85b86)
+SIG(kSigIncreaseSpeedTail, "48 8B 05 ?? ?? ?? ?? 48 8B CF 8B 90 ?? ?? ?? ?? FF C2 48 8B 5C 24 40 48 8B 6C 24 50 48 8B 7C 24 58 48 83 C4 30 41 5E E9 ?? ?? ?? ??")
+static const size_t kSigIncreaseGameStateRel = 3, kSigIncreaseSpeedDisp = 0xc, kSigIncreaseSetSpeedJmp = 0x27;
+// void CTopBar::UpdateDate(): SetText(this->DateText, FormatDate(&gamestate->date)). Called from
+// the top bar's game state listener when the date changes, and from its setup. Function start;
+// disp32 at +0x10: the DateText widget member. (0x14192f460)
+SIG(kSigTopBarUpdateDate, "40 57 48 83 EC 50 80 3D ?? ?? ?? ?? 00 48 8B B9 ?? ?? ?? ?? 0F 84")
+static const size_t kSigTopBarDateTextDisp = 0x10;
+// The top bar's pause button (and its Space shortcut): this->idler->TogglePause(1) (idler member
+// disp8 at +0x11, TogglePause disp32 at +0x17), then jmp to the pause button refresh at +0x23.
+// (0x14192efc0)
+SIG(kSigTopBarPauseClick, "40 53 48 83 EC 20 48 8B D9 BA 01 00 00 00 48 8B 49 ?? 48 8B 01 FF 90 ?? ?? ?? ?? 48 8B CB 48 83 C4 20 5B E9")
+static const size_t kSigTopBarPauseIdlerDisp = 0x11, kSigTopBarPauseToggleDisp = 0x17, kSigTopBarPauseRefreshJmp = 0x23;
+// CTopBar setup hides a whole window (the music player's): window->widget.Hide(), widget at
+// window + disp8 (+3, again at +7), Hide vtable disp32 at +0xa; or byte [window+flags],bit (disp32
+// at +0x10 = widget + the widget flags byte, imm8 at +0x14); then the next lookup loads the top
+// bar's root window (disp8 at +0x18). (0x14192d487)
+SIG(kSigTopBarHideWindow, "48 8B 46 ?? 48 8D 4E ?? FF 90 ?? ?? ?? ?? 80 8E ?? ?? ?? ?? ?? 48 8B 4F ??")
+static const size_t kSigHideWindowWidgetDisp = 3, kSigHideWindowWidgetDisp2 = 7, kSigHideWindowHideDisp = 0xa,
+                    kSigHideWindowFlagsDisp = 0x10, kSigHideWindowBit = 0x14, kSigHideWindowRootDisp = 0x18;
+
 // --- Code shapes at RTTI-found addresses (numeric triggers, NOTES.md E2) -------------------
 // CODE(name, "..."): checked with SigMatchAt at an address reached through an RTTI vtable, not
 // scanned (so not required to be unique). tools/check_code_shapes.py checks them on exe copies.
@@ -566,6 +608,43 @@ static const size_t kCodeHasCharacterResolveCall = 0x38;
 // country -> its characters (+0x10), find(characters, token, true) (+0x1f).
 CODE(kCodeCountryCharacterLookup, "E8 ?? ?? ?? ?? 48 8B CB E8 ?? ?? ?? ?? 48 8B C8 E8 ?? ?? ?? ?? 8B 54 24 ?? 41 B0 01 48 8B C8 E8 ?? ?? ?? ??")
 static const size_t kCodeCountryCharactersCall = 0x10, kCodeCountryCharacterFindCall = 0x1f;
+
+// --- Time control (time_control, NOTES.md Part K) ------------------------------------------------
+// CInGameIdler::TogglePause(int mode) at the slot the console calls (kSigConsoleSpeedPause): mode 1
+// = the player (button, Space, console), mode 0 = automatic (event popups: CAutomaticPause). Single
+// player: flips the paused byte; multiplayer: posts CPauseGame. Function start.
+CODE(kCodeIdlerTogglePause, "48 89 5C 24 10 48 89 6C 24 20 56 57 41 54 41 55 41 57 48 83 EC 30 8B F2 48 8B D9 48 8B 89 ?? ?? ?? ?? E8")
+static const size_t kCodeIdlerToggleCheckDisp = 0x1e;  // the observer / game-over check's member
+// CInGameIdler::IsPaused(): return this->paused (disp32 at +3).
+CODE(kCodeIdlerIsPaused, "0F B6 81 ?? ?? ?? ?? C3")
+static const size_t kCodeIdlerPausedDisp = 3;
+// RequestGameSpeed(idler, speed 0-based, bool fromPlayer), the console's call target: the same
+// observer / game-over check as TogglePause (idler member disp32 at +0x1d). Function start.
+CODE(kCodeGameSpeedRequest, "48 89 5C 24 10 48 89 6C 24 18 56 57 41 56 48 83 EC 30 45 8B F0 8B F2 48 8B D9 48 8B 89 ?? ?? ?? ?? E8")
+static const size_t kCodeGameSpeedRequestCheckDisp = 0x1d;
+// End of CTopBar::UpdateDate (SigFindIn from its start): lea rcx,[gamestate+date] (disp32 at +3);
+// E8 at +0xa: FormatDate(CGameDate*, out, bool); E8 at +0x15: SetText(widget, text); ret.
+CODE(kCodeTopBarDateTail, "48 81 C1 ?? ?? ?? ?? 41 B0 01 E8 ?? ?? ?? ?? 48 8B D0 48 8B CF E8 ?? ?? ?? ?? 48 83 C4 50 5F C3")
+static const size_t kCodeTopBarDateObjDisp = 3, kCodeTopBarFormatCall = 0xa;
+// FormatDate: the hour count (CGameDate +disp8 at +0x1a) minus the base (imm32 at +0x21) = hours
+// since year 0, 8760 per year (no leap years), shown as " %d:00, %d %s, %d" with hour % 24 + 1.
+CODE(kCodeGameDateFormat, "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 81 EC A0 00 00 00 44 8B 49 ?? 48 8B FA 41 81 E9 ?? ?? ?? ??")
+static const size_t kCodeGameDateHoursDisp = 0x1a, kCodeGameDateBaseImm = 0x21;
+// The pause button refresh (kSigTopBarPauseClick's jmp target) hides one button and shows the
+// other, the engine's idiom for a widget (SigFindIn within 0x200):
+//   hide: w->Hide() (vtable disp32 at +5); or byte [w+flags],bit (disp8 at +0xb, imm8 at +0xc)
+CODE(kCodeWidgetHide, "48 8B 10 FF 92 ?? ?? ?? ?? 80 4B ?? ??")
+static const size_t kCodeWidgetHideDisp = 5, kCodeWidgetFlagsDisp = 0xb, kCodeWidgetHiddenBit = 0xc;
+//   show: and byte [w+flags],~bit (disp8 at +2, imm8 at +3); ...; w->Show() (vtable disp8 at +0x18)
+CODE(kCodeWidgetShow, "80 60 ?? ?? 48 8B 07 66 0F 7F 44 24 20 FF 50 68 48 8B C8 48 8B 10 FF 52 ??")
+static const size_t kCodeWidgetShowFlagsDisp = 2, kCodeWidgetShowMask = 3, kCodeWidgetShowDisp = 0x18;
+// The pause button refresh itself starts by looking up "time_control_window": a string view
+// { lea of the name (rel32 at +0x1b, insn at +0x18), length imm8 at +0x14 }, the top bar's root
+// window (disp8 at +0x2a), its find-window vtable disp32 at +0x43: root->FindWindow(&view, true).
+CODE(kCodeTopBarPauseRefresh, "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 30 48 C7 44 24 28 ?? 00 00 00 48 8D 15 ?? ?? ?? ?? 48 89 54 24 20 48 8B D9 48 8B 49 ?? 48 8D 54 24 20 0F 28 44 24 20 41 B0 01 66 0F 7F 44 24 20 48 8B 01 FF 90 ?? ?? ?? ??")
+static const size_t kCodeRefreshNameLen = 0x14, kCodeRefreshNameLea = 0x18, kCodeRefreshRootDisp = 0x2a,
+                    kCodeRefreshFindDisp = 0x43;
+// The CTopBar destructor (RTTI vtable slot 0) has the kCodeScalarDeletingDtor shape.
 
 #undef CODE
 #undef SIG

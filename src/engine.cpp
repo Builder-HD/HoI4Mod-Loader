@@ -471,6 +471,7 @@ bool Resolve() {
     ResolveScopeBlocks();
     ResolveArmies();
     ResolveRailways();
+    ResolveTimeControl();
 
     Log("Engine: gamestate %s, flags +0x%x, regions +0x%x/+0x%x", g_ppGameState ? SigDescribe(g_ppGameState).c_str() : "-",
         g_flagsOffset, g_regionArrayOffset, g_regionCountOffset);
@@ -538,6 +539,13 @@ bool SetGlobalFlag(int token) {
     void* flags = HaveFlags() ? Flags() : nullptr;
     if (!flags || !token) return false;
     g_flagSet(flags, token, 1, 0);
+    return true;
+}
+
+bool SetGlobalFlagValue(int token, short value, short days) {
+    void* flags = HaveFlags() ? Flags() : nullptr;
+    if (!flags || !token) return false;
+    g_flagSet(flags, token, value, days);
     return true;
 }
 
