@@ -41,11 +41,13 @@ add_library(hoi4_loader SHARED
     src/plugin_production_data.cpp
     src/plugin_region_scope.cpp
     src/plugin_create_army.cpp
+    src/plugin_railways.cpp
     src/plugin_time_control.cpp
     src/engine.cpp
     src/engine_data.cpp
     src/engine_scope.cpp
     src/engine_army.cpp
+    src/engine_railway.cpp
     src/engine_time.cpp
     src/engine.h
     src/lifecycle.cpp

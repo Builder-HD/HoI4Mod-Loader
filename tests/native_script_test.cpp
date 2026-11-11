@@ -187,6 +187,8 @@ int main() {
     CHECK(!register_native_effect(Effect("dup_param", {{"a", ParamType::Int, true}, {"a", ParamType::Key, true}}), "f"),
           "duplicate parameter refused");
     CHECK(!register_native_effect(Effect("bad_param", {{"Region", ParamType::Int, true}}), "f"), "invalid parameter name refused");
+    CHECK(!register_native_effect(Effect("bad_words", {{"levels", ParamType::Int, false, ScopeDefault::None, "All"}}), "f"),
+          "int words must be lower case");
 
     // 2. Valid registrations, loader-side duplicates.
     CHECK(register_native_effect(Effect("set_thing", kRegionName), "feat_a"), "valid block effect queued");
@@ -403,6 +405,23 @@ int main() {
     CHECK(!NativeSetArg(*tp, 0, "a{b}", &err) && err.find("expects a text") != std::string::npos, "text with braces refused");
     CHECK(!NativeSetArg(*tp, 0, "line\nbreak", &err), "text with a control character refused");
     CHECK(!NativeSetArg(*tp, 0, std::string(256, 'x').c_str(), &err), "256-character text refused");
+
+    // Int with words: `levels = all` next to numbers.
+    {
+        Command words{};
+        words.name = "int_words";
+        words.params = {{"levels", ParamType::Int, false, ScopeDefault::None, "all|half"}};
+        ParsedCommand* w = NativeNewParsed(words);
+        CHECK(NativeSetArg(*w, 0, "3", &err) && w->args[0].i == 3 && IntWordIndex(w->args[0].i) == -1, "int next to words");
+        CHECK(NativeSetArg(*w, 0, "all", &err) && IntWordIndex(w->args[0].i) == 0, "word 'all' parsed");
+        CHECK(NativeSetArg(*w, 0, "half", &err) && IntWordIndex(w->args[0].i) == 1, "word 'half' parsed");
+        CHECK(!NativeSetArg(*w, 0, "most", &err) && err.find("integer or all/half") != std::string::npos,
+              "unknown word refused: %s", err.c_str());
+        CHECK(!NativeSetArg(*w, 0, "-2147483648", &err), "integer reserved for words refused");
+        CHECK(NativeSetArg(*w, 0, "-5", &err) && w->args[0].i == -5, "ordinary negative int next to words");
+        CHECK(IntWordIndex(0) == -1 && IntWordIndex(-1) == -1, "numbers are not words");
+        delete w;
+    }
 
     // 5. Validation (required parameters), logged once per command.
     ParsedCommand* missing = NativeNewParsed(*setThing);

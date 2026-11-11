@@ -242,6 +242,167 @@ static const size_t kSigBorderWarManagerDisp = 3, kSigBorderWarNullHandle = 0xa;
 // at +0x1b. (0x140337237)
 SIG(kSigBorderWarArmy, "48 8B 05 ?? ?? ?? ?? 48 89 45 ?? 45 33 C9 4C 8D 44 24 ?? 48 8D 55 ?? 48 8D 4D ?? E8 ?? ?? ?? ?? 48 8B D8")
 static const size_t kSigBorderWarCreateCall = 0x1b;
+// --- Railways (railways, NOTES.md Part H) --------------------------------------------------
+// Addresses in this section are 1.19.4.2 (v1.19.4.2.2da5), the build they were found on.
+// Gamestate setup: new CSupplySystem (E8 at +0) stored at gamestate+[disp32 +0x10] (again at
+// +0x27), then new CRailwayManager (constructor E8 at +0x42) stored at gamestate+[disp32 +0x52]
+// (again at +0x68). (0x140202a40)
+SIG(kSigRailGameStateInit, "E8 ?? ?? ?? ?? 48 8B F8 EB 03 48 8B FD 48 8B 8B ?? ?? ?? ?? 48 85 C9 74 0B 48 8B 01 BA 01 00 00 00 FF 50 08 48 89 BB ?? ?? ?? ?? B9 38 00 00 00 E8 ?? ?? ?? ?? 48 89 44 24 ?? 48 85 C0 74 0D 48 8B C8 E8 ?? ?? ?? ?? 48 8B F8 EB 03 48 8B FD 48 8B 8B ?? ?? ?? ?? 48 85 C9 74 0A 48 8B 01 BA 01 00 00 00 FF 10 48 89 BB ?? ?? ?? ??")
+static const size_t kSigRailSupplyDisp = 0x10, kSigRailSupplyStoreDisp = 0x27, kSigRailManagerCtorCall = 0x42,
+                    kSigRailManagerDisp = 0x52, kSigRailManagerStoreDisp = 0x68;
+// CRailwayManager constructor: sizes its CProvinceRailwayInfo* array (manager+[disp8 +0x21]) to the
+// gamestate's province count (gamestate pointer rip rel32 at +3, length 7; count disp32 at +0xa)
+// and stores the size at manager+[disp8 +0x11]. (0x140f0532e, inside the constructor 0x140f051e0)
+SIG(kSigRailManagerCtor, "48 8B 05 ?? ?? ?? ?? 48 63 A8 ?? ?? ?? ?? 49 63 46 ?? 3B E8 7E ?? 41 B8 01 00 00 00 8B D5 49 8D 4E ?? E8")
+static const size_t kSigRailCtorGameStateRel = 3, kSigRailProvinceCountDisp = 0xa, kSigRailInfoCountDisp = 0x11,
+                    kSigRailInfoArrayDisp = 0x21;
+// CProvinceRailwayInfo::SetRailway(neighbour, level) (0x140f08540), three parts. Neighbour lookup:
+// mov rcx,[rcx+<province> disp8 +3]; ...; E8 at +9 = NeighborIndex(province, id). (0x140f085c1)
+SIG(kSigRailSetNeighbor, "48 8B 49 ?? 48 89 6C 24 ?? E8 ?? ?? ?? ?? 48 63 E8 85 C0 79")
+static const size_t kSigRailProvinceDisp = 3, kSigRailNeighborIndexCall = 9;
+// After the MAX_RAILWAY_LEVEL clamp: per-neighbour levels int[] at info+[disp8 +3] (again at +0x15),
+// the sorted (neighbour, level) pairs at info+[disp8 +0x19], their count at info+[disp8 +0x11].
+// (0x140f0872c)
+SIG(kSigRailSetLevels, "48 8B 47 ?? 41 39 0C 06 7E 04 41 89 0C 06 48 63 57 ?? 4C 8B 4F ?? 4C 8B 57 ?? 4D 03 CE 4C 8B 74 24 ?? 4D 8B C2 4C 8D 1C D5 00 00 00 00 48 85 D2 7E ??")
+static const size_t kSigRailLevelsDisp = 3, kSigRailPairCountDisp = 0x11, kSigRailLevelsAgainDisp = 0x15,
+                    kSigRailPairsDisp = 0x19;
+// The mirror rail_way building at info+[disp8 +3] (stored again at +0x28), created on first use;
+// E8 at +0x32 = CBuilding::SetLevel(building, short level, bool). (0x140f087ef)
+SIG(kSigRailSetMirror, "48 8B 4F ?? 48 85 C9 75 ?? 85 F6 74 ?? 48 8B 5F ?? E8 ?? ?? ?? ?? 48 8B CB 48 8B 90 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 89 47 ?? 48 8B C8 41 B0 01 0F B7 D6 E8")
+static const size_t kSigRailMirrorDisp = 3, kSigRailMirrorStoreDisp = 0x28, kSigRailSetLevelCall = 0x32;
+// int NeighborIndex(province, id): linear search of province+0x70 (stride 0x30, id at +8, count
+// +0x7c); -1 if not a neighbour. Whole function. (0x1414a6290)
+SIG(kSigRailNeighborIndex, "48 63 41 ?? 45 33 C9 85 C0 7E ?? 4C 8B D0 45 8B C1 48 8B 41 ?? 48 83 C0 ?? 0F 1F 80 00 00 00 00 3B 10 74 ?? 41 FF C1 49 FF C0 48 83 C0 ?? 4D 3B C2 7C ?? B8 FF FF FF FF C3")
+// build_railway's path update (0x140f05780) tail: for each province on the path,
+// gamestate(rip rel32 at +3)->[disp32 +0xd] (CSupplySystem)->vtable[disp8 +0x2e](supply, province):
+// marks the province and its rail neighbours dirty in the supply system. (0x140f0597c)
+SIG(kSigRailSupplyNotify, "48 8B 05 ?? ?? ?? ?? 48 8B 1E 48 8B B8 ?? ?? ?? ?? 48 63 46 0C 48 8D 34 83 48 3B DE 74 1A 66 0F 1F 44 00 00 48 8B 07 48 8B CF 8B 13 FF 50 ??")
+static const size_t kSigRailNotifySupplyDisp = 0xd, kSigRailNotifySlotDisp = 0x2e, kSigRailNotifyGameStateRel = 3;
+// The supply system's full refresh (after loading) ends with the railway graphics: ui (rip rel32 at
+// +3, length 7) -> vtable[disp32 +0x11]() -> [disp8 +0x18] -> [disp32 +0x1c] = the railway
+// graphics; Clear(gfx) (E8 at +0x28: every railway piece, the moving trains and their entities),
+// then Rebuild(gfx) (E9 at +0x35: a piece for every province with a railway). Vanilla never
+// removes a railway; after it does, the loader runs the same pair so nothing on the map still
+// refers to a removed piece (NOTES.md H4). (0x140f46dea)
+SIG(kSigRailGfxRefresh, "48 8B 0D ?? ?? ?? ?? 48 85 C9 74 ?? 48 8B 01 FF 90 ?? ?? ?? ?? 48 8B 48 ?? 48 8B 99 ?? ?? ?? ?? 48 85 DB 74 ?? 48 8B CB E8 ?? ?? ?? ?? 48 8B CB 48 83 C4 20 5B E9")
+static const size_t kSigRailGfxUiRel = 3, kSigRailGfxUiSlotDisp = 0x11, kSigRailGfxViewDisp = 0x18,
+                    kSigRailGfxDisp = 0x1c, kSigRailGfxClearCall = 0x28, kSigRailGfxRebuildJmp = 0x35;
+
+// --- Railway construction lines (railways: queued dismantling, NOTES.md H3) -----------------
+// End of CBuildRailwayCommand execute, for the player's country: ui (rip rel32 at +0x10, length 7)
+// -> vtable[disp32 +0x19]() -> Post(that, &event 0x11) (E8 at +0x30): the construction view
+// refreshes now instead of at its next routine update. (0x1411dcf25)
+SIG(kSigRailUiRefresh, "49 8D 4D 28 E8 ?? ?? ?? ?? 84 C0 74 ?? 48 8B 0D ?? ?? ?? ?? 48 8B 01 FF 90 ?? ?? ?? ?? 48 85 C0 74 ?? C7 45 ?? 11 00 00 00 48 8D 55 ?? 48 8B C8 E8")
+static const size_t kSigRailUiRefreshUiRel = 0x10, kSigRailUiRefreshSlotDisp = 0x19, kSigRailUiRefreshPostCall = 0x30;
+static const int kRailUiConstructionChanged = 0x11;
+// CBuildRailwayCommand execute (slot 10): country = TagToCountry(&command.tag) (E8 at +4), then
+// CreateRailwayLine(country->[disp32 +0xc] (construction), path, from, to, flag) (E8 at +0x24).
+// (0x1411dcbba)
+SIG(kSigRailCreateLine, "49 8D 4D ?? E8 ?? ?? ?? ?? 48 8B 88 ?? ?? ?? ?? 49 8D 55 ?? 41 0F B6 45 ?? 88 44 24 20 45 8B 4D ?? 45 8B C6 E8")
+static const size_t kSigRailTagToCountryCall = 4, kSigRailConstructionDisp = 0xc, kSigRailCreateLineCall = 0x24;
+// CRailwayProductionLine::Init(path, from, to) tail: base level at line+[disp8 +6], target at
+// line+[disp8 +9]. (0x141a96142)
+SIG(kSigRailLineInit, "48 8B CE 44 89 7E ?? 89 6E ?? 48 8B 6C 24 ?? 48 83 C4 20 41 5F 41 5E 5E E9")
+static const size_t kSigRailLineBaseDisp = 6, kSigRailLineTargetDisp = 9;
+// CRailwayProductionLine daily progress (vtable slot 24), function start: the link being worked,
+// line+[disp32 +0x21], is reset to -1 first. Hooked. (0x141a944c0)
+SIG(kSigRailLineDaily, "40 55 53 56 57 41 54 41 56 41 57 48 8B EC 48 83 EC 70 8B 3D ?? ?? ?? ?? 48 8D 35 ?? ?? ?? ?? C7 81 ?? ?? ?? ?? FF FF FF FF")
+static const size_t kSigRailLineCurrentDisp = 0x21;
+// Its head: path count line+[disp32 +0xa], manager gamestate+[disp32 +0x11], the line's country
+// line+[disp8 +0x18], the country's tag holder country+[disp32 +0x20] (tag at holder+[disp8
+// +0x2b]), path line+[disp32 +0x3b]; PathUsable(tag*, first, last) E8 at +0x49; if it fails,
+// jmp [vtable+disp32 +0x69] (cancel). (0x141a945cc)
+SIG(kSigRailLineDailyHead, "48 8B 05 ?? ?? ?? ?? 49 63 8E ?? ?? ?? ?? 4C 8B B8 ?? ?? ?? ?? 49 8B 46 ?? 4C 89 7D ?? 48 8B 80 ?? ?? ?? ?? 48 89 45 ?? 48 8D 58 ?? 8D 41 FF 48 89 5D ?? 83 F8 01 7C ?? 49 8B 96 ?? ?? ?? ?? 44 8B 44 8A FC 48 8B CB 8B 12 E8 ?? ?? ?? ?? 84 C0 75 ?? 49 8B 06 49 8B CE 48 83 C4 ?? 41 5F 41 5E 41 5C 5F 5E 5B 5D 48 FF A0 ?? ?? ?? ??")
+static const size_t kSigRailHeadCountDisp = 0xa, kSigRailHeadManagerDisp = 0x11, kSigRailHeadCountryDisp = 0x18,
+                    kSigRailHeadHolderDisp = 0x20, kSigRailHeadTagDisp = 0x2b, kSigRailHeadPathDisp = 0x3b,
+                    kSigRailHeadPathUsableCall = 0x49, kSigRailHeadCancelDisp = 0x69;
+// The per-link control check in the same loop: path line+[disp32 +3]; ProvinceUsable(tag*,
+// province) E8 at +0x14. (0x141a94660)
+SIG(kSigRailLineControl, "49 8B 86 ?? ?? ?? ?? 48 8B CB 8B 74 02 04 4C 63 2C 02 8B D6 E8 ?? ?? ?? ?? 84 C0 0F 84")
+static const size_t kSigRailControlPathDisp = 3, kSigRailControlCall = 0x14;
+// After the link loop: call [vtable+disp8 +0x17], the end-of-day refresh (progress, then the
+// output bookkeeping). The production manager removes the line once slot 25 reports it finished.
+// (0x141a94aef)
+SIG(kSigRailLineAfterDaily, "89 4D ?? 48 89 55 ?? 3B C8 0F 8C ?? ?? ?? ?? 49 8B 06 49 8B CE FF 50 ??")
+static const size_t kSigRailAfterDailySlotDisp = 0x17;
+// In the link loop: the day's output, call [vtable+disp8 +0xf] (the output getter, slot 14 on the
+// checked build; its shape is kCodeRailLineOutput). (0x141a94822)
+SIG(kSigRailLineDailyOutput, "49 8B 06 48 8D 55 E0 45 32 E4 49 8B CE FF 50 ?? 48 8B 38")
+static const size_t kSigRailDailyOutputSlotDisp = 0xf;
+// CRailwayProductionLine progress recompute (called by Init, SetTarget and the daily refresh),
+// function start. Hooked. (0x141a961b0)
+SIG(kSigRailLineProgress, "4C 8B DC 53 56 57 41 54 41 55 48 81 EC 90 00 00 00 45 33 E4 32 DB 38 1D ?? ?? ?? ?? 4C 8B E9 41 8B F4")
+// Its tail: total cost line+[disp8 +3], remaining line+[disp32 +0xd] (saved), done line+[disp8
+// +0x1e], then call [vtable+disp32 +0x25](line, levels still to build) (stores the count the
+// target-change command checks, then refreshes the UI), then jmp SetSpeed(line, speed) (E9 at
+// +0x43): the line's daily progress ("vSpeed"), which slot 14 returns to the daily step.
+// (0x141a9650c)
+SIG(kSigRailLineProgressTail, "49 8B 4D ?? 49 8B C4 48 2B CE 49 89 B5 ?? ?? ?? ?? 48 85 C9 48 0F 4F C1 49 8B CD 49 89 45 ?? 49 8B 45 00 FF 90 ?? ?? ?? ?? 84 DB 49 8B CD 4C 0F 44 E7 49 8B D4 48 81 C4 ?? ?? ?? ?? 41 5D 41 5C 5F 5E 5B E9")
+static const size_t kSigRailTotalDisp = 3, kSigRailRemainingDisp = 0xd, kSigRailDoneDisp = 0x1e,
+                    kSigRailRefreshSlotDisp = 0x25, kSigRailSetSpeedJmp = 0x43;
+// In the same function, per link still to build: LinkSpeed(line, int64* out, province, next, 0) (E8
+// at +0x18): the daily progress on that link. The line's speed is the first such link's; 0 if any
+// link reports less than 1. (0x141a96497)
+SIG(kSigRailLineSpeed, "44 8B 44 24 ?? 48 8D 54 24 ?? 45 8B CB C6 44 24 20 00 49 8B CD 49 03 F6 E8")
+static const size_t kSigRailLinkSpeedCall = 0x18;
+// Building one railway level: Cost(int64* out, level, country->[disp32 +0x13] (tag holder)), E8 at
+// +0x17; the line's country at line+[disp8 +3]. (0x141a96450)
+SIG(kSigRailLineCost, "4D 8B 45 ?? 44 8D 7D 01 41 8B D7 48 8D 4C 24 ?? 4D 8B 80 ?? ?? ?? ?? E8")
+static const size_t kSigRailCostCountryDisp = 3, kSigRailCostHolderDisp = 0x13, kSigRailCostCall = 0x17;
+// The construction queue's railway entry tooltip builder (item, hovered element, out), function
+// start: line = LookupLine(item+[disp8 +0x41]) (E8 at +0x4f); base level 0 -> "RAILWAY_CONSTUCTION_
+// TOOLTIP", else "RAILWAY_UPGRADE_TOOLTIP" (START_LEVEL, TARGET_LEVEL) through Localize. Hooked.
+// (0x141de2200)
+SIG(kSigRailTooltip, "48 89 5C 24 10 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ?? ?? ?? ?? 48 81 EC ?? ?? ?? ?? 0F 29 B4 24 ?? ?? ?? ?? 49 8B F0 4C 8B E2 4C 8B F1 33 C0 89 85 ?? ?? ?? ?? 89 85 ?? ?? ?? ?? 48 83 C1 ?? 39 01 75 09 39 41 04 0F 84 ?? ?? ?? ?? E8")
+static const size_t kSigRailTooltipIdDisp = 0x41, kSigRailTooltipLookupCall = 0x4f;
+// The upgrade text key; its one lea must lie inside the tooltip builder.
+ANCHOR(kAnchorRailUpgradeTooltip, "RAILWAY_UPGRADE_TOOLTIP")
+// The railway queue entry's update (item), function start: line = LookupLine(item+[disp32 +0x23])
+// (E8 at +0x34; the same lookup as the tooltip builder's). Sets the title ("A - B"), the progress
+// bar, the level buttons and the scorched icon. Hooked. (0x141ded950)
+SIG(kSigRailEntryUpdate, "48 89 5C 24 18 55 56 57 41 56 41 57 48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? 4C 8B F1 33 DB 89 5D ?? 48 81 C1 ?? ?? ?? ?? 39 19 75 09 39 59 04 0F 84 ?? ?? ?? ?? E8")
+static const size_t kSigRailEntryIdDisp = 0x23, kSigRailEntryLookupCall = 0x34;
+// In it, the title: SetText(item->[disp32 +3] (title text element), std::string* text) (E8 at
+// +0x1b; the string is the caller's temporary copy). (0x141deda04)
+SIG(kSigRailEntryTitle, "49 8B BE ?? ?? ?? ?? 48 8D 55 ?? 48 8D 4D ?? E8 ?? ?? ?? ?? 48 8D 55 ?? 48 8B CF E8")
+static const size_t kSigRailEntryTitleDisp = 3, kSigRailEntrySetTextCall = 0x1b;
+
+// --- Who may dismantle where (railway_queue game rules, NOTES.md H5) ------------------------
+// CIsSubjectOfTrigger evaluate: country = TagToCountry(&scope tag) (E8 at +4), its diplomacy at
+// country+[disp32 +0x17], relations diplomacy->[disp8 +0x3b][TagIndex(&target) (E8 at +0x30)],
+// IsSubject(relation) (E8 at +0x40): the scope country is a subject of the target. (0x1403fa285)
+SIG(kSigRailSubjectOf, "48 8D 4A 08 E8 ?? ?? ?? ?? 4C 8B C3 48 8D 54 24 ?? 48 8B CF 48 8B B0 ?? ?? ?? ?? 48 8B 07 FF 90 ?? ?? ?? ?? 83 38 00 75 04 33 C0 EB 08 48 8B C8 E8 ?? ?? ?? ?? 48 63 C8 48 8B 46 ?? 48 8B 0C C8 E8")
+static const size_t kSigRailSubjectTagToCountry = 4, kSigRailSubjectDiplomacyDisp = 0x17, kSigRailSubjectTagIndex = 0x30,
+                    kSigRailSubjectRelationsDisp = 0x3b, kSigRailSubjectIsSubject = 0x40;
+// CIsInFactionWithTrigger evaluate: diplomacy country+[disp32 +3], faction diplomacy+[disp32 +0xa]
+// (null: none); same faction = same pointer. (0x1403f911b)
+SIG(kSigRailFaction, "48 8B 88 ?? ?? ?? ?? 48 83 B9 ?? ?? ?? ?? 00 74 ?? 48 8D 4C 24 ?? E8 ?? ?? ?? ?? 48 8B 88 ?? ?? ?? ?? 48 83 B9 ?? ?? ?? ?? 00 74")
+static const size_t kSigRailFactionDiplomacyDisp = 3, kSigRailFactionDisp = 0xa;
+// CBuildRailwayCommand execute: province = gamestate+[disp8 +3] -> vtable[0](id); its controller tag
+// at province+[disp32 +0x16]. (0x1411dca83)
+SIG(kSigRailController, "48 8D 4F 08 48 89 4D ?? 48 8B 01 8B D3 FF 10 48 89 45 ?? 48 8D 88 ?? ?? ?? ?? 44 8B 01 41 8B 55 ??")
+static const size_t kSigRailProvincesDisp = 3, kSigRailControllerDisp = 0x16;
+
+// --- Railway map badges (CRailwayMapIcon: the level circle on each railway segment) ---------
+// Left click, function start: Clickable(icon) (E8 at +0x19: the player may build here, railway
+// construction view), then the segment's province path at icon+[disp32 +0x29] (CPdxArray<int>,
+// count at +0xc). Vanilla: queue an upgrade (Shift: to the maximum). Hooked. (0x141992860)
+SIG(kSigRailIconClick, "48 89 5C 24 08 48 89 6C 24 18 56 57 41 54 41 56 41 57 48 83 EC 30 48 8B F1 E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ?? 4C 8D BE ?? ?? ?? ??")
+static const size_t kSigRailIconClickableCall = 0x19, kSigRailIconPathDisp = 0x29;
+// The badge update, function start (both province objects at icon+[disp32 +0x2e] and +0x3b must
+// exist). Hooked. (0x141992ce0)
+SIG(kSigRailIconUpdate, "48 89 5C 24 10 55 56 57 41 56 41 57 48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? 0F 29 B4 24 ?? ?? ?? ?? 48 8B F9 33 F6 89 B5 ?? ?? ?? ?? 48 39 B1 ?? ?? ?? ?? 0F 84 ?? ?? ?? ?? 48 39 B1 ?? ?? ?? ?? 0F 84")
+// In it, the level text: Colorize(std::string* out, char 'W' or 'O', string_view*) (E8 at +0x18),
+// SetText(icon->[disp32 +0x2b] (text element), that string) (E8 at +0x23), then clear the hidden
+// flag (and byte [element+disp8 +0x31], imm8 +0x32: 0x75 and ~0x10 on the checked build) and call
+// [vtable+disp8 +0x38] (show). (0x141993061)
+SIG(kSigRailIconText, "BA 57 00 00 00 B8 4F 00 00 00 45 3B FE 0F 4F D0 4C 8D 45 ?? 48 8D 4D ?? E8 ?? ?? ?? ?? 48 8B D0 48 8B CB E8 ?? ?? ?? ?? 48 8B 8F ?? ?? ?? ?? 80 61 ?? ?? 48 8B 01 FF 50 ??")
+static const size_t kSigRailIconColorizeCall = 0x18, kSigRailIconSetTextCall = 0x23, kSigRailIconTextDisp = 0x2b,
+                    kSigRailIconFlagsDisp = 0x31, kSigRailIconShownMask = 0x32, kSigRailIconShowSlotDisp = 0x38;
+// FindRailwayLine(path, tag): country(E8 at +3)->[disp32 +0xb] (construction), its lines at
+// +[disp8 +0x12], count +[disp8 +0x16]. (0x14157d37f)
+SIG(kSigRailLineList, "48 8B CA E8 ?? ?? ?? ?? 48 8B 90 ?? ?? ?? ?? 4C 8B 72 ?? 48 63 42 ?? 4D 8D 24 C6 4D 3B F4")
+static const size_t kSigRailListConstructionDisp = 0xb, kSigRailListLinesDisp = 0x12, kSigRailListCountDisp = 0x16;
 
 // --- Time control (time_control, NOTES.md Part K; addresses 1.19.4.2, 1.19.3 unchecked) --------
 // Console `gamespeed <0-5>`: n = atoi(arg); if (n > 5) error; paused = idler->IsPaused();
@@ -347,6 +508,19 @@ CODE(kCodeTargetEffectLimit, "83 B9 8C 00 00 00 00 0F 84")
 // CEveryStateEffect scalar deleting destructor: operator delete(this, size), E8 at +0x21.
 CODE(kCodeScalarDeletingDtor, "48 89 5C 24 08 57 48 83 EC 20 8B DA 48 8B F9 E8 ?? ?? ?? ?? F6 C3 01 74 ?? BA ?? ?? ?? ?? 48 8B CF E8")
 static const size_t kCodeDtorDeleteCall = 0x21;
+
+// CRailwayProductionLine slot 14 (shared getter): *out = this->[disp8 +3], the construction output
+// assigned to the line today (fixed point). (0x140c17400)
+CODE(kCodeRailLineOutput, "48 8B 41 ?? 48 89 02 48 8B C2 C3")
+static const size_t kCodeRailLineOutputDisp = 3;
+// CRailwayProductionLine cancel (the slot kSigRailLineDailyHead jumps to): mov byte [rcx+disp32 +2],1;
+// ret. That byte (saved) makes slot 25 report the line finished. (0x141a944b0)
+CODE(kCodeRailLineCancel, "C6 81 ?? ?? ?? ?? 01 C3")
+static const size_t kCodeRailLineCancelFlagDisp = 2;
+// CRailwayProductionLine slot 25, IsFinished (the production manager deletes a line when it returns
+// true): cancelled, or every link at the target. Hooked. Function start. (0x141a958c0)
+CODE(kCodeRailLineFinished, "40 55 48 83 EC 50 80 3D ?? ?? ?? ?? 00 40 B5 01 48 89 5C 24 ?? 48 89 7C 24 ?? 48 8B F9")
+static const int kRailLineDailySlot = 24, kRailLineFinishedSlot = 25;
 
 // --- Registry layouts ------------------------------------------------------------------------
 // The trigger Register (reached through the has_global_flag stub's jmp): the trigger registry

@@ -38,6 +38,8 @@ Current features:
 | `production_data` | engine (needs `lifecycle`) | `hoi4_loader_plugin_production_data` | `factories_assigned` |
 | `region_scope` | engine (needs `lifecycle`) | `hoi4_loader_plugin_region_scope` | `strategic_region`, `any_`/`every_`/`random_strategic_region` and the region identity triggers, see below |
 | `create_army` | engine (needs `lifecycle`) | `hoi4_loader_plugin_create_army` | `create_army`: spawn divisions as an army under a chosen general, see below |
+| `railways` | engine (needs `lifecycle`) | `hoi4_loader_plugin_railways` | `downgrade_railway`: lower or remove a railway; `has_railway_between` trigger, see below |
+| `railway_queue` | engine (needs `railways`) | `hoi4_loader_plugin_railway_queue` | `queue_railway_dismantle`: dismantling as a construction queue entry, see below |
 | `time_control` | engine (needs `lifecycle`) | `hoi4_loader_plugin_time_control` | `force_game_speed`, `release_game_speed`, `hide_date_display`, `hide_time_controls`, `has_forced_game_speed`: lock the game speed (and the pause) for a while, hide the top bar's date; single player, see below |
 
 On an unknown build the file tier stays on, the engine tier is off, and `loader.log` lists the
@@ -139,6 +141,8 @@ when the loader is missing or a feature is off. Without them, using a loader tri
 | `factories_assigned` | `scripted_triggers/hoi4_loader_feature_production_data.txt` |
 | `strategic_region`, `any_`/`every_`/`random_strategic_region`, `strategic_region_id`, `is_sea_region`, `region_has_state` | `scripted_triggers/hoi4_loader_feature_region_scope.txt` |
 | `create_army` | `scripted_triggers/hoi4_loader_feature_create_army.txt` |
+| `downgrade_railway`, `has_railway_between` | `scripted_triggers/hoi4_loader_feature_railways.txt` |
+| `queue_railway_dismantle` | `scripted_triggers/hoi4_loader_feature_railway_queue.txt` |
 | `force_game_speed`, `release_game_speed`, `hide_date_display`, `hide_time_controls`, `has_forced_game_speed` | `scripted_triggers/hoi4_loader_feature_time_control.txt` |
 
 - **Combinations:** a block that combines features needs each feature's stub and guard, e.g.
@@ -833,6 +837,148 @@ loaded without the loader keeps them (they are ordinary armies).
 **Without the loader:** `create_army` is an unknown effect. The game logs it once per use when
 parsing, and the whole block, `create_unit`s included, does nothing. Guard decisions with
 `hoi4_loader_feature_create_army = yes` (stub: `stubs/common/scripted_triggers/hoi4_loader_feature_create_army.txt`).
+## Lowering railways (`railways`)
+
+Vanilla script can build railways (`build_railway`) but never lower them:
+`remove_building = { type = rail_way }` only changes a hidden building that mirrors the level,
+not the railway itself (NOTES.md Part H). The `railways` feature adds a native effect and a
+trigger:
+
+```
+downgrade_railway = { start_province = 6521 target_province = 6282 }                   # one level
+downgrade_railway = { start_province = 6521 target_province = 6282 levels = 2 }        # two levels
+downgrade_railway = { start_province = 6521 target_province = 6282 levels = all }      # remove it
+downgrade_railway = { start_province = 6521 target_province = 6282 all_routes = yes }  # disconnect
+has_railway_between = { start_province = 6521 target_province = 6282 }                 # trigger
+has_railway_between = { start_province = 6521 target_province = 6282 min_level = 3 }
+```
+
+- **Which links:** the existing railway with the fewest links from `start_province` to
+  `target_province` (province ids from `map/definition.csv`). Every link on it loses `levels`
+  levels (default 1, at least 1). A link that reaches 0 is removed; `levels = all` removes the
+  whole route.
+- **Every route:** `all_routes = yes` removes the shortest route completely, then the next one,
+  until no railway connects the two provinces. That includes detours, which may run far away or
+  through other countries, so use it where the network is known. `levels` is ignored with it.
+- **What is updated:** both ends of each link, each province's `rail_way` building (which
+  `has_railway_level` reads) and the supply system, which recalculates supply and redraws the
+  railway as it does after `build_railway`.
+- **Nothing to lower:** if no railway connects the two provinces (or they are the same), nothing
+  changes and `loader.log` says so.
+- **Construction:** the effect is immediate. A railway construction line on the same links keeps
+  building upwards from the new level.
+- **Tooltip:** "Railway from province 6521 to province 6282 (3 links) loses 1 level(s)." A mod
+  can translate it with the keys `HOI4_LOADER_DOWNGRADE_RAILWAY` (placeholders `$FROM$`, `$TO$`,
+  `$LINKS$`, `$LEVELS$`), `HOI4_LOADER_REMOVE_RAILWAY` (`levels = all`; `$FROM$`, `$TO$`,
+  `$LINKS$`), `HOI4_LOADER_REMOVE_ALL_RAILWAYS` (`all_routes`; the same, `$LINKS$` of the
+  shortest route) and `HOI4_LOADER_DOWNGRADE_RAILWAY_NONE` (`$FROM$`, `$TO$`).
+- **The trigger:** `has_railway_between` is true if any railway route connects the two provinces;
+  with `min_level`, only links of at least that level count ("is there a level 3 line all the
+  way?"). Vanilla's `has_railway_connection` answers the plain question too (and also takes states
+  and `build_only_on_allied`), but has no level. Tooltip keys: `HOI4_LOADER_HAS_RAILWAY_BETWEEN`,
+  `HOI4_LOADER_HAS_RAILWAY_BETWEEN_LEVEL`, `HOI4_LOADER_HAS_NO_RAILWAY_BETWEEN` and
+  `HOI4_LOADER_HAS_NO_RAILWAY_BETWEEN_LEVEL` (`$FROM$`, `$TO$`, `$LEVEL$`). Put the guard in the
+  same AND block: without the loader it is an unknown trigger.
+- **Scope:** any. The provinces are always written explicitly.
+- **Guard:** `hoi4_loader_feature_railways = yes` (ship the stub). Without the loader the effect is
+  an unknown effect and does nothing.
+- **Self-check:** on every game entry the loader compares each stored railway link with its
+  other end. On a mismatch (e.g. a game patch moved the data) the feature switches itself off,
+  its guard and flag read as missing, and `loader.log` names the first bad link.
+- **Multiplayer:** the effect only reads and writes game state and picks the path
+  deterministically, so it runs the same on every machine; all players need the loader.
+- **Game version:** the railway signatures were found on 1.19.4.2. They are not yet checked on the
+  listed 1.19.3 builds; there the feature may report missing signatures and stay off.
+
+### Dismantling through the construction queue (`railway_queue`)
+
+```
+queue_railway_dismantle = { start_province = 6521 target_province = 6282 }             # one level
+queue_railway_dismantle = { start_province = 6521 target_province = 6282 levels = all }  # all of it
+```
+
+- **What it does:** adds an entry to the **scope country's** construction queue (railway tab, at
+  the end of the queue) for the same path `downgrade_railway` would take. The entry lowers the
+  links one level at a time, in path order, down to the path's highest level minus `levels`
+  (default 1); links already at or below that stay as they are.
+- **Cost and time:** each level costs 30% of what building that level costs (the game's own
+  railway cost, with the country's modifiers), so with the same factories it takes 30% of the
+  time. Factories are assigned to it like to any construction. A mod can change the share with a
+  game rule, see "Dismantling cost" below.
+- **In the queue:** its progress bar is filled from the dismantling cost (how the entry's level
+  text looks is not checked in game yet). Cancelling it works as for any line and keeps what was
+  dismantled so far.
+- **Don't use the queue's level buttons on it:** the engine raises the target back to at least the
+  starting level, which turns the entry into a normal railway line that rebuilds lowered links up
+  to that level.
+- **Stops by itself:** like a railway being built, if the path is no longer usable (lost control
+  of a province on it), the entry is cancelled.
+- **Saves:** the entry is saved with the game. Without the loader the game sees a railway line
+  whose target is below the railway, and finishes it the next day without changing anything
+  (expected from the engine's code; the in-game check is still open, NOTES.md H3).
+- **If `railways` switches itself off** (its self-check on game entry fails), `railway_queue` goes
+  off with it for the rest of the session. Entries already in the queue **pause** (no progress,
+  not finished) and stay in the queue and in the save, so they carry on in a later session where
+  the feature works. Nothing else changes railways meanwhile, and the map badges are vanilla.
+- **Where the country may not dismantle:** `queue_railway_dismantle` still adds the entry, but its
+  first daily step cancels it (see "Where the player may dismantle" below). The effect's tooltip
+  then adds a red line (`HOI4_LOADER_QUEUE_RAILWAY_DISMANTLE_NOT_ALLOWED`) and `loader.log` says so
+  when it runs.
+- **Scope:** country. **Guard:** `hoi4_loader_feature_railway_queue = yes` (ship the stub). The
+  feature needs `railways` and has its own guard, so a game update that breaks only the queue
+  signatures leaves `downgrade_railway` working.
+- **Tooltip** key: `HOI4_LOADER_QUEUE_RAILWAY_DISMANTLE` (`$FROM$`, `$TO$`, `$LINKS$`, `$LEVEL$`).
+- **The entry's own tooltip** in the construction queue is vanilla's "Upgrading ... railways ... to
+  level ...". If the loaded localisation defines `HOI4_LOADER_RAILWAY_DISMANTLE_TOOLTIP`, dismantle
+  entries use it instead (other railway entries keep the vanilla text). Same placeholders as
+  vanilla's `RAILWAY_UPGRADE_TOOLTIP`: `$START_LEVEL$`, `$RAILWAY_NAME$`, `$TARGET_LEVEL$`.
+  ```yaml
+   HOI4_LOADER_RAILWAY_DISMANTLE_TOOLTIP:0 "§RDismantling§! level $START_LEVEL|H$ railways in $RAILWAY_NAME|H$ to level $TARGET_LEVEL|H$"
+  ```
+  Without the key the vanilla upgrade text shows. `loader.log` says which on first use. The
+  rules-only mod (`mod/hoi4_loader_railway_rules`) defines it.
+- **On the map (single player):** in the railway construction view, hold **Alt+Shift**: the
+  level circle on every railway segment you may dismantle shows vanilla's removal cross (the one
+  on the state view's buildings; a red **X** if the text icon cannot be used). **Alt+Shift+click**
+  it to add one dismantle level for that segment to the construction queue; click again for
+  another level (the same entry goes one level deeper, down to 0). Vanilla reads three keys on
+  those circles: Shift (upgrade to the maximum level), Ctrl (first in the queue) and Alt (last in
+  the queue). Only Alt+Shift+click (vanilla: maximum level, last in the queue) on a circle you may
+  dismantle is taken over; every other combination, and Ctrl+Alt+Shift, stays vanilla. In
+  multiplayer the click is ignored (a click happens on one machine only; it would desync), and
+  `loader.log` says so once.
+- **Where the player may dismantle** (the X, Alt+Shift+click, and every day for a queued entry): every
+  province of the segment must be controlled by the player's country, or by a country these
+  global flags allow:
+
+  | Global flag | Also allowed |
+  |---|---|
+  | `hoi4_loader_railway_dismantle_allies` | members of the country's faction |
+  | `hoi4_loader_railway_dismantle_subjects` | the country's subjects |
+  | `hoi4_loader_railway_dismantle_overlord` | the country's overlord |
+
+  A queued entry is cancelled (what was dismantled stays dismantled) once that no longer holds,
+  e.g. a province changes hands or an alliance ends. The usual way to set the flags is a game
+  rule per flag; the rules-only mod `mod/hoi4_loader_railway_rules` ("HOI4 Loader Railway Rules")
+  has them (`common/game_rules/hoi4_loader_railway_rules.txt`) and sets the flags at game start
+  (`hoi4_loader_railway_rules_on_actions.txt`). Script may also
+  set or clear them at any time. The effects (`downgrade_railway`, `queue_railway_dismantle`) are
+  not limited by them: script decides where it uses those.
+- **Dismantling cost:** 30% of the building cost per level by default. A global flag
+  `hoi4_loader_railway_dismantle_cost_<percent>` (0 to 1000, e.g. `..._cost_50` for half) changes
+  it for every queued dismantle, Alt+Shift+click and `queue_railway_dismantle` alike; with several set,
+  the most recently set one counts. It is read every day, so an entry already in the queue
+  follows a change (its progress so far is kept, capped at the new total). The rules-only mod has
+  a game rule "Cost" (10, 20, 30, 50, 75 or 100%) that sets the flag at game start; it is last in the
+  rules' own "Dismantle Railways" group (`group = "RULE_GROUP_HOI4_LOADER_RAILWAY_DISMANTLE"`, a
+  new group needs only that string and a localisation key for its header).
+  `downgrade_railway` is immediate and has no cost.
+- **Railway entries' titles** ("Berlin - Stettin") start with a marker: vanilla's red down triangle
+  text icon (`£decrease_texticon£`) for dismantling, its green up triangle (`£increase_texticon£`)
+  for building and upgrading. A mod can replace them by defining
+  `HOI4_LOADER_RAILWAY_DISMANTLE_PREFIX` / `HOI4_LOADER_RAILWAY_BUILD_PREFIX` (the text goes in
+  front of the title; include the trailing space). Without them the loader's built-in markers
+  show; no mod needs to define anything for that.
 
 ## Game speed and the date display (`time_control`)
 

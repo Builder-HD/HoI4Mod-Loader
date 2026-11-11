@@ -67,6 +67,17 @@ int ChoiceIndex(const char* choices, const char* text) {
     return -1;
 }
 
+// The choice at `index` in "a|b|c", or "".
+std::string ChoiceText(const char* choices, int index) {
+    for (const char* p = choices; p && *p && index >= 0; --index) {
+        const char* bar = strchr(p, '|');
+        if (index == 0) return bar ? std::string(p, bar) : std::string(p);
+        if (!bar) break;
+        p = bar + 1;
+    }
+    return "";
+}
+
 std::string CheckParams(const std::vector<ParamSpec>& params) {
     if (params.size() > kMaxParams) return "at most 8 parameters";
     for (size_t i = 0; i < params.size(); ++i) {
@@ -74,7 +85,7 @@ std::string CheckParams(const std::vector<ParamSpec>& params) {
         if (!ValidIdentifier(p.name)) return "parameter names must be 1-64 characters of a-z 0-9 _";
         for (size_t j = 0; j < i; ++j)
             if (strcmp(p.name, params[j].name) == 0) return std::string("duplicate parameter '") + p.name + "'";
-        if (p.type == ParamType::Choice) {
+        if (p.type == ParamType::Choice || (p.type == ParamType::Int && p.choices)) {
             if (!p.choices || !*p.choices) return std::string("choice parameter '") + p.name + "' needs choices";
             for (const char* c = p.choices; *c; ++c)
                 if (!((*c >= 'a' && *c <= 'z') || (*c >= '0' && *c <= '9') || *c == '_' || *c == '|'))
@@ -166,6 +177,12 @@ std::string ParamUsage(const ParamSpec& p) {
         return c;
     }
     if (p.type == ParamType::Country && p.choices) return "<country>/any";
+    if (p.type == ParamType::Int && p.choices) {
+        std::string c = std::string("<int>/") + p.choices;
+        for (char& ch : c)
+            if (ch == '|') ch = '/';
+        return c;
+    }
     return std::string("<") + TypeName(p.type) + ">";
 }
 
@@ -649,6 +666,7 @@ std::string NativeScriptDocs() {
                 for (const ParamSpec& p : c->params) {
                     s += std::string("  - `") + p.name + "`: " + TypeName(p.type);
                     if (p.type == ParamType::Choice) s += " (" + ParamUsage(p) + ")";
+                    if (p.type == ParamType::Int && p.choices) s += " (a number or " + ParamUsage(p).substr(6) + ")";
                     if (p.type == ParamType::Country)
                         s += p.choices ? " (tag, THIS, ROOT, FROM, PREV or any)" : " (tag, THIS, ROOT, FROM or PREV)";
                     if (p.reserved) s += ", reserved: not supported yet (a parse error)";
@@ -714,11 +732,19 @@ bool NativeSetArg(ParsedCommand& pc, size_t index, const char* text, std::string
     }
     switch (spec.type) {
         case ParamType::Int: {
+            int word = spec.choices ? ChoiceIndex(spec.choices, text) : -1;
+            if (word >= 0) {
+                v.i = kIntWord0 + word;
+                break;
+            }
             char* end = nullptr;
             errno = 0;
             long n = strtol(text, &end, 10);
-            if (!*text || *end || errno == ERANGE || n < INT_MIN || n > INT_MAX) {
-                *error = std::string("'") + spec.name + "' expects an integer, got '" + text + "'";
+            // With words, the lowest integers stand for them, so script cannot write those.
+            long lowest = spec.choices ? (long)kIntWord0 + 64 : (long)INT_MIN;
+            if (!*text || *end || errno == ERANGE || n < lowest || n > INT_MAX) {
+                *error = std::string("'") + spec.name + "' expects an integer" +
+                         (spec.choices ? " or " + ParamUsage(spec).substr(6) : std::string()) + ", got '" + text + "'";
                 return false;
             }
             v.i = (int)n;
@@ -1057,7 +1083,10 @@ std::string NativeTooltip(const ParsedCommand* pc, const void* engineScope, bool
         if (!pc->args[i].present) continue;
         s += std::string(" ") + c.params[i].name + "=";
         switch (c.params[i].type) {
-            case ParamType::Int: s += std::to_string(pc->args[i].i); break;
+            case ParamType::Int:
+                s += IntWordIndex(pc->args[i].i) >= 0 ? ChoiceText(c.params[i].choices, IntWordIndex(pc->args[i].i))
+                                                      : std::to_string(pc->args[i].i);
+                break;
             case ParamType::Bool: s += pc->args[i].b ? "yes" : "no"; break;
             default: s += pc->args[i].s; break;
         }

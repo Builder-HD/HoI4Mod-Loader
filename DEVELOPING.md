@@ -32,7 +32,8 @@ Or in Visual Studio: **File > Open > Folder...**, pick this folder, choose `x64-
    OneDrive often `C:\Users\<you>\OneDrive\Documents\...`):
    - `mod\hoi4_loader_test.mod` -> `...\mod\hoi4_loader_test.mod` (the launcher may rewrite its `path`)
    - `mod\hoi4_loader_test\`    -> `...\mod\hoi4_loader_test\`
-3. Enable **HOI4 Loader Test** in the launcher playset.
+   - the same for `hoi4_loader_railway_rules` (the railway game rules, without decisions)
+3. Enable **HOI4 Loader Test** and **HOI4 Loader Railway Rules** in the launcher playset.
 
 ## Layout
 
@@ -57,6 +58,8 @@ src/plugin_time_control.cpp   time_control feature (speed lock, pause block, hid
 src/engine_data.cpp           engine access for the data triggers (read-only game state)
 src/engine_scope.cpp          engine access for scope blocks (vanilla iterator templates, child scopes)
 src/engine_army.cpp           engine access for armies (create army, set leader, characters)
+src/plugin_railways.cpp       railways and railway_queue features (downgrade_railway, queue_railway_dismantle)
+src/engine_railway.cpp        engine access for railways (levels on both ends, supply refresh)
 src/engine_time.cpp           engine access for time_control (game speed, pause, top bar date) and its hooks
 src/native_script.h, .cpp     native effect/trigger API: schemas, registration, parsing, docs
 src/native_script_engine.cpp  native API engine binding (vtable clones, registries, Scope)
@@ -280,6 +283,16 @@ The details are in NOTES.md, "Threading model".
   write, cache or allocate ("Trigger performance" above).
 - **Example:** `region_names` does exactly this. Its flag hooks only set dirty bits; the rescan
   runs from `OnMainThreadFrame`.
+- **Global hooks (shared engine functions):** `railway_queue` hooks two functions the whole UI
+  uses, so every plugin's text goes through them:
+  - `Localize` (localisation lookup): swaps `RAILWAY_UPGRADE_TOOLTIP` for the dismantle key only
+    while a thread-local flag is set (the railway queue entry's tooltip is being built); otherwise
+    one compare and a pass-through.
+  - `SetText` (a text element's text): prefixes a marker only for the one title element recorded
+    by the railway queue entry's update (thread-local); otherwise one pointer compare.
+
+  Another plugin that hooks either one chains through these. Keep any check you add there just
+  as cheap.
 
 ### Global hooks
 

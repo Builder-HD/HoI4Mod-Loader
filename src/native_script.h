@@ -22,7 +22,11 @@
 // names the evaluate callback looks up without allocating (equipment names). Text: free text,
 // quoted in script if it has spaces (army names); 1-255 bytes, no braces or control characters;
 // Args::key = the text.
+// Int with choices: a number, or one of the words in ParamSpec::choices ("all"). A word reads as
+// Args::i = kIntWord0 + its index; IntWordIndex tells them apart (-1 for a number).
 enum class ParamType { Int, Bool, Key, Country, Choice, Token, Text };
+enum : int { kIntWord0 = INT32_MIN };
+inline int IntWordIndex(int v) { return v >= kIntWord0 && v < kIntWord0 + 64 ? v - kIntWord0 : -1; }
 enum class CommandKind { Effect, Trigger };
 enum class Form { Value, Block };          // name = <value>   |   name = { key = value ... }
 
@@ -61,7 +65,7 @@ struct ParamSpec {
     ParamType type;
     bool required;     // must be written in script (false when fromScope is set)
     ScopeDefault fromScope = ScopeDefault::None;
-    const char* choices = nullptr;  // Choice: "a|b|c". Country: "any" also accepts `any`.
+    const char* choices = nullptr;  // Choice: "a|b|c". Country: "any" also accepts `any`. Int: words.
     // Declared but not supported yet: writing it is a parse error ("not supported yet"), so the
     // name stays reserved for a later version instead of reading as a typo.
     bool reserved = false;

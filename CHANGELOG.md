@@ -59,6 +59,71 @@ A–F; NOTES.md has the findings and test results behind each.
 - **Native API:** effect blocks (`register_native_effect_block`), whose children run inside the
   plugin's execute (their tooltip callback can hide the children's lines), and a `Text`
   parameter type for free text such as army names.
+- **`railways` feature (engine tier)** with the native effect `downgrade_railway = {
+  start_province = A target_province = B levels = N }`: lowers every link of the existing railway
+  with the fewest links between A and B, on both ends, with the rail_way buildings and the supply
+  system updated as the engine does when it builds one. Vanilla script can only raise railways.
+  - A self-check on game entry compares every stored link with its other end; on any mismatch
+    the feature switches itself off.
+  - 7 new signatures (51 in total). They were found on 1.19.4.2, which is not a listed build;
+    on 1.19.3 they are unchecked (NOTES.md Part H).
+  - Test mod: a "HOI4 Loader: Railways" category with downgrade, remove, no-path and rebuild
+    decisions on the Brandenburg to West Prussia railway.
+  - `levels = all` removes the whole route; `all_routes = yes` removes route after route until no
+    railway connects the two provinces. `queue_railway_dismantle` takes `levels = all` too.
+  - Native trigger `has_railway_between = { start_province target_province min_level }`: any
+    railway route between two provinces, optionally only over links of at least `min_level`.
+    Test mod: "remove every route" and "level 3 or 4 connection?" decisions.
+  - Dismantling cost is now 30% of building by default (was a third) and follows a global flag
+    `hoi4_loader_railway_dismantle_cost_<percent>`, set from a game rule "Cost" (10 to 100%).
+  - **Rules-only mod** "HOI4 Loader Railway Rules" (`mod/hoi4_loader_railway_rules`, in the
+    release zip): the four railway game rules moved out of the test mod, so they can be used
+    without its decisions. They have their own "Dismantle Railways" group, the three territory
+    rules first and Cost last. The mod also has the dismantle entry's "Dismantling" tooltip text.
+  - **Fixed:** without a mod defining the title marker keys, railway entries showed
+    "£decrease_texticon£" as text instead of the triangle: the engine converts the "£" icon
+    delimiter when it loads localisation, so the built-in markers now take it from vanilla's
+    `TRIGGER_FULLFILLED_PREFIX` ("£trigger_yes£"); without it titles stay unmarked.
+  - Native script API: an `Int` parameter can accept words next to numbers (`ParamSpec::choices`,
+    read with `IntWordIndex`).
+- **`railway_queue` feature (engine tier, needs `railways`)** with the native effect
+  `queue_railway_dismantle`: the same lowering as an entry in the scope country's construction
+  queue, one level at a time, each level at a third of the cost of building it.
+  - The entry is a railway construction line whose target is below its starting level; hooks on
+    the line's daily step, progress and finished check run it. Normal railway lines are unchanged.
+  - 10 more signatures (61 in total) and 3 code shapes (20); `tools/check_code_shapes.py` checks
+    the new shapes.
+  - Test mod: "queue dismantling one level" and "queue removing it" decisions.
+  - The queue entry's tooltip says "Dismantling" when a mod defines
+    `HOI4_LOADER_RAILWAY_DISMANTLE_TOOLTIP` (hooks on the entry's tooltip builder and on
+    Localize; one more signature and one anchor), and railway entries' titles start with a red down triangle (dismantling) or a green up triangle (building, upgrading) (hooks on the entry update and SetText; two more signatures).
+  - **Alt+Shift on the railway map:** in the railway construction view, holding Alt+Shift shows a
+    red X in each railway segment's level circle; Alt+Shift+click queues one dismantle level for
+    that segment, a further click deepens it (single player only). Four more signatures. (First
+    Shift alone, which took over vanilla's Shift+click upgrade to the maximum level; Alt+Shift
+    only takes over vanilla's "maximum level, last in the queue".)
+  - **Fixed a crash** after a railway was removed (seen after loading a save): the railway graphics
+    (pieces, trains, bridges) are now cleared and rebuilt after every removal, as the game does after
+    loading. One more signature.
+  - A queued or deepened dismantle shows in the construction queue at once (the construction view
+    gets the build command's refresh event). One more signature.
+  - **Where the player may dismantle:** every province of the segment must be controlled by the
+    player's country, or (per global flag) by a faction member, a subject or the overlord. The test
+    mod sets the flags from three game rules. A queued entry is cancelled once that no longer holds.
+    Three more signatures, 74 in total.
+  - **After review (PR #2):**
+    - When `railways` switches itself off (failed self-check), `railway_queue` goes off with it.
+      Queued dismantle entries pause (no progress, not finished, kept in the queue and the save),
+      nothing changes railways any more, and the badges are vanilla.
+    - The railway graphics rebuild runs only on the main thread (deferred otherwise). The first
+      daily step logs its thread as evidence.
+    - The output getter's slot and the badge's hidden flag are read from the code (one more
+      signature; the badge signature now wildcards those bytes).
+    - The badge shows vanilla's removal cross (`GFX_cancel_conversion_button`) instead of a red X
+      (the X stays as the fallback).
+    - `queue_railway_dismantle` on a path the country may not dismantle logs it, and its tooltip
+      adds a red line (`HOI4_LOADER_QUEUE_RAILWAY_DISMANTLE_NOT_ALLOWED`).
+    - NOTES: the railway findings are now Part H (Part G is `create_army`).
 
 ## 0.5.0-beta (2026-10-18), script version 3
 

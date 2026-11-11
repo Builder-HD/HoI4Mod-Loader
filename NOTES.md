@@ -3244,6 +3244,293 @@ the loader has been tested in multiplayer yet (README). One session also covers 
 **Pass:** steps 1-8 as described, no OOS, no crash. Then MODDING.md's "Not tested in
 multiplayer yet" for `create_army` and the README's multiplayer note can be updated.
 
+# Part H: railways (`downgrade_railway`)
+
+## H1 findings (1.19.4.2 `v1.19.4.2.2da5` in Ghidra 12.2; addresses for orientation only)
+
+Static analysis only; nothing here was observed at runtime yet.
+
+### Storage
+
+- `CRailwayManager` at gamestate+0x3e0 (constructed in the gamestate setup 0x140202a40, right after
+  `CSupplySystem` at gamestate+0x3d8). Its `CProvinceRailwayInfo*` array (+0x08, size +0x14) is
+  indexed by province id and sized to the gamestate's province count (+0x2bc).
+- `CProvinceRailwayInfo` (0x70 bytes, created on demand by 0x140f05530):
+  - +0x08 the map province (neighbours at +0x70, stride 0x30, id at +8, count +0x7c; the
+    engine's `NeighborIndex(province, id)` 0x1414a6290 searches them);
+  - +0x18 a `rail_way` building (created on first use) that mirrors the railway level;
+  - +0x20 `_RailwayLevelsToNeighbors`, int per neighbour index;
+  - +0x38 sorted `{ int neighbour, int level }` pairs, count +0x44, only levels > 0
+    (the loader 0x140f07ed0 skips 0 when reading a save);
+  - +0x50 `RailwaysInConstruction`, sorted 16-byte `{ neighbour, pad, int64 progress }`.
+- Every railway is stored on both ends; every engine path updates both.
+
+### Engine functions: all raise only
+
+- `SetRailway(info, neighbour, level)` 0x140f08540: asserts `Level > 0`, stores
+  max(current, level) clamped to `NSupply::MAX_RAILWAY_LEVEL`, updates the pair and sets the mirror
+  building's level (`CBuilding::SetLevel` 0x141163f20) to the new level.
+- `AddRailwayLevel(info, neighbour, delta, clearConstruction)` 0x140f055b0; the path variants
+  0x140f05780 (`build_railway`, CBuildRailwayEffect slot 13 0x1403663e0) and 0x140f08840 (loading
+  `map/railways.txt`) both end with `gamestate->supply->vtable[3](province)` per path province.
+- `CSupplySystem` slot 3 (0x140f46c80): looks the province up and marks it and its railway
+  neighbours dirty (0x140f41950 / 0x140f41ae0). The supply system keeps its own per-province
+  `has_rail` / `province_dirty_railway` state (its OOS checksum 0x140f42ad0 lists them), so this
+  call is required after any change.
+- `remove_building` (CRemoveBuildingEffect slot 13 0x140327740) calls `SetLevel(level - 1)` on the
+  mirror building only: the levels and pairs keep the railway, which is why it changes nothing.
+
+### Construction (for a later queued dismantle)
+
+- `CBuildRailwayCommand` execute (slot 10, 0x1411dc890): `from = min(level on the path)`; nothing
+  if the target is not above it; else `CreateRailwayLine(country+0xf68, path, from, to, flag)`
+  0x140ed1780 (allocates a 0xb0-byte `CRailwayProductionLine`, base level +0x78, target +0x7c,
+  path +0x88 / count +0x94).
+- Daily progress: `CRailwayProductionLine` slot 24 (0x141a944c0) works the first link below the
+  target through `AddConstructionProgress` (0x140f059d0, cost `((level+1) * per_level_extra_cost +
+  base_cost) * 100000`), carries overflow to the next link, completes the line when none is left.
+- `CChangeRailwayConstructionLeveLCommand` (slot 10 0x1411df7d0 -> 0x141a93ce0) clamps the target
+  to `[base, MAX]`; that is the UI's "already at current level".
+
+## H2: `downgrade_railway`
+
+- **Path:** breadth first over links with level > 0, neighbours in the pair order, so the path
+  with the fewest links is the same on every machine. The search uses per-thread work arrays
+  (grown once, reset by a generation stamp), so the trigger `has_railway_between` can run it from
+  AI threads without allocating; `min_level` only skips links below that level.
+- **All routes:** `all_routes = yes` repeats "find the shortest route, remove it completely" until
+  none is left (each round removes at least one link), then refreshes supply and graphics once.
+- **Lowering one end:** `levels[NeighborIndex]` = new level; the pair updated, or erased (memmove,
+  count - 1) at 0; the mirror building set to the highest remaining level of that province (so
+  `has_railway_level` follows). Construction progress (+0x50) is left alone.
+- **Refresh:** `CSupplySystem` slot 3 once per affected province, as `build_railway` does.
+- **Resolution** (7 signatures, engine_railway.cpp): offsets are read from the instructions and
+  cross-checked between sites (gamestate global in two places, the supply offset from the setup
+  and from the refresh, each SetRailway field read and written, the three SetRailway parts in one
+  function, the neighbour lookup called there). The manager, supply system and info objects are
+  checked against their RTTI vtables before every use.
+- **Self-check** on game entry: every stored pair must match the level array and its other end
+  (up to 2000 links); otherwise the feature deactivates.
+
+### To verify in game
+
+1. A 1936 save: "lower by one level" on Brandenburg (6521) to West Prussia (6282) shows the
+   railway one level thinner in the logistics map mode; `loader.log` says 3 links lowered.
+2. "Remove it": the railway disappears; supply in the area changes as it would without it.
+3. Save and load: the change persists and the self-check passes.
+4. `has_railway_connection` (the decisions' `available`) turns false after removal.
+5. "Rebuild": vanilla `build_railway` restores it.
+6. The signatures on 1.19.3 (`tools/check_signatures.py` on both listed builds).
+
+### In-game results (2026-11-09, 1.19.4.2 as a local test entry in `loader_config.ini`)
+
+- **Startup:** every railway field resolved to the H1 offsets; `downgrade_railway` registered;
+  self-check passed (2001 links consistent on both ends).
+- **Effect:** "lower by one" lowered the 3 links of 6521-6282 each use; "remove it" took the
+  railway off the map (Berlin to Stettin); "no path" changed nothing and logged it; after a
+  removal or rebuild the shortest remaining railway can have more links (4 once), as designed.
+- **Save and load:** the removed railway stays removed after loading.
+- **Not yet checked:** supply values before and after, `has_railway_connection` turning false,
+  multiplayer, and 1.19.3 (item 6).
+
+## H3: `queue_railway_dismantle` (construction queue)
+
+### Findings (1.19.4.2)
+
+- **Create:** `CreateRailwayLine(country->construction (+0xf68), CPdxArray<int>* path, from, to,
+  insert)` 0x140ed1780 allocates the line, `Init` (0x141a960e0) copies the path to +0x88 (count
+  +0x94) and stores base +0x78 and target +0x7c without any clamp, then appends it to the
+  construction's line list (+0x70, count +0x7c). `insert` 0, 2 and 3 reorder the queue
+  (0x140ee2b30); 1 leaves it at the end.
+- **Save:** the line writes path, base (0x2c86), target (0x6b), current link +0xa0 (0x2f22),
+  remaining cost +0xa8 (0x3b1e) and the cancelled flag +0x80 (0x28e5); loading reads them back
+  unclamped (slot 4 0x141a96040).
+- **Per day** (`production.daily_serial`, 0x140ed8390): for each construction line, slot 24 (daily
+  step, 0x141a944c0), then slot 25 (finished, 0x141a958c0); a finished line is deleted.
+  - Slot 24 resets +0xa0, checks the path (`PathUsable(tag*, first, last)` 0x14157bca0, else
+    jmp slot 27 = cancel, which sets +0x80), then for each link: `ProvinceUsable(tag*, next)`
+    0x14157bf10; the first link below the target gets the day's output (slot 14 reads +0x30)
+    through `AddConstructionProgress`. It ends with slot 10 (0x141a96160): progress recompute
+    (0x141a961b0), then the output bookkeeping.
+  - Slot 25: cancelled, or every link at the target.
+- **Progress** (0x141a961b0): remaining +0xa8 = cost still to build minus progress in the
+  railway infos' +0x50 entries; done +0x38 = total +0x28 - remaining; then slot 17 (+0x88)
+  (line, levels still to build) stores that count at +0x48 (the level command removes a line
+  whose +0x48 < 1) and refreshes the UI.
+- **Cost of a level:** `Cost(int64* out, level, country->tag holder (+0x2a8))` 0x140f05f90 =
+  `(level * per_level_extra_cost + base_cost) * 100000` plus the holder's railway cost modifier.
+
+### Design
+
+- **Marker:** target < base. Vanilla never creates it (the build command needs target > the
+  path's lowest level; `SetTarget` clamps to >= base) and it survives save/load as is.
+- **Hooks** (MinHook): slot 24 (start found by signature, checked == vtable slot 24), the progress
+  recompute (signature), slot 25 (vtable slot, code shape). Lines without the marker go to the
+  originals.
+- **Daily step:** the engine's own path and province checks (cancel if they fail); the first link
+  above the target is "current"; `remaining` (+0xa8, saved) minus today's output; while the
+  remaining work is no more than the levels after the next one cost, lower that link one level
+  (`DowngradeRailway`). Then slot 10, as the engine does.
+- **Cost:** a level costs `Cost(level) / 3`.
+- **Progress:** remaining as above (reset to the cost still left when it is 0 or more than that:
+  a new line, or levels changed by something else), total = max(total, remaining) (the total is
+  not saved), done = total - remaining, slot 17 with the levels still to do, then the line's speed
+  as the engine sets it: `LinkSpeed(line, &speed, province, next, 0)` (0x141a93d10) for the link
+  being dismantled, stored by `SetSpeed` (0x140ff2830, asserts "vSpeed >= 0_fixed") at +0x30.
+  - **Bug found in game (first build):** the hook replaced the whole recompute and never set the
+    speed, so +0x30 stayed 0: factories were assigned (15/15) but the tooltip said "Never" and
+    nothing progressed. +0x30 is the line's daily progress, not a plain output field.
+- **Finished:** cancelled, or no link above the target.
+
+### Queue wording
+
+- The railway entry's tooltip builder `(item, element, out)` 0x141de2200 looks the line up with
+  `LookupLine(item+8)` 0x142284870 and, for a line with base level > 0, localises
+  `RAILWAY_UPGRADE_TOOLTIP` with RAILWAY_NAME, START_LEVEL (base) and TARGET_LEVEL (target) through
+  `Localize` 0x1422aeab0 (base 0: `RAILWAY_CONSTUCTION_TOOLTIP`).
+- The loader hooks the builder (thread-local "dismantle entry" flag while it runs) and `Localize`
+  (with the flag set, `RAILWAY_UPGRADE_TOOLTIP` -> `HOI4_LOADER_RAILWAY_DISMANTLE_TOOLTIP` if the
+  localisation has it). Everything else passes through.
+- The entry's update (0x141ded950, `LookupLine(item+0xb50)`) sets the title with
+  `SetText(item->+0x2178, std::string* temp copy)` 0x142347db0 (copies it to element+0x110), then the
+  progress bar, the +/- buttons (vtable +0x298 enable / +0x2a0 disable) and `scorched_icon` (found
+  by name through root vtable +0x88; +0x78 show, +0x80 hide with flag 0x10 at +0x75).
+- Marker: while the update runs for a railway line, SetText on that title element gets the text
+  with `£decrease_texticon£ ` (vanilla's 13x12 red down triangle; dismantle lines) or
+  `£increase_texticon£ ` (green up triangle; the engine's lines) in front; a mod's
+  `HOI4_LOADER_RAILWAY_DISMANTLE_PREFIX` / `_BUILD_PREFIX` replaces them.
+
+### Map badges (`CRailwayMapIcon`, `railway_map_icon` in mapicons.gui)
+
+- One per railway segment; fields: province objects +0x610 / +0x618, segment path +0x620
+  (CPdxArray<int>), current level +0x63c, construction target +0x640, cooldown +0x644, elements
+  text +0x658, bg +0x660, cooldown +0x668, under_construction +0x670 (found by name in 0x141993230).
+- Left click 0x141992860: `Clickable(icon)` 0x141992220 (player may build here), modifier keys
+  from the input object (gamestate UI +0x508, vtable +0x28/+0x30/+0x38; Shift = to the maximum,
+  the others pick the queue position), then a synced command posted with 0x1422c4250: new
+  `CBuildRailwayCommand` (0x1411cd870) or `CChangeRailwayConstructionLeveLCommand` (0x1411cdba0)
+  for the existing line (`FindRailwayLine(path, tag)` 0x14157d360, path equal or reversed).
+  Right click 0x141992b10 lowers a pending upgrade.
+- Update 0x141992ce0: text = `Colorize(out, 'W' or 'O', level text)` 0x140245cf0 (writes the
+  engine's colour code: byte 0x11 then the letter) -> `SetText` (takes the string and frees it).
+- Loader: update hook replaces the text with a red X while Alt+Shift is held (and the player
+  may build there and the segment has a railway); click hook with Alt+Shift held calls the plugin,
+  which defers `QueueOrDeepenRailwayDismantle` to the next safe point (single player only). First
+  Shift alone; changed after play testing, since vanilla's Shift+click (to the maximum) is still
+  wanted in the same view. The click's modifiers (input vtable): +0x28 Shift (to the maximum),
+  +0x38 Ctrl (queue position 0, first), +0x30 Alt (1, last), neither 2 (default); matched to keys
+  by vanilla's `INSERT_CONSTRUCTION` text ("Ctrl+Click ... beginning", "Alt+Click ... end") and
+  the check order. Alt+Shift with Ctrl up was picked as costing the least.
+  - **Bug found in game (first build):** the X showed but clicks did nothing: the single-player
+    test used `SessionAllowsLocalWrites`, which only answers inside a game-entered callback. Clicks
+    now use `CurrentSessionSinglePlayer` (the session as classified when the game was entered).
+
+### After the PR #2 review (2026-11-10)
+
+- **When `railways` is switched off** (its self-check on game entry fails): the plugin calls
+  `Engine::DisableRailways()` and deactivates `railway_queue` as well. From then on, for the rest
+  of the session:
+  - `downgrade_railway`, `queue_railway_dismantle` and Alt+Shift+click change nothing;
+  - the badges are vanilla again (no cross, the click goes to vanilla);
+  - a dismantle entry already in the queue **pauses**: its daily step and progress update do
+    nothing and its finished check says no. So the engine neither runs it as an ordinary
+    railway line nor removes it, and it stays in the queue and in saves for a later session
+    where the feature works. `loader.log` says so once.
+  - A later game entry in the same session does not switch it back on.
+- **Thread of the daily step:** the first daily step of each session logs its thread and whether
+  it is the main thread (`railway_queue: daily step on thread N (the main thread)`). Statically
+  it runs from the production manager's serial daily update (`production.daily_serial`,
+  0x140ed8390), which the main thread runs. The graphics rebuild that `DowngradeRailway` ends with
+  now checks `IsMainThread()`: off the main thread it is deferred to the next safe point (logged
+  once). Without the frame hook (no main-thread test) it runs where it is called, as before.
+- **Fixed numbers now read from code:**
+  - the output getter's vtable slot: the daily step calls it as `call [vtable+0x70]`
+    (`kSigRailLineDailyOutput`, 0x141a94822; slot 14);
+  - the badge text's flags byte and the mask that clears its hidden flag: the and-instruction in
+    `kSigRailIconText` (`and byte [rcx+0x75],0xEF`), checked to clear exactly one bit.
+- **Badge cross:** while Alt+Shift is held, the badge shows vanilla's removal cross
+  (`GFX_cancel_conversion_button`, the sprite of the state view's cross) as a text icon. The red
+  X stays as the fallback when the icon delimiter cannot be read.
+- **`queue_railway_dismantle` where the country may not dismantle:** it still queues (the daily
+  step cancels the entry, as before), but `loader.log` now says so when the effect runs. The
+  effect's tooltip adds a red line (`HOI4_LOADER_QUEUE_RAILWAY_DISMANTLE_NOT_ALLOWED`). The test
+  is the daily step's own: the game rules, or without the relation tests the build permission.
+- **1.19.3:** no 1.19.3 copy is available here (only the current 1.19.4.2 `hoi4.exe`, and the
+  1.19.4.2 copy analysed in Ghidra). So the railway signatures are unchecked on 1.19.3. A false
+  match there would show as a failed cross-check or self-check, and the features would then stay
+  off. That is not proven until `tools/check_signatures.py` and `tools/check_code_shapes.py` run
+  on a 1.19.3 copy.
+
+### To verify in game (review)
+
+1. **A save with a dismantle entry, loaded without the loader** (`version.dll` renamed): what
+   happens to the entry. Is it removed at once, and cleanly? Is there a notification? Is
+   anything new in `logs\error.log`? Then once more with the loader and
+   `railway_queue = 0` in `loader_config.ini` (the hooks are not installed, so the same as
+   vanilla).
+   *Tested 2026-11-10 without `version.dll`: the save loads fine and the dismantle entry is gone
+   from the queue. Not yet checked: a notification, `error.log`, and the `railway_queue = 0`
+   run.*
+2. **`loader.log`:** the daily step's thread line says "the main thread".
+3. **The badge:** the cross shows while Alt+Shift is held and fits the badge.
+4. **Disallowed path:** `queue_railway_dismantle` on a path through another country's province
+   gives the log line and the red tooltip line; the entry is cancelled on its first day.
+
+## H4: crash after removing a railway (fixed)
+
+- **Seen:** save, load, a dismantle step took link 9238-9294 to level 0, and one second later the
+  game crashed: access violation reading 0 in the generic mesh draw (0x1422e7544, `mov rsi,
+  [rsi+rcx*8]` with rsi = 0 and a non-zero count) under the map renderer (0x14130dd50, from the
+  in-game render 0x140e4a140). Before the save, links taking provinces to no railway (9375, 526)
+  had not crashed.
+- **Railway graphics** (object at ui->vtable[0x80]()->+0x58->+0x5ce0): a hash table of pieces per
+  province (+0x38, count +0x40); moving trains (+0xa8, count +0xb4; per frame in 0x14164a980,
+  pathing in 0x141647440 "Found no valid TargetNodeIndex"); an entity table at +0x90.
+  - The supply update hands changed provinces to 0x14164b150: a province with railways gets its
+    piece rebuilt (0x141647150), one with none has it cleared (0x141cf7440: frees the piece's
+    arrays only, nothing else).
+  - Nothing removes the trains or entities that use a cleared piece: vanilla never removes a
+    railway. A train on the removed railway is the likely culprit (trains run after loading,
+    which fits the timing).
+- **Fix:** after every `DowngradeRailway` that changed a link, the loader runs what the supply
+  system's after-load refresh (0x140f46dc0) runs: `Clear(gfx)` 0x141647350 (pieces, trains via
+  0x1416473d0, entities via 0x141647230) then `Rebuild(gfx)` 0x14164af50 (a piece for every province
+  with a railway). Synchronous on the main thread, so no frame draws the stale state. Trains respawn
+  by themselves.
+
+### In-game results (2026-11-09, 1.19.4.2)
+
+- First build: factories were assigned but nothing progressed (speed never set; see above).
+- Fixed build: the entry progressed and lowered 6521-11444, 11444-3312, 3312-6282 in order, down
+  to 0 with `levels = 5`. Logged costs per level 186.667 (level 3), 143.333 (2), 100 (1): a third
+  of 560, 430 and 300. Progress about 126-142 per day.
+
+### To verify in game
+
+1. "Queue dismantling one level" adds an entry at the end of the construction queue; factories
+   are assigned and the progress bar moves.
+2. Each link loses a level when its share is paid; the entry disappears when all are done.
+3. With equal factories it takes about a third of the time building that level takes.
+4. Save and load mid-way: the entry, its progress and the railway are as before.
+5. Cancel mid-way: the entry goes, the levels lowered so far stay lowered.
+6. How the entry's text and level look in the queue.
+
+## H5: who may dismantle where (game rules)
+
+- Relations, as the vanilla triggers evaluate them:
+  - `is_subject_of` (0x1403fa270): country = TagToCountry(tag) 0x140c07bf0, diplomacy country+0xf88,
+    relation = diplomacy->+8[TagIndex(other) 0x140c08790], `IsSubject(relation)` 0x140d87160
+    (relation+0x288 = the subject agreement, type 0x30d1, overlord tag at +0x10).
+  - `is_in_faction_with` (0x1403f90f0): diplomacy+0x2d8 = faction, same faction = same pointer.
+  - province controller: gamestate+8 is the province table (vtable[0](id)), controller tag at
+    province+0x188 (CBuildRailwayCommand compares it with the command's country).
+- The loader's check: every province of the path controlled by the country (the engine's "same
+  country" test) or, per global flag, by a faction member / subject / overlord. It replaces the
+  engine's build permission (`Clickable`, `PathUsable`/`ProvinceUsable`) for the X, the click and a
+  dismantle line's daily step; without these signatures the build permission stays.
+- Game rules can't be read from C++ here without more work; a mod sets the flags from
+  `has_game_rule` at `on_startup` (rules are fixed per game, flags are saved).
+
 # Part K: game speed and date display (`time_control`)
 
 Branch `feature/time-control` (from main). Static analysis of vanilla 1.19.4.2 (v1.19.4.2.2da5)

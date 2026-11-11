@@ -1,0 +1,109 @@
+# Test decisions for the railways plugin (downgrade_railway).
+#
+# The railway in the first line of map/railways.txt: level 3 in 1936, provinces
+# 6521 - 11444 - 3312 - 6282 (Brandenburg to West Prussia, Germany). Check it in the logistics
+# (supply) map mode before and after each decision; loader.log has a line per use.
+#
+# downgrade_railway exists only while the railways feature is active, so every decision that uses it
+# is guarded with hoi4_loader_feature_railways = yes.
+hoi4_loader_railway_category = {
+
+	# One level off every link of the railway between the two ends.
+	hoi4_rail_test_downgrade_one = {
+		icon = generic_construction
+		cost = 0
+		visible = { hoi4_loader_feature_railways = yes }
+		available = { has_railway_connection = { start_province = 6521 target_province = 6282 } }
+		complete_effect = {
+			downgrade_railway = { start_province = 6521 target_province = 6282 }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# Removes it completely, whatever its levels.
+	hoi4_rail_test_remove = {
+		icon = generic_construction
+		cost = 0
+		visible = { hoi4_loader_feature_railways = yes }
+		available = { has_railway_connection = { start_province = 6521 target_province = 6282 } }
+		complete_effect = {
+			downgrade_railway = { start_province = 6521 target_province = 6282 levels = all }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# Removes every route until no railway connects the two provinces, detours included. loader.log
+	# names how many routes and links went.
+	hoi4_rail_test_remove_all_routes = {
+		icon = generic_construction
+		cost = 0
+		visible = { hoi4_loader_feature_railways = yes }
+		available = { has_railway_between = { start_province = 6521 target_province = 6282 } }
+		complete_effect = {
+			downgrade_railway = { start_province = 6521 target_province = 6282 all_routes = yes }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# has_railway_between with min_level: available only while links of level 3 or more connect the
+	# two ends (true in 1936; false after "lower by one level"). The tooltip shows the trigger.
+	hoi4_rail_test_level_check = {
+		icon = generic_construction
+		cost = 0
+		visible = { hoi4_loader_feature_railways = yes }
+		available = {
+			has_railway_between = { start_province = 6521 target_province = 6282 min_level = 3 }
+			NOT = { has_railway_between = { start_province = 6521 target_province = 6282 min_level = 5 } }
+		}
+		complete_effect = {
+			log = "hoi4_rail_test_level_check: level 3 or 4 railway connects 6521 and 6282"
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# Must fail safe: start and target are the same province, so no path. Expect a loader.log line
+	# and no change.
+	hoi4_rail_test_no_path = {
+		icon = generic_construction
+		cost = 0
+		visible = { hoi4_loader_feature_railways = yes }
+		complete_effect = {
+			downgrade_railway = { start_province = 6521 target_province = 6521 }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# railway_queue: the same lowering as a construction queue entry. Watch it in the construction
+	# screen (railway tab) and the logistics map mode; each level costs 30% of building it (Cost rule in the HOI4 Loader Railway Rules mod).
+	hoi4_rail_test_queue_one = {
+		icon = generic_construction
+		cost = 0
+		visible = { hoi4_loader_feature_railway_queue = yes }
+		available = { has_railway_connection = { start_province = 6521 target_province = 6282 } }
+		complete_effect = {
+			queue_railway_dismantle = { start_province = 6521 target_province = 6282 }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	hoi4_rail_test_queue_remove = {
+		icon = generic_construction
+		cost = 0
+		visible = { hoi4_loader_feature_railway_queue = yes }
+		available = { has_railway_connection = { start_province = 6521 target_province = 6282 } }
+		complete_effect = {
+			queue_railway_dismantle = { start_province = 6521 target_province = 6282 levels = all }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# Vanilla only: adds 3 levels along the same provinces, to rebuild after the tests.
+	hoi4_rail_test_rebuild = {
+		icon = generic_construction
+		cost = 0
+		complete_effect = {
+			build_railway = { level = 3 path = { 6521 11444 3312 6282 } }
+		}
+		ai_will_do = { base = 0 }
+	}
+}

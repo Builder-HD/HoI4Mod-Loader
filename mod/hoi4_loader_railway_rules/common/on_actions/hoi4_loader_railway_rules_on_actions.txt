@@ -1,0 +1,42 @@
+# The railway dismantling game rules as the global flags the loader reads. Game rules are fixed
+# for a game, and global flags are saved with it, so setting them once at game start is enough.
+on_actions = {
+	on_startup = {
+		effect = {
+			if = {
+				limit = { has_game_rule = { rule = hoi4_loader_railway_dismantle_allies option = ALLOWED } }
+				set_global_flag = hoi4_loader_railway_dismantle_allies
+			}
+			if = {
+				limit = { has_game_rule = { rule = hoi4_loader_railway_dismantle_subjects option = ALLOWED } }
+				set_global_flag = hoi4_loader_railway_dismantle_subjects
+			}
+			if = {
+				limit = { has_game_rule = { rule = hoi4_loader_railway_dismantle_overlord option = ALLOWED } }
+				set_global_flag = hoi4_loader_railway_dismantle_overlord
+			}
+			# Dismantling cost in percent of building. COST_30 (the default) sets no flag: the loader's
+			# default is 30 too.
+			if = {
+				limit = { has_game_rule = { rule = hoi4_loader_railway_dismantle_cost option = COST_10 } }
+				set_global_flag = hoi4_loader_railway_dismantle_cost_10
+			}
+			if = {
+				limit = { has_game_rule = { rule = hoi4_loader_railway_dismantle_cost option = COST_20 } }
+				set_global_flag = hoi4_loader_railway_dismantle_cost_20
+			}
+			if = {
+				limit = { has_game_rule = { rule = hoi4_loader_railway_dismantle_cost option = COST_50 } }
+				set_global_flag = hoi4_loader_railway_dismantle_cost_50
+			}
+			if = {
+				limit = { has_game_rule = { rule = hoi4_loader_railway_dismantle_cost option = COST_75 } }
+				set_global_flag = hoi4_loader_railway_dismantle_cost_75
+			}
+			if = {
+				limit = { has_game_rule = { rule = hoi4_loader_railway_dismantle_cost option = COST_100 } }
+				set_global_flag = hoi4_loader_railway_dismantle_cost_100
+			}
+		}
+	}
+}

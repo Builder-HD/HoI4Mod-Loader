@@ -230,6 +230,77 @@ bool RegionHasState(int regionId, int stateId, bool* has);
 // The region holding the state's first province (0 if none).
 int RegionOfState(int stateId);
 
+// --- Railways (railways; engine_railway.cpp, NOTES.md Part H) ---------------------------------
+// Main thread only: the effect that uses them runs there, and DowngradeRailway writes game state.
+void ResolveRailways();
+bool HaveRailways();   // every railway field and function resolved (no game needed)
+bool RailwaysReady();  // HaveRailways() and a game with a railway manager exists
+// Switches railways off for the rest of the session (the plugin's self-check failed): nothing
+// changes a railway any more, dismantle entries in the queue pause (no progress, not finished,
+// kept in the queue and in saves), and the map badges are vanilla again.
+void DisableRailways();
+// May the country dismantle along the path: the game rules (or without the relation tests, the
+// engine's build permission), as a queued entry's daily step checks it. -1 if unknown.
+int RailwayDismantleAllowed(int tag, const std::vector<int>& path);
+// Read-only consistency check of the railway data as resolved: every stored link agrees with the
+// per-neighbour level and with its other end. False (with the first problem) if anything is off.
+bool RailwaySelfCheck(int* linksChecked, std::string* problem);
+// The railway level of the link between neighbouring provinces a and b (0: none).
+int RailwayLevel(int a, int b);
+// The existing railway path with the fewest links from `from` to `to` (both ends included);
+// false if no railway connects them. Deterministic: the same on every machine.
+bool RailwayPath(int from, int to, std::vector<int>* path);
+// True if railway links of at least minLevel connect the two provinces. Read only and safe in a
+// trigger: no allocation per call (per-thread work arrays that grow once).
+bool RailwayConnected(int from, int to, int minLevel);
+// Lowers every link along the path by `levels` (not below 0), on both ends, updates the provinces'
+// rail_way buildings and marks the provinces dirty in the supply system. Returns the links changed.
+int DowngradeRailway(const std::vector<int>& path, int levels);
+// Removes the shortest route completely, again and again, until no railway connects the two
+// provinces. Returns the links removed; *routes = the number of routes removed.
+int RemoveAllRailwayRoutes(int from, int to, int* routes);
+// Queued dismantling: a railway construction line with its target below its base level, run by
+// hooks on the line's daily step, progress and finished check (NOTES.md H3).
+bool HaveRailwayLines();   // every line field, function and vtable slot resolved
+bool HookRailwayLines();   // queues the three hooks; call from a feature's init
+// Adds a dismantle line to the country's construction queue (at the end): every link of `path`
+// above `to` is lowered one level at a time down to `to`, each level costing a share of building
+// it (SetRailwayDismantleCost). `from` is the highest level on the path. Main thread (an effect).
+bool QueueRailwayDismantle(int tag, const std::vector<int>& path, int from, int to);
+// The construction queue's tooltip for a dismantle entry uses this key (placeholders as
+// RAILWAY_UPGRADE_TOOLTIP: $START_LEVEL$, $RAILWAY_NAME$, $TARGET_LEVEL$) when the loaded
+// localisation defines it. Queues the tooltip and Localize hooks; false if not found.
+const char kRailwayDismantleTooltipKey[] = "HOI4_LOADER_RAILWAY_DISMANTLE_TOOLTIP";
+bool HookRailwayTooltip();
+// Railway entries' titles in the queue start with a marker: vanilla's red down triangle text icon
+// for dismantling, its green up triangle for building and upgrading, or the localisation of these
+// keys if a mod defines them. Queues the entry-update and SetText hooks; needs HookRailwayTooltip
+// first (the shared line lookup).
+const char kRailwayDismantlePrefixKey[] = "HOI4_LOADER_RAILWAY_DISMANTLE_PREFIX";
+const char kRailwayBuildPrefixKey[] = "HOI4_LOADER_RAILWAY_BUILD_PREFIX";
+bool HookRailwayEntryTitle();
+// Where the player's dismantling (map badges, the queued line's daily check) is allowed besides
+// provinces the country controls itself: a bit mask the plugin computes from global flags a mod
+// sets from its game rules. Without the relation tests (signatures missing) the engine's build
+// permission applies instead.
+enum : int { kRailRuleAllies = 1, kRailRuleSubjects = 2, kRailRuleOverlord = 4 };
+using RailwayRules_t = int (*)();
+void SetRailwayDismantleRules(RailwayRules_t rules);
+// What dismantling a level costs, in percent of building it (default 30). `cost` is asked once per
+// dismantle line per day and per queue change (main thread); it returns -1 for the default.
+const int kRailwayDismantleDefaultPercent = 30;
+using RailwayCost_t = int (*)();
+void SetRailwayDismantleCost(RailwayCost_t cost);
+// Railway map badges (the level circle on each segment): while Alt+Shift is held they show a red
+// X where the player may dismantle, and a Alt+Shift+click calls onClick(segment path) instead of
+// vanilla's upgrade when onClick returns true. UI thread; onClick must defer game-state changes.
+using RailwayIconClick_t = bool (*)(const std::vector<int>& path);
+bool HookRailwayMapIcons(RailwayIconClick_t onClick);
+// One more dismantle level on a segment: deepens the country's dismantle entry for exactly this
+// path by one level (adding that level's cost), or queues a new one (top level -> top - 1).
+// Returns 2 deepened, 1 queued, 0 nothing to do. Main thread, at a safe point.
+int QueueOrDeepenRailwayDismantle(int tag, const std::vector<int>& path);
+
 // --- Scope blocks and iterators (region_scope; engine_scope.cpp, NOTES.md F5) -----------------
 // The vanilla state iterators the region iterators are cloned from. keys: the block keys the
 // vanilla item handler reads itself (decoded from its compare chain); limitKey: the one whose
