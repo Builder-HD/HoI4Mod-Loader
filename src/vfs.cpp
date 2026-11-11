@@ -213,6 +213,17 @@ static bool ReadWholeFile(const std::wstring& path, std::string* out) {
     return ok;
 }
 
+// The path as UTF-16: a CreateFileA name is in the ANSI code page (CP_ACP), as CreateFileA reads it.
+static std::wstring WidePath(const wchar_t* name) { return name; }
+static std::wstring WidePath(const char* name) {
+    int n = MultiByteToWideChar(CP_ACP, 0, name, -1, nullptr, 0);
+    if (n <= 1) return std::wstring();
+    std::wstring w((size_t)n, L'\0');
+    MultiByteToWideChar(CP_ACP, 0, name, -1, &w[0], n);
+    w.resize((size_t)n - 1);
+    return w;
+}
+
 // The patched copy to serve for this open, or nullptr (not patched, or serve the original).
 template <typename Ch>
 static const wchar_t* FindPatchedFile(const Ch* name, DWORD access, DWORD disposition) {
@@ -221,8 +232,10 @@ static const wchar_t* FindPatchedFile(const Ch* name, DWORD access, DWORD dispos
         return nullptr;
     for (FilePatch& p : g_patches) {
         if (!EndsWithPath(name, p.suffix) || !FileExists(name)) continue;
+        const std::wstring path = WidePath(name);
+        if (path.empty()) return nullptr;
         std::wstring full;
-        for (const Ch* c = name; *c; ++c) full += FoldChar((wchar_t)(std::make_unsigned_t<Ch>)*c);
+        for (wchar_t c : path) full += FoldChar(c);
         AcquireSRWLockExclusive(&g_genLock);
         const wchar_t* served = nullptr;
         bool known = false;
@@ -236,8 +249,6 @@ static const wchar_t* FindPatchedFile(const Ch* name, DWORD access, DWORD dispos
             // Each original gets its own copy: vanilla and every mod's version are patched separately.
             PatchedCopy copy{full, L""};
             std::string original, patched;
-            std::wstring path;
-            for (const Ch* c = name; *c; ++c) path += (wchar_t)(std::make_unsigned_t<Ch>)*c;
             bool read = ReadWholeFile(path, &original);
             try {
                 patched = read ? p.patcher(original) : std::string();

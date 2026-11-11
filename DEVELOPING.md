@@ -302,6 +302,11 @@ The details are in NOTES.md, "Threading model".
   compare. Keep patchers pure text work: no game state, no engine calls, no logging loops.
   `province_building_removal`'s patcher (`gui_patch.cpp`) is one, and it is covered by
   `gui_patch_test`.
+- **Patched copies are cached for the session.** Each original file is patched on its first open
+  and the copy in `%TEMP%\hoi4_loader` is served from then on. A modder who edits that file (for
+  example `countrystateview.gui`) and reloads the interface in game keeps getting the first patched
+  version; restart the game to see the edit. ANSI paths (`CreateFileA`) are converted with the
+  ANSI code page before the file is read.
 
 ### Global hooks
 

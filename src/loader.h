@@ -62,6 +62,8 @@ bool VfsStart();
 // Creates a MinHook hook and queues it for enabling; main.cpp applies all queued hooks at once
 // after the features and the VFS are set up. Logs failures.
 bool HookQueue(void* target, void* detour, void** original, const char* name);
+// Takes a queued hook out again; only during init, before the queue is applied.
+void HookUnqueue(void* target);
 
 // ---------------------------------------------------------------------------
 // sigscan.cpp

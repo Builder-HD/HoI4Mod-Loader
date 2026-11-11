@@ -3599,12 +3599,18 @@ Static analysis only. The analysed copy has the same SHA-256 as the game folder'
   `BUILDING_SLOT_REMOVE_BUILDING_LEVEL` ("Remove the building."), or the construction / conversion
   variants.
 - Permission (0x140a25c50): in wartime a removal cooldown applies
-  (`BUILDING_SLOT_REMOVE_COOLDOWN`, the country's last removal date at +0x870); otherwise allowed.
+  (`BUILDING_SLOT_REMOVE_COOLDOWN`, the **state's** last removal date at state+0x870); otherwise
+  allowed.
 - The button is not chosen per building type. The slot (0x141e44b50 hover, 0x141e44c60 show,
   0x141e47400 update/hide) shows `remove` only while the slot is hovered (+0x40), enables it when
-  the viewer owns the state (0x140748490) and the cooldown check (0x140a25c50) passes, and hides it
+  the viewer owns the state and the cooldown check (0x140a25c50) passes, and hides it
   otherwise. The slots are filled by the state view update (0x1417e5000, `state_building_entries` /
   `state_shared_slot_building_entries`).
+- The ownership test in the show (0x141e44d69): the player's tag from gamestate +0x520 (or +0x524),
+  the state's owner tag at state+0xcc turned into the country (0x140c07bf0), then 0x140748490
+  (country, player tag): the same tag, or the same tag group (0x140c08790), else 0x140748500.
+  Without it the cross is not shown at all. The loader reads +0xcc from there
+  (`kSigStateOwnerCheck`, checked: the view's state field is the tooltip's +0x608).
 - **So:** a building that has a slot in the state view should already get the cross. If the hub
   has none, it is because the hub is not listed in the state view, not because the cross is
   denied. Which buildings are listed (0x1417e5000 onwards) is not checked yet.
@@ -3776,9 +3782,16 @@ Built as planned in I3, with these changes found while building it:
   (`kSigSharedSlotDtor`, which also yields the wrapper destructor 0x14235a680). The wrapper copies
   the passed `std::function` and clears the caller's (`_Delete_this`, then impl = null), so the
   loader's copy is not destroyed twice. `static_assert` on the 64-byte layout.
-- **Show:** the cross shows when the province has a level, the local player's country controls
-  the province (the controller offset `kSigRailController` gives) and the session is single
-  player. It is enabled when vanilla's permission check (`kSigRemovePermission`, 0x140a25c50)
+  - **ABI assumption:** the loader's `std::function<void()>` is handed to the game's code as is. That
+    holds only while the loader and the game use the same MSVC STL layout: 64 bytes, the impl
+    pointer in the last qword, and `_Copy` / `_Delete_this` as the impl's virtual functions. Only
+    the size is checked (`static_assert`). Both are built with MSVC, but a change of the STL's
+    `std::function` (a new ABI generation) would break this without a compile error.
+- **Show:** the cross shows when the province has a level, the local player's country owns the
+  state (owner tag state+0xcc, `kSigStateOwnerCheck`: vanilla's shared slot condition) and controls
+  the province (the controller offset `kSigRailController` gives), and the session is single
+  player. Before the PR #3 review only control was checked, so the cross showed in occupied enemy
+  provinces. It is enabled when vanilla's permission check (`kSigRemovePermission`, 0x140a25c50)
   passes, greyed out during the wartime cooldown. Element calls: hide vtable +0x80 then hidden bit
   0x10 at +0x75, show clears it then +0x78 (`kSigGuiHideShow`, from the shared slot's cross);
   IsEnabled +0x218, Enable +0x298, Disable +0x2a0 (`kCodePbUpdateEnable`, searched inside the
@@ -3792,7 +3805,8 @@ Built as planned in I3, with these changes found while building it:
   cooldown applies to province buildings as to state buildings.
 - **Click:** deferred to the next safe point (single player). It carries the province, the type
   and the state, not the item, and a generation number that changes on every game start or load.
-  There the building is looked up again, and level, controller and permission are checked again.
+  There the building is looked up again, and level, owner, controller and permission are checked
+  again.
   Then come the stamp and `SetLevel(level - 1, notify = 1)` (`kSigRemoveBuildingLoop`, cross-checked
   with the railway code's SetLevel).
 - **UI refresh (found in the first game test):** the level dropped at the click, but the state view
@@ -3800,7 +3814,9 @@ Built as planned in I3, with these changes found while building it:
   `ui->vtable[0xb8]()` (`kSigRemoveUiRefresh`, 0x1411e2ead; the same UI global, slot and post
   function as the railway construction view refresh, which posts 0x11). The loader's removal now
   does the same.
-- **Signatures:** 12 new and 1 anchor (90 in total), 7 code shapes (45), all unique on 1.19.4.2.
+- **Signatures:** 12 new and 1 anchor, 7 code shapes, all unique on 1.19.4.2 (then 90 in total;
+  after the rebase onto `time_control` and the PR #3 owner check, 13 signatures and 1 anchor of
+  98).
   A static dry run of every resolver cross-check on the analysed copy passes: item window +0x10,
   type +0x28, tooltip sub-object +0x18 (view +0x8), view province +0x600 / state +0x608, buildings
   +0x190, level +0x40, button map +0x12a0, wrapper 0x5d8 bytes.
@@ -3842,10 +3858,10 @@ Built as planned in I3, with these changes found while building it:
 The railway review (H3, "After the PR #2 review") asked the same questions of this feature:
 
 - **Fail-safe:** the loader's part of each hook (update, tooltip, click, removal) runs under SEH.
-  A fault is logged once and switches the feature off for the session
-  (`Engine::DisableProvinceBuildingRemoval`, and the plugin clears the feature's flag). After that,
-  existing crosses hide on their next update, nothing new is bound, clicks and removals do
-  nothing, and the tooltip is vanilla's. The destructor hook keeps freeing the button bindings, so
+  A fault is logged once and switches the feature off for the session (the engine side's
+  `g_enabled`, and the plugin clears the feature's flag). After that, every cross hides on its
+  entry's next update (bound or not: see "After the PR #3 review"), nothing new is bound, clicks
+  and removals do nothing, and the tooltip is vanilla's. The destructor hook keeps freeing the button bindings, so
   closing the state view stays safe. There is no game-entry self-check like railways' because the
   feature keeps no data of its own to check. Instead, before any read, the item's vtable is
   compared with `CProvinceBuildingItem`'s (RTTI), and the window's with `CContainerWindow`'s.
@@ -3866,6 +3882,31 @@ The railway review (H3, "After the PR #2 review") asked the same questions of th
 - **1.19.3:** unchecked, as for railways (no copy here). A false match would fail one of the
   resolver's cross-checks, and the feature would then stay off.
 
+### After the PR #3 review (2026-11-11)
+
+- **Crosses after a fault:** the switched-off branch of the update hid only buttons bound before
+  the fault. The patched file is still served, and a buttonType is visible by default, so a state
+  view opened after the fault showed working-looking crosses that did nothing. Now, while off, the
+  update looks the entry's `remove` button up (the same non-logging lookup, no binding) and hides
+  it.
+- **Ownership:** the cross, the dialog's validity check and the removal require that the player
+  owns the state (vanilla's condition, `kSigStateOwnerCheck`, see "Vanilla building removal in the
+  state view") as well as controls the province. Before, an occupied enemy province's naval base,
+  bunkers and hub could be removed.
+- **Partial init:** the three item hooks are queued all or none. If a later one fails, the ones
+  already queued are taken out (`HookUnqueue`, MinHook `MH_RemoveHook` before the queue is
+  applied). The same happens if the file patch cannot be registered. The dialog's three hooks are
+  handled the same way, independently (without them the cross removes without asking).
+  `DisableProvinceBuildingRemoval` (never called) became `UnhookProvinceBuildingRemoval`.
+- **`CreateFileA` paths:** the file patch widened each byte of an ANSI path. It now converts with
+  `MultiByteToWideChar(CP_ACP)`, as CreateFileA does, so a path with non-ASCII characters in a
+  non-Western code page is read and patched (before, it failed safe: the original was served).
+- **VFS caching:** each patched copy is made once per session (DEVELOPING.md says so).
+- **Docs:** the "at once" in MODDING.md, the state's (not the country's) removal date at +0x870,
+  the `std::function` ABI assumption (I4).
+- **Code shape checker:** `tools/check_code_shapes.py` reads the province and dialog offsets from
+  `signatures.h` instead of repeating them.
+
 ### To verify in game
 
 1. `loader.log`: `Province buildings: ...` with the values above, the feature active, and
@@ -3878,8 +3919,9 @@ The railway review (H3, "After the PR #2 review") asked the same questions of th
    save and load keep it.
 5. At war: after one removal the cross is greyed out and its tooltip gives the cooldown date
    (vanilla's dockyard cross does the same in that state).
-6. A province the player owns but does not control, and an occupied enemy province: what shows
-   (the loader uses the province controller; vanilla's shared slot checks the state).
+6. **Ownership:** an occupied enemy province (the player controls it, the enemy owns the state):
+   no cross. A province of the player's own state that the enemy occupies: no cross. The player's
+   own, controlled provinces: the cross as before.
 7. Multiplayer: no cross.
 8. A UI mod that replaces countrystateview.gui: its copy is patched (`loader.log` names its path).
 9. Destroying the state view (close, reopen, switch states quickly): no crash (the destructor
@@ -3888,6 +3930,8 @@ The railway review (H3, "After the PR #2 review") asked the same questions of th
     level; with two crosses clicked in a row only the confirmed one goes; a building lost while
     the dialog is open closes it (or OK does nothing).
     *Tested 2026-11-10: the dialog opens from the province row, Cancel and OK behave as described.*
+11. **After a fault** (not reproducible on purpose; check by reading `loader.log` if one ever
+    happens): state views opened afterwards show no cross.
 
 # Part K: game speed and date display (`time_control`)
 

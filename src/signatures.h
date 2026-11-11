@@ -512,6 +512,12 @@ static const size_t kSigRemoveLevelDisp = 3, kSigRemoveSetLevelCall = 0x12;
 // +0x3e].
 SIG(kSigGuiHideShow, "FF 92 80 00 00 00 80 4F 75 10 48 8D 4D E0 E8 ?? ?? ?? ?? 41 03 C4 49 8B 0E 4C 8B 81 B0 00 00 00 39 46 34 41 0F 9E C7 41 8D 57 01 49 8B CE 41 FF D0 41 80 66 75 EF 49 8B 06 49 8B CE FF 50 78")
 static const size_t kSigGuiHideDisp = 2, kSigGuiFlagsDisp = 8, kSigGuiHiddenBit = 9, kSigGuiShowDisp = 0x3e;
+// The shared slot's hover (0x141e44d69): the player's tag (gamestate +0x520 or +0x524), state =
+// view+[disp32 +0x1e], then owner = TagToCountry(state+[disp32 +0x2e]) (E8 at +0x32), checked
+// against the player before the cross shows. The state's owner tag is read from here; the view's
+// state field must be the one the tooltip reads.
+SIG(kSigStateOwnerCheck, "BB ?? ?? ?? ?? B9 ?? ?? ?? ?? 83 B8 ?? ?? ?? ?? 00 0F 4F D9 48 03 D8 48 8B 47 ?? 4C 8B B0 ?? ?? ?? ?? 4D 85 F6 0F 84 ?? ?? ?? ?? 49 8D 8E ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B F0 8B 0B")
+static const size_t kSigOwnerViewStateDisp = 0x1e, kSigOwnerStateOwnerDisp = 0x2e;
 
 // --- Code shapes at RTTI-found addresses (numeric triggers, NOTES.md E2) -------------------
 // CODE(name, "..."): checked with SigMatchAt at an address reached through an RTTI vtable, not

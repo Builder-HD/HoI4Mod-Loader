@@ -68,6 +68,7 @@ ItemDtor_t g_dtorOrig = nullptr;
 uint32_t g_itemWindow = 0, g_itemType = 0, g_finderSlotDisp = 0;
 uint32_t g_tipSub = 0, g_tipType = 0, g_tipView = 0;
 uint32_t g_typeProvinceFlag = 0, g_viewProvince = 0, g_viewState = 0, g_provinceBuildings = 0;
+uint32_t g_stateOwner = 0;  // the state's owner tag (as vanilla's shared slot cross checks it)
 uint32_t g_buttonMap = 0;
 ButtonLookup_t g_buttonLookup = nullptr;
 uint8_t* g_buttonFinder = nullptr;
@@ -163,17 +164,22 @@ Target TargetOf(void* item) {
     return t;
 }
 
-bool PlayerControls(void* province) {
+// The local player may remove buildings here: they own the state (as vanilla's shared slot cross
+// requires) and also control the province (so not in an owned province the enemy occupies).
+bool PlayerMayRemove(void* province, void* state) {
     uint32_t off = ProvinceControllerOffset();
     int player = PlayerCountryTag();
+    int owner = g_stateOwner && state ? Rd<int>(state, g_stateOwner) : 0;
     int controller = off && province ? Rd<int>(province, off) : 0;
-    return player > 0 && controller > 0 && IsSameCountry(controller, player);
+    return player > 0 && owner > 0 && controller > 0 && IsSameCountry(owner, player) &&
+           IsSameCountry(controller, player);
 }
 
 // The cross shows where a level could be removed by the local player; it is enabled unless the
 // wartime removal cooldown blocks it (the vanilla check, which also explains why in the tooltip).
 bool MayShow(const Target& t) {
-    return t.building && t.level > 0 && t.state && PlayerControls(t.province) && g_allowedFn && g_allowedFn();
+    return t.building && t.level > 0 && t.state && PlayerMayRemove(t.province, t.state) && g_allowedFn &&
+           g_allowedFn();
 }
 
 void SetVisible(void* element, bool visible) {
@@ -245,13 +251,14 @@ bool FindDialog(void* dialog, Pending* p) {
     return known;
 }
 
-// The removal could still happen now: the province still has a level, the player still controls
-// it, and the cooldown allows it (as vanilla's dialog re-checks the state building).
+// The removal could still happen now: the province still has a level, the player still owns the
+// state and controls the province, and the cooldown allows it (as vanilla's dialog re-checks the
+// state building).
 bool PendingStillValid(const Pending& p) {
     if (!g_enabled || !p.province || !p.state || !IsProvinceType(p.type)) return false;
     void* building = g_lookupBuilding((uint8_t*)p.province + g_provinceBuildings, p.type);
     int level = building ? Rd<int16_t>(building, g_level) : 0;
-    return level > 0 && PlayerControls(p.province) && g_permission(p.state, building, nullptr);
+    return level > 0 && PlayerMayRemove(p.province, p.state) && g_permission(p.state, building, nullptr);
 }
 
 // Opens vanilla's "Remove Building" dialog for this province building (mode 0: remove a level).
@@ -307,13 +314,20 @@ void ForgetDialog(void* dialog) {
     ReleaseSRWLockExclusive(&g_lock);
 }
 
+// The entry's `remove` button (the patched GUI file's), or null. No binding, no logging.
+void* RemoveButton(void* item) {
+    void* window = Window(item);
+    if (!window || *(void***)window != g_vtWindow) return nullptr;
+    StringView name{"remove", 6};
+    return g_buttonLookup((uint8_t*)window + g_buttonMap, &name);
+}
+
 // Builds the CButtonWrapper for the item's `remove` button (once per item).
 Binding Bind(void* item) {
     Binding b;
     void* window = Window(item);
     if (!window || *(void***)window != g_vtWindow) return b;
-    StringView name{"remove", 6};
-    void* button = g_buttonLookup((uint8_t*)window + g_buttonMap, &name);
+    void* button = RemoveButton(item);
     if (!button) {
         if (!g_loggedMissing)
             Log("province_building_removal: province_building_entry has no `remove` button (the countrystateview.gui "
@@ -364,9 +378,13 @@ Binding Find(void* item) {
 
 void UpdateBody(void* item) {
     if (!IsItem(item) || !OnMainThread("entry update")) return;
-    if (!g_enabled) {  // switched off: hide a cross that is already there, bind nothing new
+    if (!g_enabled) {
+        // Switched off: hide the cross, bound or not. The patched GUI file is still served, and a
+        // buttonType is visible by default, so an entry created after the fault has one too. Look
+        // it up without binding (nothing new is bound once the feature is off).
         Binding b = Find(item);
-        if (b.button) SetVisible(b.button, false);
+        void* button = b.button ? b.button : RemoveButton(item);
+        if (button) SetVisible(button, false);
         return;
     }
     Binding b = FindOrBind(item);
@@ -622,16 +640,24 @@ void ResolveProvinceBuildings() {
         g_hiddenBit = Rd<uint8_t>(p, kSigGuiHiddenBit);
         g_showDisp = Rd<uint8_t>(p, kSigGuiShowDisp);
     }
+    if ((p = SigFindUnique("state_owner_check", kSigStateOwnerCheck)) != nullptr) {
+        if (g_viewState && Rd<uint32_t>(p, kSigOwnerViewStateDisp) == g_viewState)
+            g_stateOwner = Rd<uint32_t>(p, kSigOwnerStateOwnerDisp);
+        else
+            Log("ERROR: province_building_removal: the shared slot's owner check reads another view field");
+    }
     if (HaveProvinceBuildingRemoval())
         Log("Province buildings: item window +0x%x, type +0x%x, tooltip sub +0x%x (view +0x%x), view province +0x%x / "
-            "state +0x%x, buildings +0x%x, level +0x%x, button map +0x%x, wrapper 0x%zx bytes, controller +0x%x",
+            "state +0x%x, buildings +0x%x, level +0x%x, button map +0x%x, wrapper 0x%zx bytes, state owner +0x%x, "
+            "controller +0x%x",
             g_itemWindow, g_itemType, g_tipSub, g_tipView, g_viewProvince, g_viewState, g_provinceBuildings, g_level,
-            g_buttonMap, g_wrapperSize, ProvinceControllerOffset());
+            g_buttonMap, g_wrapperSize, g_stateOwner, ProvinceControllerOffset());
 }
 
 bool HaveProvinceBuildingRemoval() {
     return g_updateFn && g_tooltipFn && g_dtorFn && g_itemWindow && g_itemType && g_tipSub && g_tipView &&
-           g_typeProvinceFlag && g_viewProvince && g_viewState && g_provinceBuildings && g_buttonMap && g_buttonLookup &&
+           g_typeProvinceFlag && g_viewProvince && g_viewState && g_stateOwner && g_provinceBuildings && g_buttonMap &&
+           g_buttonLookup &&
            g_wrapperCtor && g_wrapperDtor && g_wrapperSize && g_lookupBuilding && g_permission && g_setLevel && g_level &&
            g_dateDisp && g_stateRemovalDate &&
            g_hideDisp && g_showDisp && g_flags && g_hiddenBit && g_isEnabledDisp && g_enableDisp && g_disableDisp &&
@@ -644,24 +670,40 @@ bool HookProvinceBuildingRemoval(ProvinceRemoveAllowed_t allowed, ProvinceRemove
     g_allowedFn = allowed;
     g_clickFn = onClick;
     g_faultFn = onFault;
-    if (!HookQueue(g_updateFn, (void*)&UpdateDetour, (void**)&g_updateOrig, "province_building_update") ||
-        !HookQueue(g_tooltipFn, (void*)&TooltipDetour, (void**)&g_tooltipOrig, "province_building_tooltip") ||
-        !HookQueue(g_dtorFn, (void*)&DtorDetour, (void**)&g_dtorOrig, "province_building_dtor"))
+    // All three item hooks or none: a hook queued before a later one fails is taken out again, so
+    // nothing of the feature is applied (with a UI mod that has its own `remove` button, a lone
+    // update hook would bind it while the feature reports off).
+    bool items = HookQueue(g_updateFn, (void*)&UpdateDetour, (void**)&g_updateOrig, "province_building_update");
+    items = items && HookQueue(g_tooltipFn, (void*)&TooltipDetour, (void**)&g_tooltipOrig, "province_building_tooltip");
+    items = items && HookQueue(g_dtorFn, (void*)&DtorDetour, (void**)&g_dtorOrig, "province_building_dtor");
+    if (!items) {
+        UnhookProvinceBuildingRemoval();
         return false;
+    }
     // Optional: the confirmation dialog. All three or none (a dialog opened here must have its OK
     // and validity answered here).
-    g_confirmHooked =
-        HaveConfirm() &&
-        HookQueue(g_confirmDtorFn, (void*)&ConfirmDtorDetour, (void**)&g_confirmDtorOrig, "confirm_remove_dtor") &&
-        HookQueue(g_confirmValidFn, (void*)&ConfirmValidDetour, (void**)&g_confirmValidOrig, "confirm_remove_valid") &&
-        HookQueue(g_confirmAcceptFn, (void*)&ConfirmAcceptDetour, (void**)&g_confirmAcceptOrig, "confirm_remove_accept");
+    bool dialog = HaveConfirm();
+    dialog = dialog && HookQueue(g_confirmDtorFn, (void*)&ConfirmDtorDetour, (void**)&g_confirmDtorOrig,
+                                 "confirm_remove_dtor");
+    dialog = dialog && HookQueue(g_confirmValidFn, (void*)&ConfirmValidDetour, (void**)&g_confirmValidOrig,
+                                 "confirm_remove_valid");
+    dialog = dialog && HookQueue(g_confirmAcceptFn, (void*)&ConfirmAcceptDetour, (void**)&g_confirmAcceptOrig,
+                                 "confirm_remove_accept");
+    if (!dialog) {
+        for (uint8_t* fn : {g_confirmDtorFn, g_confirmValidFn, g_confirmAcceptFn})
+            if (fn) HookUnqueue(fn);
+    }
+    g_confirmHooked = dialog;
     Log("province_building_removal: %s", g_confirmHooked ? "the cross asks for confirmation (vanilla's dialog)"
                                                           : "no confirmation dialog; the cross removes at once");
     return true;
 }
 
-void DisableProvinceBuildingRemoval() {
-    if (g_enabled) Log("province_building_removal: switched off for this session");
+// Takes out every hook queued above, before they are applied (init failed after queueing them).
+void UnhookProvinceBuildingRemoval() {
+    for (uint8_t* fn : {g_updateFn, g_tooltipFn, g_dtorFn, g_confirmDtorFn, g_confirmValidFn, g_confirmAcceptFn})
+        if (fn) HookUnqueue(fn);
+    g_confirmHooked = false;
     g_enabled = false;
 }
 
@@ -680,8 +722,8 @@ static int RemoveBody(void* province, void* type, void* state, std::string* why)
         *why = "the province has no level of that building";
         return -1;
     }
-    if (!PlayerControls(province)) {
-        *why = "the player does not control the province";
+    if (!PlayerMayRemove(province, state)) {
+        *why = "the player does not own the state or control the province";
         return -1;
     }
     if (!g_permission(state, building, nullptr)) {

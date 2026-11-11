@@ -1,11 +1,11 @@
 // province_building_removal (engine tier): a cross on the state view's province building entries
 // (supply hub, naval base, bunkers, coastal bunkers, ...), as vanilla shows one on the shared slot
-// buildings. A click removes one level of that building in that province at once, as
-// remove_building does, so the supply system follows for hubs (NOTES.md Part I).
+// buildings. A click opens vanilla's "Remove Building" dialog; OK removes one level of that building
+// in that province, as remove_building does, so the supply system follows for hubs (NOTES.md Part I).
 //
 // The cross is a `remove` button the loader adds to province_building_entry by patching
 // interface/countrystateview.gui when the game reads it (vanilla's copy or a mod's). It shows where
-// the local player controls the province and the building has a level, enabled unless vanilla's
+// the local player owns the state, controls the province and the building has a level, enabled unless vanilla's
 // wartime removal cooldown blocks it. Single player only: a click happens on one machine, so in
 // multiplayer the cross stays hidden.
 #include <atomic>
@@ -78,15 +78,17 @@ bool ProvinceBuildingRemovalInit() {
         Log("%s: the main-thread queue is unavailable (clicks could not be deferred)", kFeature);
         return false;
     }
-    // The patch first: without the button the hooks have nothing to do; without the hooks a patched
-    // button would show and do nothing, so a failed hook leaves the file unpatched (init fails
-    // before VfsStart, and features register their files from init only).
+    // Hooks and file patch together or not at all. Without the hooks a patched button would show
+    // and do nothing, so a failed hook leaves the file unpatched (features register their files
+    // from init only, before VfsStart). Without the patch the hooks are taken out again, so a UI
+    // mod's own `remove` button in the entry is not bound while the feature reports off.
     if (!Engine::HookProvinceBuildingRemoval(&Allowed, &OnClick, &OnFault)) {
         Log("%s: hooks could not be queued", kFeature);
         return false;
     }
     if (!register_file_patch(L"interface/countrystateview.gui", &PatchGui)) {
-        Log("%s: countrystateview.gui patch could not be registered; the cross will not appear", kFeature);
+        Log("%s: countrystateview.gui patch could not be registered; hooks taken out, no cross", kFeature);
+        Engine::UnhookProvinceBuildingRemoval();
         return false;
     }
     OnGameEntered(&OnEntered);

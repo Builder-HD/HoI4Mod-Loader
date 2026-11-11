@@ -322,9 +322,9 @@ using ProvinceRemoveFault_t = void (*)(const char* where);
 // Queues the update, tooltip and destructor hooks. Call from a feature's init.
 bool HookProvinceBuildingRemoval(ProvinceRemoveAllowed_t allowed, ProvinceRemoveClick_t onClick,
                                  ProvinceRemoveFault_t onFault);
-// Switches it off for the rest of the session: crosses hide, clicks and removals do nothing, the
-// tooltip is vanilla's. The destructor hook keeps freeing the button bindings.
-void DisableProvinceBuildingRemoval();
+// Init only: takes out every hook HookProvinceBuildingRemoval queued (a later init step failed),
+// so nothing of the feature is applied.
+void UnhookProvinceBuildingRemoval();
 // Main thread, at a safe point: removes one level of the province's building of `type` as
 // remove_building does (SetLevel with notify, so supply follows), if it still has a level, the local
 // player controls the province and the removal cooldown allows it. Returns the new level, or -1

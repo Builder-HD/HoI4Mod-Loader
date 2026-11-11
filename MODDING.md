@@ -1066,23 +1066,27 @@ No script commands: this feature changes the UI.
 
 - **What the player sees:** in the state view's province row (supply hub, naval base, bunker,
   coastal bunker and the other province buildings), each building gets the same red cross that
-  vanilla shows on dockyards and factories in the shared slots. Clicking it removes one level of
-  that building in that province at once, as vanilla's removal does for state buildings.
-- **When the cross shows:** the province has a level of the building and the local player's
-  country controls the province. During a war, vanilla's removal cooldown applies: the cross is
+  vanilla shows on dockyards and factories in the shared slots. Clicking it asks for confirmation
+  (below); OK removes one level of that building in that province, as vanilla's removal does for
+  state buildings.
+- **When the cross shows:** the province has a level of the building, the local player's country
+  owns the state (as vanilla requires for the shared slot cross) and controls the province. So
+  there is no cross in an occupied enemy province, nor in an owned province the enemy occupies.
+  During a war, vanilla's removal cooldown applies: the cross is
   greyed out and its tooltip says until when. A removal starts the cooldown, as for state
   buildings. The tooltip is vanilla's `BUILDING_SLOT_REMOVE_BUILDING_LEVEL` ("Remove the
   building.").
 - **Confirmation:** a click opens vanilla's "Remove Building" dialog ("Are you sure you want to
   remove this Building?"), as on dockyards, and OK removes the level. If the building is gone, the
-  player loses the province or the cooldown starts while the dialog is open, it closes without
-  removing anything.
+  player loses the state or the province, or the cooldown starts while the dialog is open, it
+  closes without removing anything. (If the dialog's engine functions are not found on a build,
+  the cross removes without asking; `loader.log` says which.)
 - **Supply hubs:** the supply system follows the removal (the same notification
   `remove_building` sends): the hub stops supplying at the next supply update.
 - **Single player only:** a click happens on one machine, so in multiplayer the cross stays hidden.
 - **Fail-safe:** if anything in the loader's part faults, the feature logs it and switches itself
-  off for the session. The crosses hide, clicks do nothing, and
-  `hoi4_loader_feature_province_building_removal` turns false.
+  off for the session. The crosses hide (also in state views opened afterwards), clicks do
+  nothing, and `hoi4_loader_feature_province_building_removal` turns false.
 - **Saves:** nothing of the loader's own is saved. A removal changes only what vanilla's removal
   changes (the building level, and the state's last removal date for the cooldown), so saves load
   the same without the loader.
@@ -1091,7 +1095,9 @@ No script commands: this feature changes the UI.
   `province_building_entry`. It patches whichever copy the game loads, vanilla's or a mod's, so a
   UI mod that changes that file keeps its version. If the entry already has a `remove` button, or
   there is no `province_building_entry`, the file is left as it is. Without the loader, or with
-  the feature off, there is no button at all.
+  the feature off from the start, the file is not patched and there is no button at all. If the
+  feature switches itself off during a game, the patched file stays loaded and the loader keeps
+  the button hidden.
 - **Script:** use vanilla `remove_building = { type = supply_node level = 1 province = N }`; it
   updates supply too. `hoi4_loader_feature_province_building_removal = yes` (ship the stub) tells
   whether the cross is available, for example for a hint in a decision's description.
