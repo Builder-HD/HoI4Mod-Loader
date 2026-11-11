@@ -848,7 +848,7 @@ leads no army yet, the first division forms one under them.
 
 ```
 every_country_division = {               # vanilla division scope
-    limit = { has_template = "Panzer-Division" }
+    limit = { division_has_majority_template = cavalry }
     add_to_army = {
         leader = GER_erwin_rommel        # character id (required)
         name = "1. Panzerarmee"          # optional: only used when a new army is formed

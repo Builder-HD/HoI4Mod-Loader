@@ -3434,6 +3434,10 @@ more step.
   off for the session (`create_army` stays).
 - **Logging:** the same line for many divisions (an `every_country_division` with an unavailable
   general) is logged once, then "(the previous line N more time(s))".
+- **Test mod:** vanilla has no division trigger for a template name (`has_template` is a country
+  trigger; error.log: "has_template: Invalid Scope, supported: Country, provided: Unit"), so the
+  Join decisions pick any of the country's divisions. Found in the first game test, where every
+  `limit` was false and no Join decision did anything.
 - `tools/check_code_shapes.py` (`check_add_to_army`): all ok on 1.19.4.2. Smoke test, unit
   tests, signature check and stub check pass. No new signatures (the count stays 84).
 
@@ -3447,12 +3451,13 @@ divisions and armies on the left) and `loader.log`.
    and, on game entry, "add_to_army: self-check passed".
 2. **New army:** "Join: one division forms Army J under General C". Tooltip "Forms the army Loader
    Test Army J under Loader Test General C." Then one division is in a new army "Loader Test Army
-   J" led by General C; its old army has one division fewer.
+   J" led by General C (a random German division; if it was in an army, that army has one
+   division fewer).
 3. **Join:** "Join: three divisions join General C". Tooltip "Joins the army of Loader Test General
    C." Army J then has 4 divisions (fewer if a picked division was already in it: nothing happens
    for that one).
-4. **Old army disbanded:** "Join: Nassau's divisions join General B". Every Loader Test Infantry
-   division in Nassau (Army A's, and Army A2's if "reassign General A" was taken) is in General
+4. **Old army disbanded:** "Join: Nassau's divisions join General B". Every division in Nassau
+   (Army A's, and Army A2's if "reassign General A" was taken) is in General
    B's army; Army A is gone from the list; `loader.log` says "...was disbanded" for its last
    division. Its general, if it had one, then leads no army.
 5. **Failures** (the division stays; red tooltip line; one log line each): unknown character, an
