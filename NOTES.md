@@ -3441,7 +3441,7 @@ more step.
 - `tools/check_code_shapes.py` (`check_add_to_army`): all ok on 1.19.4.2. Smoke test, unit
   tests, signature check and stub check pass. No new signatures (the count stays 84).
 
-### G4.6 In-game test (to do)
+### G4.6 In-game test (passed 2026-11-11)
 
 Germany 1936, test mod, single player. Take "Armies: prepare", then Army A, B and C, then
 "Join: prepare" (recruits Loader Test General C). After each step, look at the army list (the
@@ -3475,6 +3475,9 @@ divisions and armies on the left) and `loader.log`.
 9. **Without the loader** (`version.dll` renamed): the save loads with the same armies;
    `error.log` has "Unknown effect" for `add_to_army` when parsing the test mod; the Join decisions
    are hidden.
+
+**Result (2026-11-11, 1.19.4.2, single player):** after the test mod fix in G4.5 (no
+`has_template` in division scope), "everything works as expected" in the in-game test.
 
 ### G4.7 Open
 
