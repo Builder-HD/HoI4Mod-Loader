@@ -43,6 +43,7 @@ add_library(hoi4_loader SHARED
     src/plugin_create_army.cpp
     src/plugin_railways.cpp
     src/plugin_time_control.cpp
+    src/plugin_equipment_conversion.cpp
     src/engine.cpp
     src/engine_data.cpp
     src/engine_scope.cpp
@@ -52,6 +53,7 @@ add_library(hoi4_loader SHARED
     src/engine_province_buildings.cpp
     src/gui_patch.cpp
     src/plugin_province_buildings.cpp
+    src/engine_conversion.cpp
     src/engine.h
     src/lifecycle.cpp
     src/lifecycle.h
