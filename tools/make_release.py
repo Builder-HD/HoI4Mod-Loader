@@ -5,7 +5,6 @@ Usage: python -I tools/make_release.py
 Writes release/hoi4_loader-v<version>.zip (one top folder of the same name) with:
   game/version.dll, game/loader_config.ini   -> the game folder
   mod/hoi4_loader_test.mod, mod/hoi4_loader_test/ -> Documents\\...\\Hearts of Iron IV\\mod\\
-  mod/hoi4_loader_railway_rules.mod, mod/hoi4_loader_railway_rules/ (the game rules alone) -> same
   stubs/                                      -> for mod authors (MODDING.md "Stub pack")
   README.md (players), MODDING.md, DEVELOPING.md, CHANGELOG.md, LICENSE.txt, SHA256SUMS.txt
 and release/SHA256SUMS.txt (the zip contents), release/<zip>.sha256 (the zip itself) and
@@ -122,10 +121,8 @@ def files():
            ('DEVELOPING.md', ROOT / 'DEVELOPING.md'),
            ('LICENSE.txt', ROOT / 'LICENSE'),
            ('CHANGELOG.md', ROOT / 'CHANGELOG.md'),
-           ('mod/hoi4_loader_test.mod', ROOT / 'mod' / 'hoi4_loader_test.mod'),
-           ('mod/hoi4_loader_railway_rules.mod', ROOT / 'mod' / 'hoi4_loader_railway_rules.mod')]
+           ('mod/hoi4_loader_test.mod', ROOT / 'mod' / 'hoi4_loader_test.mod')]
     for base, prefix in ((ROOT / 'mod' / 'hoi4_loader_test', 'mod/hoi4_loader_test/'),
-                         (ROOT / 'mod' / 'hoi4_loader_railway_rules', 'mod/hoi4_loader_railway_rules/'),
                          (ROOT / 'stubs', 'stubs/')):
         for p in sorted(base.rglob('*')):
             if p.is_file():
