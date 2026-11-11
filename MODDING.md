@@ -1006,8 +1006,7 @@ queue_railway_dismantle = { start_province = 6521 target_province = 6282 levels 
   ```yaml
    HOI4_LOADER_RAILWAY_DISMANTLE_TOOLTIP:0 "§RDismantling§! level $START_LEVEL|H$ railways in $RAILWAY_NAME|H$ to level $TARGET_LEVEL|H$"
   ```
-  Without the key the vanilla upgrade text shows. `loader.log` says which on first use. The
-  rules-only mod (`mod/hoi4_loader_railway_rules`) defines it.
+  Without the key the vanilla upgrade text shows. `loader.log` says which on first use.
 - **On the map (single player):** in the railway construction view, hold **Alt+Shift**: the
   level circle on every railway segment you may dismantle shows vanilla's removal cross (the one
   on the state view's buildings; a red **X** if the text icon cannot be used). **Alt+Shift+click**
@@ -1030,10 +1029,9 @@ queue_railway_dismantle = { start_province = 6521 target_province = 6282 levels 
 
   A queued entry is cancelled (what was dismantled stays dismantled) once that no longer holds,
   e.g. a province changes hands or an alliance ends. The usual way to set the flags is a game
-  rule per flag; the rules-only mod `mod/hoi4_loader_railway_rules` ("HOI4 Loader Railway Rules")
-  has them (`common/game_rules/hoi4_loader_railway_rules.txt`) and sets the flags at game start
-  (`hoi4_loader_railway_rules_on_actions.txt`). Script may also
-  set or clear them at any time. The effects (`downgrade_railway`, `queue_railway_dismantle`) are
+  rule per flag, read at `on_startup` (`has_game_rule`) to set the flag. Note that 1.19.4.2
+  accepts `desc` only inside a rule's `option` / `default` blocks, not on the rule itself
+  ("Unexpected token: desc" in `error.log`). Script may also set or clear them at any time. The effects (`downgrade_railway`, `queue_railway_dismantle`) are
   not limited by them: script decides where it uses those.
 - **Dismantling cost:** 30% of the building cost per level by default. A global flag
   `hoi4_loader_railway_dismantle_cost_<percent>` (0 to 1000, e.g. `..._cost_50` for half) changes

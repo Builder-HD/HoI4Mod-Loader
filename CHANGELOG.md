@@ -6,6 +6,8 @@ A–F; NOTES.md has the findings and test results behind each.
 
 ## Unreleased
 
+- **Railway rules mod removed from the repo:** `mod/hoi4_loader_railway_rules` is no longer part
+  of the loader or its release zip; the global flags it set stay documented in MODDING.md.
 - **New feature `time_control`** (engine tier, single player; guard
   `hoi4_loader_feature_time_control`; script version unchanged). NOTES.md Part K.
   - `force_game_speed = { speed = 1-5 days = <n> hours = <n> until = "y.m.d.h" lock_pause = yes }`
@@ -87,11 +89,7 @@ A–F; NOTES.md has the findings and test results behind each.
     railway route between two provinces, optionally only over links of at least `min_level`.
     Test mod: "remove every route" and "level 3 or 4 connection?" decisions.
   - Dismantling cost is now 30% of building by default (was a third) and follows a global flag
-    `hoi4_loader_railway_dismantle_cost_<percent>`, set from a game rule "Cost" (10 to 100%).
-  - **Rules-only mod** "HOI4 Loader Railway Rules" (`mod/hoi4_loader_railway_rules`, in the
-    release zip): the four railway game rules moved out of the test mod, so they can be used
-    without its decisions. They have their own "Dismantle Railways" group, the three territory
-    rules first and Cost last. The mod also has the dismantle entry's "Dismantling" tooltip text.
+    `hoi4_loader_railway_dismantle_cost_<percent>`.
   - **Fixed:** without a mod defining the title marker keys, railway entries showed
     "£decrease_texticon£" as text instead of the triangle: the engine converts the "£" icon
     delimiter when it loads localisation, so the built-in markers now take it from vanilla's

@@ -223,7 +223,7 @@
  hoi4_rail_test_no_path:0 "Railway test: no path (must do nothing)"
  hoi4_rail_test_no_path_desc:0 "Start and target are the same province. Expect a loader.log line and no change."
  hoi4_rail_test_queue_one:0 "Railway test: queue dismantling one level"
- hoi4_rail_test_queue_one_desc:0 "queue_railway_dismantle on the railway 6521 to 6282: a construction queue entry lowers every link one level, at 30% of the cost of building it (or the Cost game rule of the HOI4 Loader Railway Rules mod)."
+ hoi4_rail_test_queue_one_desc:0 "queue_railway_dismantle on the railway 6521 to 6282: a construction queue entry lowers every link one level, at 30% of the cost of building it (or the global flag hoi4_loader_railway_dismantle_cost_<percent>)."
  hoi4_rail_test_queue_remove:0 "Railway test: queue removing it"
  hoi4_rail_test_queue_remove_desc:0 "queue_railway_dismantle with levels = all: the queue entry takes the railway 6521 to 6282 down to nothing, level by level."
  HOI4_LOADER_RAILWAY_DISMANTLE_PREFIX:0"£decrease_texticon£ "

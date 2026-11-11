@@ -32,8 +32,7 @@ Or in Visual Studio: **File > Open > Folder...**, pick this folder, choose `x64-
    OneDrive often `C:\Users\<you>\OneDrive\Documents\...`):
    - `mod\hoi4_loader_test.mod` -> `...\mod\hoi4_loader_test.mod` (the launcher may rewrite its `path`)
    - `mod\hoi4_loader_test\`    -> `...\mod\hoi4_loader_test\`
-   - the same for `hoi4_loader_railway_rules` (the railway game rules, without decisions)
-3. Enable **HOI4 Loader Test** and **HOI4 Loader Railway Rules** in the launcher playset.
+3. Enable **HOI4 Loader Test** in the launcher playset.
 
 ## Layout
 
