@@ -386,6 +386,160 @@ hoi4_loader_army_category = {
 		ai_will_do = { base = 0 }
 	}
 
+	# --- add_to_army (NOTES.md G4) ----------------------------------------------------------------
+	# Existing divisions join a general's army. Take "Armies: prepare" and Army A, B and C first.
+	# "Join: prepare" recruits Loader Test General C, who leads no army yet. Guarded with
+	# hoi4_loader_feature_add_to_army = yes. Hover each decision: the line says "Joins the army of
+	# ..." / "Forms a new army under ..." or the reason in red; loader.log names what happened.
+	hoi4_loader_join_prepare = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_add_to_army = yes
+			has_country_flag = hoi4_loader_army_prepared
+			NOT = { has_country_flag = hoi4_loader_join_prepared }
+		}
+		complete_effect = {
+			set_country_flag = hoi4_loader_join_prepared
+			recruit_character = HLT_general_c
+		}
+		ai_will_do = { base = 0 }
+	}
+	# One division forms a new army under General C (General C leads none yet).
+	hoi4_loader_join_new = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_add_to_army = yes has_country_flag = hoi4_loader_join_prepared }
+		complete_effect = {
+			random_country_division = {
+				limit = { has_template = "Loader Test Infantry" }
+				add_to_army = { leader = HLT_general_c name = "Loader Test Army J" }
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+	# Three more divisions join General C's army (Army J after the decision above).
+	hoi4_loader_join_three = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_add_to_army = yes has_country_flag = hoi4_loader_join_prepared }
+		complete_effect = {
+			every_country_division = {
+				limit = { has_template = "Loader Test Infantry" }
+				random_select_amount = 3
+				add_to_army = { leader = HLT_general_c }
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+	# Every division in Nassau (Army A's divisions at Frankfurt) joins General B's army (Army B).
+	# Army A, left without divisions, is disbanded.
+	hoi4_loader_join_nassau = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_add_to_army = yes has_country_flag = hoi4_loader_join_prepared }
+		complete_effect = {
+			55 = {
+				every_state_division = {
+					limit = { has_template = "Loader Test Infantry" }
+					add_to_army = { leader = HLT_general_b }
+				}
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+	# Failures: the division stays where it is; red tooltip line, loader.log says why.
+	hoi4_loader_join_fail_unknown = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_add_to_army = yes has_country_flag = hoi4_loader_join_prepared }
+		complete_effect = {
+			random_country_division = {
+				limit = { has_template = "Loader Test Infantry" }
+				add_to_army = { leader = HLT_no_such_character }
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_join_fail_admiral = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_add_to_army = yes has_country_flag = hoi4_loader_join_prepared }
+		complete_effect = {
+			random_country_division = {
+				limit = { has_template = "Loader Test Infantry" }
+				add_to_army = { leader = HLT_admiral }
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_join_fail_other_country = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_add_to_army = yes has_country_flag = hoi4_loader_join_prepared }
+		complete_effect = {
+			random_country_division = {
+				limit = { has_template = "Loader Test Infantry" }
+				add_to_army = { leader = FRA_jean_de_lattre_de_tassigny }
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+	# While France holds General B (Armies: France captures General B).
+	hoi4_loader_join_fail_captured = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_add_to_army = yes
+			has_country_flag = hoi4_loader_join_prepared
+			HLT_general_b = { is_general_captured = yes }
+		}
+		complete_effect = {
+			random_country_division = {
+				limit = { has_template = "Loader Test Infantry" }
+				add_to_army = { leader = HLT_general_b }
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+	# During the border war (Armies: border war from Saxony, led by General B): a division joins
+	# General C, then may not join General B's army ("their army ... is in a border war") ...
+	hoi4_loader_join_fail_border_war_target = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_add_to_army = yes
+			has_country_flag = hoi4_loader_join_prepared
+			has_global_flag = hoi4_loader_army_border_war
+		}
+		complete_effect = {
+			random_country_division = {
+				limit = { has_template = "Loader Test Infantry" }
+				add_to_army = { leader = HLT_general_c }
+				add_to_army = { leader = HLT_general_b }
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+	# ... and no division of General B's army may leave it ("its army ... is in a border war"):
+	# every division of the country tries to join General C; those in the border war army stay,
+	# the others join (loader.log counts repeated lines).
+	hoi4_loader_join_fail_border_war_division = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_add_to_army = yes
+			has_country_flag = hoi4_loader_join_prepared
+			has_global_flag = hoi4_loader_army_border_war
+		}
+		complete_effect = {
+			every_country_division = {
+				add_to_army = { leader = HLT_general_c }
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+
 	# --- AI ------------------------------------------------------------------------------------
 	# Two steps, so the second decision's preview sees General AI already recruited by Italy:
 	# prepare Italy (general and template), then give it an army of 10 divisions under that general

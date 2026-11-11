@@ -12,6 +12,11 @@ characters = {
 		portraits = { army = { large = GFX_portrait_unknown small = GFX_portrait_unknown } }
 		corps_commander = { skill = 2 attack_skill = 2 defense_skill = 2 planning_skill = 2 logistics_skill = 2 }
 	}
+	HLT_general_c = {
+		name = HLT_general_c
+		portraits = { army = { large = GFX_portrait_unknown small = GFX_portrait_unknown } }
+		corps_commander = { skill = 2 attack_skill = 2 defense_skill = 2 planning_skill = 2 logistics_skill = 2 }
+	}
 	HLT_marshal = {
 		name = HLT_marshal
 		portraits = { army = { large = GFX_portrait_unknown small = GFX_portrait_unknown } }
