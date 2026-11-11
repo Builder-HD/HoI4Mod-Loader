@@ -3925,6 +3925,9 @@ The railway review (H3, "After the PR #2 review") asked the same questions of th
    *Tested 2026-11-11 after the PR #3 review fixes: as described.*
 7. Multiplayer: no cross.
 8. A UI mod that replaces countrystateview.gui: its copy is patched (`loader.log` names its path).
+   *Tested 2026-11-11 with KaiserreduX (Workshop 2076426030, a heavily changed 258 KB copy): the
+   cross shows and removes as in vanilla. The patch also applies offline (`gui_patch_test <file>`)
+   to The Road to 56, The Great War Redux and The Fire Rises.*
 9. Destroying the state view (close, reopen, switch states quickly): no crash (the destructor
    hook frees the wrapper first).
 10. **Confirmation:** the cross opens "Remove Building"; Cancel leaves the level; OK removes one
