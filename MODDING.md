@@ -38,6 +38,7 @@ Current features:
 | `production_data` | engine (needs `lifecycle`) | `hoi4_loader_plugin_production_data` | `factories_assigned` |
 | `region_scope` | engine (needs `lifecycle`) | `hoi4_loader_plugin_region_scope` | `strategic_region`, `any_`/`every_`/`random_strategic_region` and the region identity triggers, see below |
 | `create_army` | engine (needs `lifecycle`) | `hoi4_loader_plugin_create_army` | `create_army`: spawn divisions as an army under a chosen general, see below |
+| `add_to_army` | engine (needs `create_army`) | `hoi4_loader_plugin_add_to_army` | `add_to_army`: put a division into a general's army, see below |
 | `railways` | engine (needs `lifecycle`) | `hoi4_loader_plugin_railways` | `downgrade_railway`: lower or remove a railway; `has_railway_between` trigger, see below |
 | `railway_queue` | engine (needs `railways`) | `hoi4_loader_plugin_railway_queue` | `queue_railway_dismantle`: dismantling as a construction queue entry, see below |
 | `time_control` | engine (needs `lifecycle`) | `hoi4_loader_plugin_time_control` | `force_game_speed`, `release_game_speed`, `hide_date_display`, `hide_time_controls`, `has_forced_game_speed`: lock the game speed (and the pause) for a while, hide the top bar's date; single player, see below |
@@ -141,6 +142,7 @@ when the loader is missing or a feature is off. Without them, using a loader tri
 | `factories_assigned` | `scripted_triggers/hoi4_loader_feature_production_data.txt` |
 | `strategic_region`, `any_`/`every_`/`random_strategic_region`, `strategic_region_id`, `is_sea_region`, `region_has_state` | `scripted_triggers/hoi4_loader_feature_region_scope.txt` |
 | `create_army` | `scripted_triggers/hoi4_loader_feature_create_army.txt` |
+| `add_to_army` | `scripted_triggers/hoi4_loader_feature_add_to_army.txt` |
 | `downgrade_railway`, `has_railway_between` | `scripted_triggers/hoi4_loader_feature_railways.txt` |
 | `queue_railway_dismantle` | `scripted_triggers/hoi4_loader_feature_railway_queue.txt` |
 | `force_game_speed`, `release_game_speed`, `hide_date_display`, `hide_time_controls`, `has_forced_game_speed` | `scripted_triggers/hoi4_loader_feature_time_control.txt` |
@@ -837,6 +839,75 @@ loaded without the loader keeps them (they are ordinary armies).
 **Without the loader:** `create_army` is an unknown effect. The game logs it once per use when
 parsing, and the whole block, `create_unit`s included, does nothing. Guard decisions with
 `hoi4_loader_feature_create_army = yes` (stub: `stubs/common/scripted_triggers/hoi4_loader_feature_create_army.txt`).
+
+### Adding divisions to a general's army (`add_to_army`)
+
+`create_army` makes an army from new divisions. `add_to_army` puts **existing** divisions into the
+army a general leads, the way the player assigns divisions to an army in the game. If the general
+leads no army yet, the first division forms one under them.
+
+```
+every_country_division = {               # vanilla division scope
+    limit = { has_template = "Panzer-Division" }
+    add_to_army = {
+        leader = GER_erwin_rommel        # character id (required)
+        name = "1. Panzerarmee"          # optional: only used when a new army is formed
+    }
+}
+```
+
+- **Scope:** a division, e.g. inside `every_country_division`, `random_country_division`,
+  `every_state_division` or `random_state_division`. Anywhere else the effect does nothing.
+- **What happens:**
+  - The division joins the army the general leads, through the game's own assignment. It leaves
+    its old army; an old army left without divisions is disbanded, as when the player reassigns
+    divisions in the game.
+  - **The general leads no army:** a new army is formed from this division, led by the general
+    and named `name` if given. The next divisions of the same `every_country_division` then join it.
+  - **The division is already in that army:** nothing happens.
+- **Orders:** the division joins without the army's front or other orders. Give the army its
+  orders in game.
+- **Command power:** none is charged (the game's own assignment costs none either).
+
+**The general (`leader`)** must be, as for `create_army`:
+- an army leader (general or field marshal);
+- recruited by the **division's** country;
+- not captured, and not leading an army group.
+
+**When nothing happens.** That division is left as it is; `loader.log` says why (a reason that
+repeats for every division of an `every_country_division` is logged once and then counted), and
+the tooltip shows a red line such as "Cannot join the army of Erwin Rommel: not recruited."
+
+| Case | Reason |
+|---|---|
+| The general is unknown, not recruited, serves another country, is not an army leader, is captured, or leads an army group | as for `create_army` |
+| The division's army is in a border war | "its army <name> is in a border war" (the game's own assignment refuses this too) |
+| The general's army is in a border war | "their army <name> is in a border war" (stricter than the game, so a script can't change the strength of a running border war) |
+| The scope is not a land division | "this is not a land division" |
+
+**Tooltip.**
+- "Joins the army of **Erwin Rommel**."
+- "Forms a new army under **Erwin Rommel**." (with `name`: "Forms the army **1. Panzerarmee**
+  under **Erwin Rommel**.") when the general leads no army at the moment of hovering.
+- Inside `every_country_division` the game shows the line once, for the iterator as a whole; the
+  general is then checked against the scope's country.
+- The texts can be translated: `HOI4_LOADER_ADD_TO_ARMY`, `_NEW`, `_NEW_NAMED`, `_UNAVAILABLE`,
+  `HOI4_LOADER_ADD_TO_ARMY_NOT_DIVISION`, `HOI4_LOADER_ADD_TO_ARMY_DIVISION_BORDER_WAR`, and the
+  `create_army` reason keys (`loader_script_docs.md` lists them).
+
+**AI countries:** as for `create_army`, the AI rearranges its own armies, so for an AI country
+the result is only a starting point. Players' armies are not touched.
+
+**Multiplayer:** an ordinary effect that runs the game's own assignment on every machine in the
+same order. **Not tested in multiplayer yet.**
+
+**Saves:** the armies are saved by the game itself; a save loaded without the loader keeps them.
+
+**Without the loader:** `add_to_army` is an unknown effect. The game logs it once when parsing and
+skips it; the other effects in the same block still run. Guard with
+`hoi4_loader_feature_add_to_army = yes` (stub:
+`stubs/common/scripted_triggers/hoi4_loader_feature_add_to_army.txt`).
+
 ## Lowering railways (`railways`)
 
 Vanilla script can build railways (`build_railway`) but never lower them:

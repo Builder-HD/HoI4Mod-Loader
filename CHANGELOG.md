@@ -41,6 +41,18 @@ A–F; NOTES.md has the findings and test results behind each.
     `tools/make_release.py` also writes the GitHub release notes.
   - Help texts the DLL writes into `loader_script_docs.md` point to MODDING.md instead of the
     README.
+- **New feature `add_to_army`** (engine tier, needs `create_army`; guard
+  `hoi4_loader_feature_add_to_army`; script version unchanged). NOTES.md G4.
+  - `add_to_army = { leader = <character> name = "..." }` in a division scope (e.g. inside
+    `every_country_division`): the division joins the army that general leads, through the
+    game's own assignment (as the player's "assign to army"); an old army left without divisions
+    is disbanded. If the general leads no army, a new one is formed from the division, named
+    `name` if given, and the next divisions join it.
+  - The general must be available as for `create_army`. Also refused when the division's army
+    (the game's own rule) or the general's army (stricter than the game) is in a border war.
+    The tooltip shows the reason in red; `loader.log` logs a repeated line once, then counts it.
+  - No command power, no front orders. New code shapes (no new signatures); checked on 1.19.4.2
+    only, 1.19.3 and 1.19.2 are unchecked (no copies).
 - **New feature `create_army`** (engine tier; guard `hoi4_loader_feature_create_army`; script version
   unchanged, as for every new feature).
   - `create_army = { leader = <character> name = "..." reassign = yes country = <tag> create_unit = { ... } ... }`,

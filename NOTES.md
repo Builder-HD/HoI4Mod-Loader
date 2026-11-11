@@ -3399,12 +3399,85 @@ the result is only a starting arrangement. Player armies are not touched.
 cleanup are deterministic game-state code; there is no UI call. The G3 session covers it with one
 more step.
 
-### G4.5 Open
+### G4.5 Decisions and implementation (2026-11-11)
 
-- **Approval** of G4.4, especially the stricter border war rule and the separate feature.
+**Approved** as proposed in G4.4:
+- the stricter rule: a division may not join a general's army that is in a border war;
+- a feature of its own, `add_to_army` (needs `create_army`), guard
+  `hoi4_loader_feature_add_to_army`, with a stub;
+- `name` is only used when a new army is formed; no front orders; an emptied old army is
+  disbanded as the UI does.
+
+**Implemented** (branch `feature/add-to-army`, rebased onto `main` after #2 and #5):
+- **Engine** (`engine_army.cpp`, `ResolveJoin`, resolved after create_army's pieces):
+  - the move and the cleanup from create_army (`kCodeCreateArmyMove`, `kCodeCreateArmyCleanup`),
+    cross-checked: `COrderAssignCommand` slot 10 calls both;
+  - inside the move: the unit's tag (`kCodeArmyMoveTag`, must equal the division owner offset
+    from `kSigStateLandUnits`), the army's member list and count (`kCodeArmyMoveMembers`), the
+    unit's army field read, compared and set at the same offset (`kCodeArmyMoveUnitArmy`); the
+    count must equal the cleanup's (`kCodeArmyCleanup`) and list + 0xc;
+  - the division getter from `CDestroyUnitEffect` slot 13 (`kCodeScopeDivision`): scope `+0x70`
+    (the field `Scope::types` reads), the loader's resolver, `-0x10` (`kUnitRef`);
+  - the CArmy vtable (RTTI), so only land divisions are accepted; and the border war field from
+    can_change_leader (`g_borderWar`), now required.
+  - On 1.19.4.2: move 0x140c45630, cleanup 0x140f70840, getter 0x14057cba0; division army
+    `+0xc0`, member entry `+0xb8`, army tag `+0x3c`, members `+0x50` (count `+0x5c`).
+- **`JoinArmy`** checks what the move only asserts (not an army group, same tag), skips a
+  division already in the army, calls `move(army, division, 1, 1)`, checks the division's army
+  field, then `cleanup(old)` (deletes the old army only if it has no members left).
+- **Plugin** (`plugin_create_army.cpp`, shares create_army's general check): the general's check
+  with "already leads an army" allowed; then the division's army in a border war ("its army ...")
+  and the general's army in a border war ("their army ..."). A general without an army: create_army's
+  `CreateArmy` with this one division, then the name and set_leader.
+- **Self-check on game entry:** every division of the player's country that has an army is in that
+  army's member list, and the army carries the country's tag. Otherwise `add_to_army` is switched
+  off for the session (`create_army` stays).
+- **Logging:** the same line for many divisions (an `every_country_division` with an unavailable
+  general) is logged once, then "(the previous line N more time(s))".
+- `tools/check_code_shapes.py` (`check_add_to_army`): all ok on 1.19.4.2. Smoke test, unit
+  tests, signature check and stub check pass. No new signatures (the count stays 84).
+
+### G4.6 In-game test (to do)
+
+Germany 1936, test mod, single player. Take "Armies: prepare", then Army A, B and C, then
+"Join: prepare" (recruits Loader Test General C). After each step, look at the army list (the
+divisions and armies on the left) and `loader.log`.
+
+1. **Load:** `loader.log` has the `add_to_army: move ..., cleanup ..., division getter ...` line
+   and, on game entry, "add_to_army: self-check passed".
+2. **New army:** "Join: one division forms Army J under General C". Tooltip "Forms the army Loader
+   Test Army J under Loader Test General C." Then one division is in a new army "Loader Test Army
+   J" led by General C; its old army has one division fewer.
+3. **Join:** "Join: three divisions join General C". Tooltip "Joins the army of Loader Test General
+   C." Army J then has 4 divisions (fewer if a picked division was already in it: nothing happens
+   for that one).
+4. **Old army disbanded:** "Join: Nassau's divisions join General B". Every Loader Test Infantry
+   division in Nassau (Army A's, and Army A2's if "reassign General A" was taken) is in General
+   B's army; Army A is gone from the list; `loader.log` says "...was disbanded" for its last
+   division. Its general, if it had one, then leads no army.
+5. **Failures** (the division stays; red tooltip line; one log line each): unknown character, an
+   admiral, a French general; after "Armies: France captures General B", "Join: fail, General B
+   is captured"; then "Armies: release General B".
+6. **Border war:** "Armies: border war from Saxony, led by General B", then:
+   - "Join: fail, General B's army is in a border war": the division joins General C, then the
+     second line is refused ("their army ... is in a border war");
+   - "Join: every division to General C during the border war": divisions of the border war
+     army stay ("its army ... is in a border war", logged once and counted), the others join;
+   - "Armies: end the border war".
+7. **Orders:** a division that joined an army with front orders has none of them (expected; the
+   UI's "also assign orders" option is not used).
+8. **Save/load:** save after step 4, load: the armies are as before; the self-check passes.
+9. **Without the loader** (`version.dll` renamed): the save loads with the same armies;
+   `error.log` has "Unknown effect" for `add_to_army` when parsing the test mod; the Join decisions
+   are hidden.
+
+### G4.7 Open
+
 - **Older builds:** the new code shapes must be checked on 1.19.3 (vanilla and checksum-patched)
   and 1.19.2. That needs copies of those exes (Steam's beta branch selector). Until then the
   feature stays off on those builds unless its shapes match (fail safe), like everything else.
+- **Multiplayer:** G3 gets one more step: an `every_country_division` with `add_to_army` from a
+  decision, then compare the armies on both machines (no OOS).
 
 # Part H: railways (`downgrade_railway`)
 
