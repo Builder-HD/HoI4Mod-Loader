@@ -23,6 +23,15 @@ hoi4_loader_army_category = {
 	}
 }
 
+# time_control tests (player only).
+hoi4_loader_time_category = {
+	icon = generic_research
+	visible = {
+		is_ai = no
+		hoi4_loader_present = yes
+	}
+}
+
 # AI cost measurement: visible to every country while the loader is present.
 hoi4_loader_ai_cost_category = {
 	icon = generic_research
