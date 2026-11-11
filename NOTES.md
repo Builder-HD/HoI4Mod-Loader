@@ -3922,6 +3922,7 @@ The railway review (H3, "After the PR #2 review") asked the same questions of th
 6. **Ownership:** an occupied enemy province (the player controls it, the enemy owns the state):
    no cross. A province of the player's own state that the enemy occupies: no cross. The player's
    own, controlled provinces: the cross as before.
+   *Tested 2026-11-11 after the PR #3 review fixes: as described.*
 7. Multiplayer: no cross.
 8. A UI mod that replaces countrystateview.gui: its copy is patched (`loader.log` names its path).
 9. Destroying the state view (close, reopen, switch states quickly): no crash (the destructor
