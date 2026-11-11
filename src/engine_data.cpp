@@ -338,6 +338,7 @@ bool CountryDivisionList(int tag, std::vector<void*>* out) {
 }
 
 int UnitOwnerTag(const void* unit) { return unit && g_unitOwner ? Rd<int>(unit, g_unitOwner) : 0; }
+uint32_t UnitOwnerOffset() { return g_unitOwner; }
 
 bool ForEachDivision(int tag, void (*fn)(void* division, void* ctx), void* ctx) {
     if (!HaveMilitaryCounts()) return false;

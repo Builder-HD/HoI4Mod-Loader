@@ -53,7 +53,7 @@ src/plugin_game_loaded.cpp    game_loaded feature (fires on_game_loaded after a 
 src/plugin_region_control.cpp, plugin_military_counts.cpp, plugin_army_condition.cpp,
 src/plugin_production_data.cpp   data trigger features (numeric triggers)
 src/plugin_region_scope.cpp   region_scope feature (strategic region scope blocks, iterators)
-src/plugin_create_army.cpp    create_army feature (create_unit children -> army under a general)
+src/plugin_create_army.cpp    create_army and add_to_army features (armies under a chosen general)
 src/plugin_time_control.cpp   time_control feature (speed lock, pause block, hidden date; saved as flags)
 src/engine_data.cpp           engine access for the data triggers (read-only game state)
 src/engine_scope.cpp          engine access for scope blocks (vanilla iterator templates, child scopes)
