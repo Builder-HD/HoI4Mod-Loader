@@ -4262,11 +4262,10 @@ Static analysis only.
 - **Naval:** first decided "no naval"; then (the user, "immersion breaking") a rule, off by
   default. The rules are only known in a game, after the lists are built, so naval pairs are
   added like the others and `CanConvert` refuses them while the rule is off.
-- **Rules:** game rules in the rules-only mod `mod/hoi4_loader_conversion_rules` (renamed in J6), which sets global
-  flags at `on_startup` (railways' way, H5): `hoi4_loader_conversion_off`,
-  `hoi4_loader_conversion_factor_<percent>` (default 75), `hoi4_loader_conversion_existing_loader_cost`,
-  `hoi4_loader_conversion_naval`. Read on the main thread at game entry and each new in-game day
-  into atomics; the hooks read only those.
+- **Rules** (first version; superseded by J6 and J7): game rules in a rules-only mod set global
+  flags at `on_startup` (railways' way, H5), read at game entry and daily. Now the tools are
+  opt-in flags a mod sets (J6), read at game entry, and in single player also every 30 frames;
+  in multiplayer at game entry only (J7). The hooks read only atomics.
 
 ## J3 implementation
 
@@ -4302,7 +4301,7 @@ Static analysis only.
 - **1.19.3:** unchecked (no 1.19.3 copy here); a false match would fail a cross-check and the
   feature would stay off.
 - `tools/check_signatures.py` and `tools/check_code_shapes.py`: all ok on the 1.19.4.2 copy
-  (SHA-256 `bccc6290…`, same as the game folder's). Smoke test: signature total 46 -> 52.
+  (SHA-256 `bccc6290…`, same as the game folder's). Smoke test: the signature total grew by 6 here (J5 and the rebases: J7).
 
 ### To verify in game (1.19.4.2, single player, Germany 1936, decisions "HOI4 Loader: Equipment Conversion")
 
@@ -4451,19 +4450,19 @@ convert tooltip (no script access).
   only: the type's earlier generations its list lacks). `Sync` (game entry, and `OnMainThreadFrame`
   every 30 frames in a game, so an `on_startup` flag counts before the first day) appends the
   planned pairs when the flag is set and truncates each list back to where the loader's entries
-  start when it is gone (`ConvertListTruncate`; the storage stays and the type's destructor frees
-  it). Safe points only: no tick, no conversion test running. After appending, the self-check runs;
+  start when it is gone (J7 replaced appending at runtime with entries reserved at load and a
+  count change). Safe points only: no tick, no conversion test running. After appending, the self-check runs;
   on a failure the pairs are removed again and the feature switches off.
 - **Pass-through without the flags.** `CanConvert` refuses a loader pair while the flag is gone but
   the entries are not removed yet; the cost hook scales nothing; the rebuild hook marks nothing;
   Shift+click is the game's click; the tooltip is the game's.
 - **All or none at init:** the hooks are queued from one list; on a failure the ones queued so far
-  are removed (`MH_RemoveHook`, before anything is applied).
+  are removed before anything is applied (`HookUnqueue` since J7).
 - **E8 fix:** `InText` checks every range against `.text` (`ImageSection`); `CallsTarget` returns
   false outside it, and the rebuild's E8 scan only follows targets inside it.
-- **The mod:** `mod/hoi4_loader_conversion_rules` became the example mod
-  `mod/hoi4_loader_equipment_conversion` (it sets the opt-in flags from game rules, plus a new rule
-  "Same Role Only (Shift+Click)"). The test mod got "Conversion: opt in (as a mod would)" / "opt out".
+- **The mod:** the rules-only mod became the example opt-in mod (it sets the opt-in flags from
+  game rules, plus a new rule "Same Role Only (Shift+Click)"); since moved to its own repository
+  (below). The test mod got "Conversion: opt in (as a mod would)" / "opt out".
 - **Console opt-in** (the user's question): the game has no console command that sets a flag or
   runs an effect (only the script effects `set_global_flag` / `clr_global_flag` exist in the exe),
   but its `event` command fires any event. The example mod's rule-to-flag logic moved into the
@@ -4489,8 +4488,8 @@ convert tooltip (no script access).
   merge (the railway category ended up inside it); restored.
 - **The mod moved out of the loader** (the user, 2026-11-11, as with the railway rules mod): the
   opt-in mod is now its own repository, "HoI4Mod Loader: Equipment Conversion"
-  (`C:\Users\nisse\Kod\HoI4Mod Loader Equipment Conversion`; launcher file
-  `hoi4_loader_equipment_conversion.mod`, folder `mod/hoi4_loader_equipment_conversion`). The loader
+  ([ni1saux/HoI4Mod-Loader-Equipment-Conversion](https://github.com/ni1saux/HoI4Mod-Loader-Equipment-Conversion);
+  launcher file `hoi4_loader_equipment_conversion.mod`). The loader
   keeps only the tools and the test mod's opt-in decisions; the mod's tooltip localisation keys
   fall back to the loader's English text without it.
 
@@ -4508,6 +4507,54 @@ convert tooltip (no script access).
 5. A save started without the mod, then loaded with it: nothing changes until the console's
    `event hoi4_loader_equipment_conversion.1`; then step 2 holds (`game.log`: "opted in from the
    game rules"). `event hoi4_loader_equipment_conversion.2`: step 3.
+
+## J7: PR #7 review (2026-11-11)
+
+**The review (Builder-HD):** opt-in answers #4; one blocker and smaller points.
+
+- **Blocker, multiplayer:** `Frame()` read the flags every 30 frames and `Sync()` then changed the
+  lists. Frame rates differ between machines, so a flag a mod sets or clears mid-game would change
+  `CanConvert`, the cost and the lists at a different tick on each machine (out of sync). **Fixed:**
+  in multiplayer the flags are read at game entry only (new game after `on_startup`, loaded save,
+  hot join: the same point everywhere); a flag set mid-game counts from the next load (logged once,
+  documented in MODDING). Single player keeps the 30-frame read, so a decision or the console still
+  counts within a second. "Single player" is the session as classified at game entry
+  (`SessionAllowsLocalWrites`).
+- **Growing the list freed the old buffer** at runtime, safe only because of the safe-point rule.
+  **Fixed:** at load, right after the game built a type's list (no conversion test runs yet), the
+  loader appends that type's earlier generations and sets the count back at once
+  (`ConvertListSetCount`): the entries sit in the buffer beyond the count, invisible to the game. At
+  runtime only the count changes (`first + n` while opted in, `first` otherwise); nothing is
+  allocated or freed after load. Before raising the count, `StillReserved` checks that the game's
+  count is unchanged and the entries are still there (otherwise that list is skipped and logged).
+- **Shift+click in multiplayer** swallowed the click. **Fixed:** it falls through to the game's
+  convert toggle.
+- **Hook removal:** `HookUnqueue` (from #3) instead of `MH_RemoveHook` in the plugin.
+- **NOTES:** J2 and J3 corrected, J6's mod path and a local path removed.
+- **Rebase on `main`** (#3, #6, #8, #9): the two branch commits squashed into one, then rebased;
+  add-only conflicts resolved as unions. The test mod's categories fix is now `main`'s (#9).
+  Signatures 98 + 11 = 109.
+
+**In-game checks** (still to run, from the review):
+1. Opting out removes the pairs ("earlier generations OFF"; the tooltip back to the base game).
+2. The factor on a source two or more generations back (Infantry Equipment 0 into II at 75%).
+3. The naval flag: without it no hull refits into a newer hull; check whether the designer or
+   stockpile still marks a hull as convertible (the design-flag helpers read the list; cosmetic).
+4. A new game with the separate mod: the flags at game entry, no `desc` or scope errors.
+5. A save made while opted in: loaded with the loader (still opted in), and without it (base game,
+   no errors).
+6. Multiplayer: a flag set mid-game changes nothing until the next load; no out of sync.
+
+**Results (2026-11-11, the user, 1.19.4.2, single player; the build installed before the J7
+changes, i.e. runtime append rather than reserved entries):** 2 (factor two or more generations
+back), 4 (new game with the separate mod) and 5 (save made while opted in, loaded with and without
+the loader) passed. Multiplayer (6) is not tested for now. Still open: 1 (opt-out), 3 (naval), and a
+run of the J7 build itself (the list is now reserved at load).
+
+**Results on the J7 build (2026-11-11, the user, 1.19.4.2, single player):** opt in, opt out and opt
+in again work (1; the reserved entries shown, hidden and shown again by the count alone); the naval
+flag works (3; whether a hull is still marked as convertible in the designer or stockpile was not
+reported). Only multiplayer (6) remains untested.
 
 
 # Part K: game speed and date display (`time_control`)

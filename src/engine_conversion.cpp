@@ -266,11 +266,12 @@ int GenerationsBack(const void* target, const void* source) {
 int ConvertListCount(const void* type) { return Rd<int32_t>(type, g_count); }
 const void* ConvertListAt(const void* type, int i) { return Rd<const void* const*>(type, g_list)[i]; }
 
-bool ConvertListTruncate(void* type, int count) {
+int ConvertListCapacity(const void* type) { return Rd<int32_t>(type, g_cap); }
+
+bool ConvertListSetCount(void* type, int count) {
     uint8_t* t = (uint8_t*)type;
-    int now = Rd<int32_t>(t, g_count);
-    if (count < 0 || count > now) return false;
-    memcpy(t + g_count, &count, sizeof count);  // the storage stays; the type's destructor frees it
+    if (count < 0 || count > Rd<int32_t>(t, g_cap)) return false;
+    memcpy(t + g_count, &count, sizeof count);  // no allocation: the storage stays as it is
     return true;
 }
 

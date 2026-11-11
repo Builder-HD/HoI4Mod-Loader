@@ -246,11 +246,13 @@ int GenerationsBack(const void* target, const void* source);
 // The convert-from list: types whose designs may be converted into designs of this type.
 int ConvertListCount(const void* type);
 const void* ConvertListAt(const void* type, int i);
-// Appends with the list's own allocator (the type's destructor frees it). Only where no conversion
-// test can run concurrently: the main thread at a safe point, or the database load.
+// Appends with the list's own allocator (the type's destructor frees it); may reallocate and free
+// the old buffer, so only during the database load (no conversion test runs yet).
 bool ConvertListAppend(void* type, const void* const* add, int n);
-// Shrinks the list back to `count` entries (removes what was appended after it). Same rule.
-bool ConvertListTruncate(void* type, int count);
+int ConvertListCapacity(const void* type);
+// Sets the count within the capacity, without allocating: entries already written beyond the count
+// become visible, or entries are hidden again. The buffer itself never changes.
+bool ConvertListSetCount(void* type, int count);
 // The role mode (Shift+click on a line's convert button), optional:
 bool HaveRoleMode();
 extern void* pLineRebuild;     // void (line, const int* tag): rebuilds the line's conversion sources

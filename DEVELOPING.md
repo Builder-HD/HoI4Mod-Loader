@@ -335,9 +335,11 @@ The loader's own speed request, unpause and date refresh run from `OnMainThreadF
 the tick. Each hook logs once which thread it runs on (`time_control: ... runs on thread`), the
 evidence that the UI parts stay on the main thread.
 
-The conversion lists themselves change only while a mod sets `hoi4_loader_conversion_generations`:
-the loader appends its pairs (and removes them when the flag goes) from `OnMainThreadFrame` or on
-game entry, when no conversion test runs. The hooks read equipment type data (fixed after load),
+The conversion lists themselves change only while a mod sets `hoi4_loader_conversion_generations`.
+The loader's entries are written into each list's buffer beyond the count during the database load;
+at runtime only the count changes (no buffer is allocated or freed after load), on game entry and,
+in single player, from `OnMainThreadFrame`. In multiplayer the flags count at game entry only, the
+same point on every machine. The hooks read equipment type data (fixed after load),
 the loader's own tables (SRW locks) and atomics; the flags are read on the main thread. Nothing
 touches graphics.
 

@@ -1193,9 +1193,12 @@ Equipment 0 never becomes Infantry Equipment II, and a mod that wants it writes 
 | `hoi4_loader_conversion_naval` | with generations on: earlier ship hulls too (refits); without it ships refit only as the game allows |
 | `hoi4_loader_conversion_role_mode` | Shift+click on a line's convert button toggles "same role only", see below |
 
-- The loader reads the flags every 30 frames in a game and when a game is entered (a flag set at
-  `on_startup` counts at once). Clearing `hoi4_loader_conversion_generations` removes the loader's
-  pairs again.
+- **When a flag change counts:** always at game entry (a new game after `on_startup`, a loaded
+  save, a hot join), so a flag set at `on_startup` counts at once. In **single player** also
+  mid-game: the loader reads the flags every 30 frames (a decision or the console counts within a
+  second). In **multiplayer only at game entry:** a flag a mod sets or clears mid-game counts from
+  the next load, so every machine changes at the same point. Clearing
+  `hoi4_loader_conversion_generations` removes the loader's pairs again.
 - Without `hoi4_loader_conversion_generations` the conversion lists stay the game's; with it the
   loader adds the pairs at a safe point (no tick running) and checks them.
 
@@ -1225,7 +1228,7 @@ role only" mode lists the designs it leaves out, greyed (HoI4 text has no strike
 - It is saved as the global flag `hoi4_loader_conversion_role_<TAG>_<equipment type>`; a mod can
   set it too. Without the loader the flag does nothing.
 - Without the opt-in flag, Shift+click is the game's normal click and the tooltip is the game's.
-- In multiplayer, Shift+click does nothing (logged once).
+- In multiplayer, Shift+click is the game's normal click (logged once).
 - The tooltip text: `HOI4_LOADER_CONVERSION_MODE_ALL` / `HOI4_LOADER_CONVERSION_MODE_ROLE`, and
   `HOI4_LOADER_CONVERSION_LEFT_OUT` / `HOI4_LOADER_CONVERSION_LEFT_OUT_ENTRY` (`$VARIANT$`) for the
   left-out list, from the mod's localisation; without them the loader's English text.

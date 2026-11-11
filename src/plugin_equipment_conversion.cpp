@@ -4,9 +4,10 @@
 //
 // - hoi4_loader_conversion_generations: equipment of any earlier generation converts into the
 //   generation a production line makes ("Convert from stockpile"), for every equipment type and mod,
-//   without can_convert_from entries. At load the loader only plans each type's earlier generations
-//   (its `parent =` chain within the archetype); it appends them to the game's convert-from list at
-//   a main-thread safe point once the flag is set, and removes them again when it is gone.
+//   without can_convert_from entries. At load the loader writes each type's earlier generations
+//   (its `parent =` chain within the archetype) into the list's buffer beyond the count, invisible
+//   to the game; while the flag is set the count includes them. Flag changes count at game entry,
+//   and in single player also mid-game (every 30 frames); in multiplayer at game entry only.
 // - Cost (with generations on): the engine's own conversion cost, times factor^(g-1) for a source g
 //   generations back; hoi4_loader_conversion_factor_<percent> (default 75); only the loader's pairs
 //   unless hoi4_loader_conversion_existing_loader_cost.
@@ -25,7 +26,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include "MinHook.h"
 #include "engine.h"
 #include "lifecycle.h"
 #include "loader.h"
@@ -59,11 +59,18 @@ void Fault(const char* where) {
 }
 
 // --- The loader's pairs ----------------------------------------------------------------------
-// Planned at load (type -> its earlier generations); applied (appended to the game's lists) only
-// while hoi4_loader_conversion_generations is set. While applied: type -> list index of its first
-// loader entry (entries from there on are the loader's).
+// At load each type's earlier generations are written into its list's buffer *beyond* the count
+// (the buffer grows there, while no conversion test can run yet), so the game does not see them.
+// While hoi4_loader_conversion_generations is set, only the count changes to include them; no
+// buffer is allocated or freed after load (a reader on another thread never sees a freed buffer).
+// While applied: type -> list index of its first loader entry (entries from there on are the
+// loader's).
+struct Planned {
+    int first;                       // the game's own count when the loader wrote its entries
+    std::vector<const void*> add;    // written at [first, first + add.size()) in the buffer
+};
 SRWLOCK g_lock = SRWLOCK_INIT;
-std::unordered_map<void*, std::vector<const void*>> g_planned;
+std::unordered_map<void*, Planned> g_planned;
 std::unordered_map<const void*, int> g_firstAdded;
 std::atomic<long> g_plannedPairs{0}, g_plannedNaval{0}, g_builds{0};
 std::atomic<bool> g_anyAdded{false};  // the lists hold loader entries right now
@@ -93,7 +100,9 @@ bool InList(const void* type, const void* t) {
     return false;
 }
 
-// At load (read only): the type's earlier generations its list lacks.
+// At load (right after the game built the list; no conversion test runs yet): the type's earlier
+// generations its list lacks, written beyond the count. The count is set back at once, so the
+// game sees exactly its own list.
 void Plan(void* type) {
     if (Engine::TypeIsArchetype(type)) return;
     const void* arch = Engine::TypeArchetype(type);
@@ -102,31 +111,48 @@ void Plan(void* type) {
         if (Engine::TypeArchetype(p) != arch) break;  // a generation chain stays in its archetype
         if (!InList(type, p)) add.push_back(p);
     }
+    int first = Engine::ConvertListCount(type);
+    bool written = !add.empty() && Engine::ConvertListAppend(type, add.data(), (int)add.size()) &&
+                   Engine::ConvertListSetCount(type, first);
+    if (!add.empty() && !written) {
+        Engine::ConvertListSetCount(type, first);
+        Log("equipment_conversion: could not reserve the list of %s; it gets no earlier generations", Engine::TypeName(type));
+    }
     AcquireSRWLockExclusive(&g_lock);
     auto old = g_planned.find(type);
-    if (old != g_planned.end()) g_plannedPairs.fetch_sub((long)old->second.size());
-    if (add.empty()) {
-        if (old != g_planned.end()) g_planned.erase(old);
-    } else {
+    if (old != g_planned.end()) {
+        g_plannedPairs.fetch_sub((long)old->second.add.size());
+        g_planned.erase(old);
+    }
+    if (written) {
         g_plannedPairs.fetch_add((long)add.size());
         if (Engine::TypeIsNaval(type)) g_plannedNaval.fetch_add((long)add.size());
-        g_planned[type] = std::move(add);
+        g_planned[type] = Planned{first, std::move(add)};
     }
     ReleaseSRWLockExclusive(&g_lock);
 }
 
-// Main thread, safe point only (no conversion test runs): append the planned pairs, or remove them.
-void Apply(bool on, long* types, long* pairs) {
+// The entries written at load are still there, and the game's own count has not moved.
+bool StillReserved(void* type, const Planned& p) {
+    int n = (int)p.add.size();
+    if (Engine::ConvertListCount(type) != p.first || Engine::ConvertListCapacity(type) < p.first + n) return false;
+    for (int i = 0; i < n; ++i)
+        if (Engine::ConvertListAt(type, p.first + i) != p.add[i]) return false;
+    return true;
+}
+
+// Main thread, at game entry or a safe point: show the reserved entries (count up), or hide them
+// again (count back). Nothing is allocated or freed.
+void Apply(bool on, long* types, long* pairs, long* skipped) {
     AcquireSRWLockExclusive(&g_lock);
     if (on && g_firstAdded.empty()) {
         for (auto& e : g_planned) {
-            const void* add[64];
-            int n = 0;
-            for (const void* p : e.second)
-                if (n < 64 && !InList(e.first, p)) add[n++] = p;
-            int first = Engine::ConvertListCount(e.first);
-            if (!n || !Engine::ConvertListAppend(e.first, add, n)) continue;
-            g_firstAdded[e.first] = first;
+            int n = (int)e.second.add.size();
+            if (!StillReserved(e.first, e.second) || !Engine::ConvertListSetCount(e.first, e.second.first + n)) {
+                ++*skipped;
+                continue;
+            }
+            g_firstAdded[e.first] = e.second.first;
             ++*types;
             *pairs += n;
         }
@@ -134,7 +160,7 @@ void Apply(bool on, long* types, long* pairs) {
     } else if (!on && !g_firstAdded.empty()) {
         g_anyAdded.store(false);
         for (const auto& e : g_firstAdded) {
-            if (Engine::ConvertListTruncate((void*)e.first, e.second)) ++*types;
+            if (Engine::ConvertListSetCount((void*)e.first, e.second)) ++*types;
         }
         g_firstAdded.clear();
     }
@@ -142,13 +168,14 @@ void Apply(bool on, long* types, long* pairs) {
 }
 
 bool SafeApply(bool on) {
-    long types = 0, pairs = 0;
+    long types = 0, pairs = 0, skipped = 0;
     __try {
-        Apply(on, &types, &pairs);
+        Apply(on, &types, &pairs, &skipped);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         Fault(on ? "adding the earlier generations" : "removing the earlier generations");
         return false;
     }
+    if (skipped) Log("equipment_conversion: %ld lists changed since load; they get no earlier generations", skipped);
     if (on && types) Log("equipment_conversion: earlier generations ON: %ld pairs added to %ld types' lists", pairs, types);
     if (!on && types) Log("equipment_conversion: earlier generations OFF: the loader's entries removed from %ld lists", types);
     return true;
@@ -425,8 +452,8 @@ bool HandleShiftClick(void* item) {
     const void* type = Engine::DesignType(target);
     if (!type) return false;
     if (!g_singlePlayer.load()) {
-        if (!g_mpLogged.exchange(true)) Log("equipment_conversion: Shift+click on convert: single player only");
-        return true;  // swallowed: no vanilla toggle either
+        if (!g_mpLogged.exchange(true)) Log("equipment_conversion: Shift+click on convert: single player only; the game's click runs");
+        return false;  // the game's own convert toggle
     }
     return RunOnMainThread(&ToggleOnMain, (void*)type);
 }
@@ -570,11 +597,19 @@ void Sync() {
     Log("equipment_conversion: self-check passed (%ld extended lists)", checked);
 }
 
-// The flags are read every 30 frames in a game: a mod's on_startup sets them right after a new game
-// starts, before the first day passes.
+// When a flag change counts:
+// - Game entry (new game after on_startup, loaded save, hot join): everywhere. Every machine is at
+//   the same point of the game there.
+// - Single player, also mid-game: the flags are read every 30 frames (a decision or the console
+//   counts within a second).
+// - Multiplayer: game entry only. Frames differ between machines, so a frame-based read would
+//   change CanConvert, the cost and the lists at a different tick on each machine (out of sync). A
+//   flag a mod sets mid-game counts from the next load.
 int g_frames = 0;
+std::atomic<bool> g_mpNoteLogged{false};
 void Frame() {
     if (Engine::GameDateHours() <= 0 || ++g_frames % 30) return;
+    if (!g_singlePlayer.load()) return;
     ReadRules();
     Sync();
 }
@@ -635,6 +670,10 @@ void OnEntered(bool) {
     }
     ReadRules();
     Sync();
+    if (!g_singlePlayer.load() && !g_mpNoteLogged.exchange(true))
+        Log("equipment_conversion: multiplayer (%s): the flags count as set at game entry; a change mid-game counts "
+            "from the next load",
+            why && *why ? why : "not single player");
 }
 
 }  // namespace
@@ -672,7 +711,7 @@ bool EquipmentConversionInit() {
     }
     for (size_t i = 0; i < hooks.size(); ++i) {
         if (HookQueue(hooks[i].target, hooks[i].detour, hooks[i].orig, hooks[i].name)) continue;
-        for (size_t j = 0; j < i; ++j) MH_RemoveHook(hooks[j].target);
+        for (size_t j = 0; j < i; ++j) HookUnqueue(hooks[j].target);
         g_off.store(true);
         return false;
     }
