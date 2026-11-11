@@ -32,8 +32,7 @@ Or in Visual Studio: **File > Open > Folder...**, pick this folder, choose `x64-
    OneDrive often `C:\Users\<you>\OneDrive\Documents\...`):
    - `mod\hoi4_loader_test.mod` -> `...\mod\hoi4_loader_test.mod` (the launcher may rewrite its `path`)
    - `mod\hoi4_loader_test\`    -> `...\mod\hoi4_loader_test\`
-   - the same for `hoi4_loader_railway_rules` (the railway game rules, without decisions)
-3. Enable **HOI4 Loader Test** and **HOI4 Loader Railway Rules** in the launcher playset.
+3. Enable **HOI4 Loader Test** in the launcher playset.
 
 ## Layout
 
@@ -53,7 +52,7 @@ src/plugin_game_loaded.cpp    game_loaded feature (fires on_game_loaded after a 
 src/plugin_region_control.cpp, plugin_military_counts.cpp, plugin_army_condition.cpp,
 src/plugin_production_data.cpp   data trigger features (numeric triggers)
 src/plugin_region_scope.cpp   region_scope feature (strategic region scope blocks, iterators)
-src/plugin_create_army.cpp    create_army feature (create_unit children -> army under a general)
+src/plugin_create_army.cpp    create_army and add_to_army features (armies under a chosen general)
 src/plugin_time_control.cpp   time_control feature (speed lock, pause block, hidden date; saved as flags)
 src/engine_data.cpp           engine access for the data triggers (read-only game state)
 src/engine_scope.cpp          engine access for scope blocks (vanilla iterator templates, child scopes)

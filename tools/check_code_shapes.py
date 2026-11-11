@@ -207,6 +207,7 @@ def check(path, codes):
         results.append(('%s (confirm dialog slot %d%s)' % (code, slot, ', reads the state id' if read else ''), ok,
                         hex(fn)))
     results += check_create_army(img, codes, text_va, text)
+    results += check_add_to_army(img, codes, text_va, text)
     results += check_time_control(img, codes, text_va, text)
     return results
 
@@ -397,6 +398,48 @@ def check_create_army(img, codes, text_va, text):
     ok = bool(ren) and img.match_at(ren[1][10], codes['kCodeSetArmyName']) and rel32(img, ren[1][10] + 0x1c) == resolve
     disp = i32(img, ren[1][10] + 0x3c) if ok else -1
     results.append(('kCodeSetArmyName (name +0x%x)' % disp, ok, hex(rel32(img, ren[1][10] + 0x58)) if ok else '-'))
+    return results
+
+
+def check_add_to_army(img, codes, text_va, text):
+    """add_to_army (NOTES.md G4): the same pieces engine_army.cpp ResolveJoin resolves, with its cross-checks."""
+    sigs, _ = cs.load_signatures(pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h')
+    sigs = dict(sigs)
+    army = [m.start() for m in cs.compile_pattern(sigs['kSigBorderWarArmy']).finditer(text)]
+    land = [m.start() for m in cs.compile_pattern(sigs['kSigStateLandUnits']).finditer(text)]
+    if len(army) != 1 or len(land) != 1:
+        return [('add_to_army: create_army / land unit signatures', False, '%d/%d matches' % (len(army), len(land)))]
+    create = rel32(img, text_va + army[0] + 0x1b)
+    owner = i32(img, text_va + land[0] + 0x38)
+    results = []
+    ms = find_in(img, create, 0x400, codes['kCodeCreateArmyMove'])
+    move = rel32(img, ms + 0x12) if ms else 0
+    cs_ = find_in(img, ms, 0x100, codes['kCodeCreateArmyCleanup']) if ms else None
+    cleanup = rel32(img, cs_ + 6) if cs_ else 0
+    assign = img.vtable('.?AVCOrderAssignCommand@@')
+    ok = bool(move and cleanup and assign) and calls(img, assign[1][10], 0x1400, move) and calls(img, assign[1][10], 0x1400, cleanup)
+    results.append(('kCodeCreateArmyMove / Cleanup (COrderAssignCommand calls the same)', ok, '%s %s' % (hex(move), hex(cleanup))))
+
+    tag = find_in(img, move, 0x100, codes['kCodeArmyMoveTag']) if move else None
+    mem = find_in(img, move, 0x140, codes['kCodeArmyMoveMembers']) if move else None
+    ua = find_in(img, move, 0x200, codes['kCodeArmyMoveUnitArmy']) if move else None
+    u8 = lambda va: img.d[img.va2off(va)]
+    ok = bool(tag and mem and ua) and bool(cleanup) and img.match_at(cleanup, codes['kCodeArmyCleanup'])
+    if ok:
+        unit_army, lst, cnt = i32(img, ua + 3), u8(mem + 0x24), u8(mem + 0xf)
+        ok = (i32(img, tag + 2) == owner and unit_army == i32(img, ua + 0x35) == i32(img, ua + 0x41) and
+              lst == u8(ua + 0x25) and cnt == lst + 0xc and cnt == u8(cleanup + 0xb))
+        detail = 'unit army +0x%x, entry +0x%x, army tag +0x%x, members +0x%x' % (unit_army, i32(img, mem + 6), u8(tag + 0x17), lst)
+    else:
+        detail = '-'
+    results.append(('kCodeArmyMoveTag / Members / UnitArmy, kCodeArmyCleanup (%s)' % detail, ok, hex(move)))
+
+    destroy = img.vtable('.?AVCDestroyUnitEffect@@')
+    getter = rel32(img, destroy[1][13] + 9) if destroy and u8(destroy[1][13] + 9) == 0xe8 else 0
+    resolve = rel32(img, img.vtable('.?AVCOrderGroupCommand@@')[1][10] + 0x31)
+    ok = bool(getter) and img.match_at(getter, codes['kCodeScopeDivision'])
+    ok = ok and u8(getter + 7) == 0x70 and rel32(img, getter + 0x13) == resolve and u8(getter + 0x20) == 0xf0
+    results.append(('kCodeScopeDivision (destroy_unit slot 13 + 9; scope +0x70, resolver, -0x10)', ok, hex(getter)))
     return results
 
 

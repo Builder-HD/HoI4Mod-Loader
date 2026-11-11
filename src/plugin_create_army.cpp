@@ -57,7 +57,9 @@ enum class Refusal {
     CannotLeave,
     Deploying,
     Withdrawing,
-    BorderWar
+    BorderWar,
+    NotDivision,        // add_to_army: the scope holds no land division
+    DivisionBorderWar,  // add_to_army: the division's own army is in a border war
 };
 
 const LocText kReasons[] = {
@@ -73,6 +75,8 @@ const LocText kReasons[] = {
     {"HOI4_LOADER_CREATE_ARMY_DEPLOYING", "their army $ARMY$ is currently being deployed"},
     {"HOI4_LOADER_CREATE_ARMY_WITHDRAWING", "their army $ARMY$ is currently being withdrawn"},
     {"HOI4_LOADER_CREATE_ARMY_BORDER_WAR", "their army $ARMY$ is in a border war"},
+    {"HOI4_LOADER_ADD_TO_ARMY_NOT_DIVISION", "this is not a land division"},
+    {"HOI4_LOADER_ADD_TO_ARMY_DIVISION_BORDER_WAR", "its army $ARMY$ is in a border war"},
 };
 const LocText& ReasonText(Refusal r) { return kReasons[(int)r]; }
 
@@ -101,13 +105,17 @@ struct Candidate {
 
 std::string CurrentArmy(const Candidate& c) { return c.state.leads ? Engine::ArmyName(c.state.leads) : std::string(); }
 
-// Who `leader` is and whether that general may lead a new army of `tag` now. Reads only.
-Refusal Check(const Args& a, int tag, Candidate* c) {
-    c->name = native_localize_key(a.key(0));
+// What to do when the general already leads an army: create_army refuses, or (reassign = yes)
+// takes the general along if the game lets that army change its general; add_to_army keeps it.
+enum class Leading { Refuse, Leave, Keep };
+
+// Who the general (`key`, `token`) is and whether that general is available to `tag` now. Reads only.
+Refusal CheckGeneral(const char* key, int token, int tag, Leading leading, Candidate* c) {
+    c->name = native_localize_key(key);
     // The country's own characters first (has_character's lookup, valid after loading a save).
     // Otherwise recruit_character's table, which only tells why: not recruited, or another country.
-    void* character = Engine::CountryCharacterByToken(tag, a.i(0));
-    void* other = character ? nullptr : Engine::CharacterByToken(a.i(0));
+    void* character = Engine::CountryCharacterByToken(tag, token);
+    void* other = character ? nullptr : Engine::CharacterByToken(token);
     void* leader = Engine::ArmyLeaderRole(character ? character : other);
     if (leader) {
         std::string n = Engine::LeaderName(leader);
@@ -125,9 +133,13 @@ Refusal Check(const Args& a, int tag, Candidate* c) {
     c->leader = leader;
     if (c->state.captured) return Refusal::Captured;
     if (c->state.leads && c->state.leadsArmyGroup) return Refusal::LeadsArmyGroup;
-    if (c->state.leads && !a.b(2)) return Refusal::LeadsArmy;
-    if (c->state.leads && !c->state.canLeave) return LeaveRefusal(c->state.whyNot);
+    if (c->state.leads && leading == Leading::Refuse) return Refusal::LeadsArmy;
+    if (c->state.leads && leading == Leading::Leave && !c->state.canLeave) return LeaveRefusal(c->state.whyNot);
     return Refusal::None;
+}
+
+Refusal Check(const Args& a, int tag, Candidate* c) {
+    return CheckGeneral(a.key(0), a.i(0), tag, a.b(2) ? Leading::Leave : Leading::Refuse, c);
 }
 
 void Execute(const Args& a, const Scope&, const EffectChildren& children) {
@@ -221,6 +233,176 @@ void OnEntered(bool) {
         divisions);
 }
 
+// --- add_to_army (NOTES.md G4) ---------------------------------------------------------------------
+//
+//   every_country_division = {
+//       limit = { ... }
+//       add_to_army = {
+//           leader = GER_erwin_rommel   # character id: an army leader recruited by the division's country
+//           name = "1. Panzerarmee"     # optional: only used when a new army is formed
+//       }
+//   }
+//
+// The division joins the army the general leads, through the game's own move (as the UI's "assign
+// to army" does); its old army is deleted if left without divisions. If the general leads no army,
+// a new one is formed from the division under the general (create_army's functions), and the next
+// divisions join it. Refused, with a log line and a red tooltip line, if the general is not
+// available (as for create_army), the division's army or the general's army is in a border war, or
+// the scope holds no land division. Game state writes, main thread, deterministic. No command
+// power, and the division gets none of the army's orders.
+
+const char* const kJoinFeature = "add_to_army";
+std::atomic<bool> g_joinOk{true};
+
+const LocText kJoin{"HOI4_LOADER_ADD_TO_ARMY", "Joins the army of $LEADER|Y$."};
+const LocText kJoinNew{"HOI4_LOADER_ADD_TO_ARMY_NEW", "Forms a new army under $LEADER|Y$."};
+const LocText kJoinNewNamed{"HOI4_LOADER_ADD_TO_ARMY_NEW_NAMED", "Forms the army $NAME|Y$ under $LEADER|Y$."};
+const LocText kJoinUnavailable{"HOI4_LOADER_ADD_TO_ARMY_UNAVAILABLE", "\x11RCannot join the army of $LEADER$: $REASON$.\x11!"};
+
+// Repeated lines (the same refusal for every division of an every_country_division, all in one
+// moment) are logged once, then counted. Main thread only (effects).
+std::string g_lastJoinLine;
+ULONGLONG g_lastJoinTime = 0;
+int g_joinRepeats = 0;
+void FlushJoinRepeats() {
+    if (g_joinRepeats > 0) Log("add_to_army: (the previous line %d more time(s))", g_joinRepeats);
+    g_joinRepeats = 0;
+}
+void LogJoin(const std::string& line) {
+    ULONGLONG now = GetTickCount64();
+    bool repeat = line == g_lastJoinLine && now - g_lastJoinTime < 2000;
+    g_lastJoinTime = now;
+    if (repeat) {
+        // The count is written at the next safe point, after the effect (e.g. the whole
+        // every_country_division) has run; or before the next different line.
+        if (++g_joinRepeats == 1 && MainThreadQueueAvailable()) RunOnMainThread([](void*) { FlushJoinRepeats(); }, nullptr);
+        return;
+    }
+    FlushJoinRepeats();
+    g_lastJoinLine = line;
+    Log("%s", line.c_str());
+}
+
+// Whether the division may join the general's army now (reads only). *target: the general's army
+// (null if a new army would be formed); *current: the division's army.
+Refusal CheckJoin(const Args& a, void* division, Candidate* c, void** target, void** current) {
+    *target = *current = nullptr;
+    Refusal r = CheckGeneral(a.key(0), a.i(0), Engine::UnitOwnerTag(division), Leading::Keep, c);
+    if (r != Refusal::None) return r;
+    *current = Engine::DivisionArmy(division);
+    *target = c->state.leads;
+    if (*current && *current != *target && Engine::ArmyInBorderWar(*current)) return Refusal::DivisionBorderWar;
+    if (*target && *current != *target && Engine::ArmyInBorderWar(*target)) return Refusal::BorderWar;
+    return Refusal::None;
+}
+
+std::string JoinReason(Refusal r, const Candidate& c, void* current, bool english) {
+    std::string army = r == Refusal::DivisionBorderWar ? Engine::ArmyName(current) : CurrentArmy(c);
+    return english ? ReasonEnglish(r, army) : native_localize(ReasonText(r), {{"ARMY", army}});
+}
+
+void ExecuteJoin(const Args& a, const Scope& s) {
+    if (!g_joinOk.load() || !g_ok.load()) return;
+    void* division = Engine::ScopeDivision(s.raw());
+    if (!division) {
+        LogJoin(std::string("add_to_army: ") + a.key(0) + ": " + ReasonText(Refusal::NotDivision).english + "; nothing done");
+        return;
+    }
+    int tag = Engine::UnitOwnerTag(division);
+    std::string country = Engine::CountryTagName(tag);
+    Candidate c;
+    void *target, *current;
+    Refusal r = CheckJoin(a, division, &c, &target, &current);
+    if (r != Refusal::None) {
+        LogJoin("add_to_army (" + country + "): a division cannot join the army of " + c.name + " (" + a.key(0) +
+                "): " + JoinReason(r, c, current, true) + "; nothing done");
+        return;
+    }
+    if (target && target == current) return;  // already in that army
+    if (target) {
+        std::string oldName;
+        bool oldDeleted = false;
+        bool ok = Engine::JoinArmy(target, division, &oldName, &oldDeleted);
+        std::string line = "add_to_army (" + country + "): a division ";
+        if (!ok) line += "FAILED to join \"" + Engine::ArmyName(target) + "\" (the game did not move it)";
+        else line += "joined \"" + Engine::ArmyName(target) + "\" under " + c.name;
+        if (ok && !oldName.empty())
+            line += "; it left \"" + oldName + "\"" + (oldDeleted ? ", which had no divisions left and was disbanded" : "");
+        LogJoin(line);
+        return;
+    }
+    // The general leads no army: a new one from this division (its old army, if left empty, is
+    // deleted by the game's create_army itself).
+    std::string oldName = current ? Engine::ArmyName(current) : std::string();
+    void* army = Engine::CreateArmy(tag, {division});
+    if (!army) {
+        LogJoin("add_to_army (" + country + "): the game did not form a new army under " + c.name + "; the division is unchanged");
+        return;
+    }
+    if (a.has(1)) Engine::SetArmyName(army, a.key(1));
+    bool led = Engine::SetArmyLeader(army, c.leader);
+    LogJoin("add_to_army (" + country + "): a division formed the new army \"" + Engine::ArmyName(army) + "\" under " + c.name +
+            (led ? "" : " (FAILED to set the general)") + (oldName.empty() ? "" : "; it left \"" + oldName + "\""));
+}
+
+void TooltipJoin(const Args& a, const Scope& s, TooltipText& out) {
+    if (!g_joinOk.load() || !g_ok.load()) return;
+    Candidate c;
+    void* division = Engine::ScopeDivision(s.raw());
+    Refusal r = Refusal::None;
+    void *target = nullptr, *current = nullptr;
+    if (division) {
+        r = CheckJoin(a, division, &c, &target, &current);
+    } else {
+        // An iterator's header (every_country_division) has no division yet: check the general
+        // against the scope's country if there is one, else only name the general.
+        int tag = s.countryTag() > 0 ? s.countryTag() : s.root().countryTag();
+        if (tag > 0) {
+            r = CheckGeneral(a.key(0), a.i(0), tag, Leading::Keep, &c);
+            target = c.state.leads;
+        } else {
+            c.name = native_localize_key(a.key(0));
+            out.add(native_localize(kJoin, {{"LEADER", c.name}}).c_str());
+            return;
+        }
+    }
+    if (r != Refusal::None) {
+        out.add(native_localize(kJoinUnavailable, {{"LEADER", c.name}, {"REASON", JoinReason(r, c, current, false)}}).c_str());
+        return;
+    }
+    if (target) out.add(native_localize(kJoin, {{"LEADER", c.name}}).c_str());
+    else out.add(native_localize(a.has(1) ? kJoinNewNamed : kJoinNew, {{"LEADER", c.name}, {"NAME", a.has(1) ? a.key(1) : ""}}).c_str());
+}
+
+bool SafeJoinSelfCheck(int tag, int* divisions, const char** why, bool* ok) {
+    __try {
+        *ok = Engine::JoinSelfCheck(tag, divisions, why);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *why = "crashed";
+        return false;
+    }
+}
+
+void OnEnteredJoin(bool) {
+    FlushJoinRepeats();
+    g_lastJoinLine.clear();
+    int tag = Engine::PlayerCountryTag();
+    if (tag <= 0) return;  // observer: nothing to check against
+    int divisions = 0;
+    const char* why = "";
+    bool ok = false;
+    if (!SafeJoinSelfCheck(tag, &divisions, &why, &ok) || !ok) {
+        g_joinOk.store(false);
+        Log("add_to_army: self-check failed for %s (%s)", Engine::CountryTagName(tag).c_str(), why);
+        FeatureDeactivate(kJoinFeature, "self-check failed: army membership data unreadable");
+        return;
+    }
+    if (!g_joinOk.load()) return;  // switched off earlier this session: stays off
+    Log("add_to_army: self-check passed (%s: %d division(s) found in their armies' member lists)", Engine::CountryTagName(tag).c_str(),
+        divisions);
+}
+
 }  // namespace
 
 bool CreateArmyInit() {
@@ -230,8 +412,7 @@ bool CreateArmyInit() {
         return false;
     }
     std::vector<LocText> texts = {kCreate, kCreateNamed, kLeaves, kUnavailable};
-    for (const LocText& t : kReasons)
-        if (&t != &kReasons[0]) texts.push_back(t);
+    for (int r = 1; r <= (int)Refusal::BorderWar; ++r) texts.push_back(kReasons[r]);
     register_native_effect_block(
         {"create_army",
          "Use it in a state scope, as vanilla create_unit (e.g. `64 = { create_army = { ... } }`): the create_unit "
@@ -253,5 +434,35 @@ bool CreateArmyInit() {
          texts},
         kFeature);
     OnGameEntered(&OnEntered);
+    return true;
+}
+
+bool AddToArmyInit() {
+    if (!Engine::HaveJoinArmy()) {
+        Log("add_to_army: required engine functions missing (join army %d)", Engine::HaveJoinArmy());
+        return false;
+    }
+    std::vector<LocText> texts = {kJoin, kJoinNew, kJoinNewNamed, kJoinUnavailable};
+    for (int r = 1; r < (int)(sizeof kReasons / sizeof kReasons[0]); ++r)
+        if (r != (int)Refusal::LeadsArmy && r != (int)Refusal::CannotLeave && r != (int)Refusal::Deploying &&
+            r != (int)Refusal::Withdrawing)
+            texts.push_back(kReasons[r]);
+    register_native_effect(
+        {"add_to_army",
+         "Use it in a division scope (e.g. inside every_country_division): the division joins the army that `leader` (a "
+         "character id) leads, as the UI's assignment does; its old army is disbanded if left without divisions. If the "
+         "general leads no army, a new army is formed from the division under the general, named `name` if given, and "
+         "later divisions join it. The general must be an army leader (general or field marshal) recruited by the "
+         "division's country, not captured and not leading an army group. Nothing happens (logged in loader.log; the "
+         "tooltip shows the reason in red) if the general is not available, or if the division's army or the general's "
+         "army is in a border war. No command power is charged, and the division gets none of the army's orders.",
+         Form::Block,
+         {{"leader", ParamType::Token, true}, {"name", ParamType::Text, false}},
+         ScopeMask::Unit,
+         &ExecuteJoin,
+         &TooltipJoin,
+         texts},
+        kJoinFeature);
+    OnGameEntered(&OnEnteredJoin);
     return true;
 }

@@ -29,6 +29,7 @@ static Feature g_features[] = {
     {"production_data", Tier::Engine, &ProductionDataInit, "lifecycle", false, 0},
     {"region_scope", Tier::Engine, &RegionScopeInit, "lifecycle", false, 0},
     {"create_army", Tier::Engine, &CreateArmyInit, "lifecycle", false, 0},
+    {"add_to_army", Tier::Engine, &AddToArmyInit, "create_army", false, 0},
     {"railways", Tier::Engine, &RailwaysInit, "lifecycle", false, 0},
     {"railway_queue", Tier::Engine, &RailwayQueueInit, "railways", false, 0},
     {"time_control", Tier::Engine, &TimeControlInit, "lifecycle", false, 0},

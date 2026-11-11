@@ -55,12 +55,32 @@ uint32_t g_refreshSlot = 0;     // leader vtable byte offset: refresh after star
 // army -> the fields can_change_leader refuses on (0 = not found: the reason is then Unknown)
 uint32_t g_borderWar = 0, g_deploying = 0, g_deploying2 = 0, g_withdrawing = 0;
 
+// add_to_army (NOTES.md G4): the game's move into an army, its cleanup of emptied armies, and the
+// division scope's getter, as the UI's COrderAssignCommand and vanilla destroy_unit use them.
+using Move_t = void(__fastcall*)(void* army, void* unit, bool skipIfMember, bool flag);
+using Cleanup_t = void(__fastcall*)(void* army);
+using ScopeDivision_t = void*(__fastcall*)(const void* scope);
+Move_t g_move = nullptr;
+Cleanup_t g_cleanup = nullptr;
+ScopeDivision_t g_scopeDivision = nullptr;
+void** g_divisionVt = nullptr;  // CArmy (a land division)
+uint32_t g_unitArmy = 0;        // division -> its army
+uint32_t g_unitEntry = 0;       // division -> the entry an army's member list points at
+uint32_t g_armyTag = 0;         // army -> its country's tag
+uint32_t g_armyMembers = 0;     // army -> member list (entry pointers); count at +0xc
+const size_t kScopeUnit = 0x70;  // CEventScope -> unit handle (Scope::types reads the same field)
+
 // Fixed by the engine's reference objects: the manager's tag (create_army compares units' tags
 // with it) and a division's own handle, which resolves to the division + 0x10. Both are checked
 // at runtime before use.
 const size_t kManagerTag = 0x48, kHandle = 8, kUnitHandle = 0x18, kUnitRef = 0x10;
 
+// Whether a call in [fn, fn + len) (clipped to .text) goes to `target`.
 bool CallsTarget(const uint8_t* fn, size_t len, const void* target) {
+    uint8_t* text = nullptr;
+    size_t size = 0;
+    if (!fn || !ImageSection(".text", &text, &size) || fn < text || fn >= text + size) return false;
+    if (len > (size_t)(text + size - fn)) len = (size_t)(text + size - fn);
     for (size_t i = 0; i + 5 <= len; ++i)
         if (fn[i] == 0xE8 && fn + i + 5 + Rd<int32_t>(fn, i + 1) == target) return true;
     return false;
@@ -218,6 +238,62 @@ const void* ManagerHandle(int tag) {
     return mgr + kHandle;
 }
 
+bool FailJoin(const char* what) {
+    Log("ERROR: add_to_army: %s; joining armies unavailable", what);
+    return false;
+}
+
+// add_to_army (NOTES.md G4). Needs create_army's pieces (ResolveAll) first.
+bool ResolveJoin() {
+    // The move and the cleanup, as create_army calls them ...
+    uint8_t* ms = SigFindIn((uint8_t*)g_createArmy, 0x400, kCodeCreateArmyMove);
+    if (!ms) return FailJoin("create_army's move call not found");
+    uint8_t* move = SigFollowRel32(ms + kCodeCreateArmyMoveCall);
+    uint8_t* cs = SigFindIn(ms, 0x100, kCodeCreateArmyCleanup);
+    if (!cs) return FailJoin("create_army's cleanup call not found");
+    uint8_t* cleanup = SigFollowRel32(cs + kCodeCreateArmyCleanupCall);
+    // ... and as the UI's "assign to army" command calls them.
+    uint8_t* assign = Slot(".?AVCOrderAssignCommand@@", 10);
+    if (!assign || !CallsTarget(assign, 0x1400, move) || !CallsTarget(assign, 0x1400, cleanup))
+        return FailJoin("COrderAssignCommand does not call create_army's move and cleanup");
+
+    // Inside the move: the tag assert, the member list, the division's army field.
+    uint8_t* tag = SigFindIn(move, 0x100, kCodeArmyMoveTag);
+    uint8_t* members = SigFindIn(move, 0x140, kCodeArmyMoveMembers);
+    uint8_t* unitArmy = SigFindIn(move, 0x200, kCodeArmyMoveUnitArmy);
+    if (!tag || !members || !unitArmy || !SigMatchAt(cleanup, kCodeArmyCleanup)) return FailJoin("the move or cleanup has an unexpected shape");
+    uint32_t unitTag = Rd<uint32_t>(tag, kCodeArmyMoveUnitTagDisp);
+    uint32_t army = Rd<uint32_t>(unitArmy, kCodeArmyMoveUnitArmyDisp);
+    uint8_t list = Rd<uint8_t>(members, kCodeArmyMoveListDisp), count = Rd<uint8_t>(members, kCodeArmyMoveCountDisp);
+    bool agree = unitTag == UnitOwnerOffset() && army == Rd<uint32_t>(unitArmy, kCodeArmyMoveUnitArmyCmpDisp) &&
+                 army == Rd<uint32_t>(unitArmy, kCodeArmyMoveUnitArmySetDisp) &&
+                 list == Rd<uint8_t>(unitArmy, kCodeArmyMoveAppendListDisp) && count == list + 0xc &&
+                 count == Rd<uint8_t>(cleanup, kCodeArmyCleanupCountDisp) && army < 0x400 &&
+                 Rd<uint32_t>(members, kCodeArmyMoveEntryDisp) < 0x400;
+    if (!agree) return FailJoin("the move's fields disagree with create_army's, the cleanup's or the division owner");
+
+    // The division scope's getter, from vanilla destroy_unit.
+    uint8_t* destroy = Slot(".?AVCDestroyUnitEffect@@", 13);
+    uint8_t* getter = destroy && SigMatchAt(destroy + kDestroyUnitGetterCall, "E8") ? SigFollowRel32(destroy + kDestroyUnitGetterCall) : nullptr;
+    if (!getter || !SigMatchAt(getter, kCodeScopeDivision) || Rd<uint8_t>(getter, kCodeScopeDivisionDisp) != kScopeUnit ||
+        (Resolve_t)SigFollowRel32(getter + kCodeScopeDivisionResolveCall) != g_resolve ||
+        (int8_t)Rd<uint8_t>(getter, kCodeScopeDivisionRefImm) != -(int)kUnitRef)
+        return FailJoin("destroy_unit's division getter has an unexpected shape");
+
+    size_t n = 0;
+    g_divisionVt = FindVtableByRtti(".?AVCArmy@@", &n);
+    if (!g_divisionVt) return FailJoin("CArmy vtable not found");
+    if (!g_borderWar) return FailJoin("the border war field is unknown (can_change_leader)");
+    g_move = (Move_t)move;
+    g_cleanup = (Cleanup_t)cleanup;
+    g_scopeDivision = (ScopeDivision_t)getter;
+    g_unitArmy = army;
+    g_unitEntry = Rd<uint32_t>(members, kCodeArmyMoveEntryDisp);
+    g_armyTag = Rd<uint8_t>(tag, kCodeArmyMoveArmyTagDisp);
+    g_armyMembers = list;
+    return true;
+}
+
 }  // namespace
 
 void ResolveArmies() {
@@ -234,6 +310,10 @@ void ResolveArmies() {
     if (g_borderWar)
         Log("create_army: leader change refused on: border war +0x%x, deploying +0x%x / +0x%x, withdrawing +0x%x", g_borderWar,
             g_deploying, g_deploying2, g_withdrawing);
+    if (ResolveJoin())
+        Log("add_to_army: move %s, cleanup %s, division getter %s; division army +0x%x, entry +0x%x, army tag +0x%x, members +0x%x",
+            SigDescribe((void*)g_move).c_str(), SigDescribe((void*)g_cleanup).c_str(), SigDescribe((void*)g_scopeDivision).c_str(),
+            g_unitArmy, g_unitEntry, g_armyTag, g_armyMembers);
 }
 
 bool HaveArmies() {
@@ -340,6 +420,69 @@ bool ArmySelfCheck(int tag, int* divisions, const char** why) {
             return false;
         }
         ++*divisions;
+    }
+    return true;
+}
+
+// --- Joining an army (add_to_army, NOTES.md G4) -------------------------------------------------
+
+bool HaveJoinArmy() {
+    return HaveArmies() && g_move && g_cleanup && g_scopeDivision && g_divisionVt && g_unitArmy && g_unitEntry && g_armyTag &&
+           g_armyMembers && g_borderWar;
+}
+
+void* ScopeDivision(const void* engineScope) {
+    if (!g_scopeDivision || !engineScope) return nullptr;
+    void* unit = g_scopeDivision(engineScope);
+    return unit && *(void***)unit == g_divisionVt ? unit : nullptr;
+}
+
+void* DivisionArmy(const void* division) { return division ? Rd<void*>(division, g_unitArmy) : nullptr; }
+
+bool ArmyInBorderWar(const void* army) { return army && Rd<uint64_t>(army, g_borderWar) != 0; }
+
+bool JoinArmy(void* army, void* division, std::string* oldName, bool* oldDeleted) {
+    *oldDeleted = false;
+    oldName->clear();
+    int tag = UnitOwnerTag(division);
+    // The move asserts both (the army is not an army group, the tags match); check them first.
+    if (!army || !division || Rd<uint8_t>(army, g_armyGroupFlag) != 0 || tag <= 0 || Rd<int>(army, g_armyTag) != tag) return false;
+    void* old = DivisionArmy(division);
+    if (old == army) return true;
+    if (old) *oldName = ArmyName(old);
+    g_move(army, division, true, true);
+    if (DivisionArmy(division) != army) return false;
+    if (old) {
+        *oldDeleted = Rd<int>(old, g_armyMembers + 0xc) == 0;
+        g_cleanup(old);  // deletes it only if it has no members left
+    }
+    return true;
+}
+
+bool JoinSelfCheck(int tag, int* armies, const char** why) {
+    *armies = 0;
+    std::vector<void*> units;
+    if (!CountryDivisionList(tag, &units)) {
+        *why = "the country's division list is unreadable";
+        return false;
+    }
+    for (void* unit : units) {
+        void* army = DivisionArmy(unit);
+        if (!army) continue;
+        if (Rd<int>(army, g_armyTag) != tag) {
+            *why = "a division's army does not carry the country's tag";
+            return false;
+        }
+        const void* const* list = Rd<const void* const*>(army, g_armyMembers);
+        int count = Rd<int>(army, g_armyMembers + 0xc);
+        const void* entry = (const uint8_t*)unit + g_unitEntry;
+        bool found = false;
+        for (int i = 0; list && i < count && i < 100000 && !found; ++i) found = list[i] == entry;
+        if (!found) {
+            *why = "a division is not in its army's member list";
+            return false;
+        }
+        ++*armies;
     }
     return true;
 }

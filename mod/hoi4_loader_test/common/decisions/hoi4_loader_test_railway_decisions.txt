@@ -74,7 +74,7 @@ hoi4_loader_railway_category = {
 	}
 
 	# railway_queue: the same lowering as a construction queue entry. Watch it in the construction
-	# screen (railway tab) and the logistics map mode; each level costs 30% of building it (Cost rule in the HOI4 Loader Railway Rules mod).
+	# screen (railway tab) and the logistics map mode; each level costs 30% of building it (or what hoi4_loader_railway_dismantle_cost_<percent> says).
 	hoi4_rail_test_queue_one = {
 		icon = generic_construction
 		cost = 0

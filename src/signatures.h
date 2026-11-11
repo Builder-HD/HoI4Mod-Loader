@@ -711,6 +711,42 @@ static const size_t kCodeHasCharacterResolveCall = 0x38;
 CODE(kCodeCountryCharacterLookup, "E8 ?? ?? ?? ?? 48 8B CB E8 ?? ?? ?? ?? 48 8B C8 E8 ?? ?? ?? ?? 8B 54 24 ?? 41 B0 01 48 8B C8 E8 ?? ?? ?? ??")
 static const size_t kCodeCountryCharactersCall = 0x10, kCodeCountryCharacterFindCall = 0x1f;
 
+// --- Joining an army (add_to_army, NOTES.md G4) ---------------------------------------------
+// Addresses are 1.19.4.2 (v1.19.4.2.2da5), the build these were found on.
+// In create_army (SigFindIn from its start): the move of each unit into the new army,
+// move(army, unit, true, true) (call at +0x12). The unit register differs by build, so its byte is
+// a wildcard. (0x140c41a40)
+CODE(kCodeCreateArmyMove, "41 B1 01 45 0F B6 C1 49 8B ?? 4C 8B 74 24 ?? 49 8B CE E8 ?? ?? ?? ??")
+static const size_t kCodeCreateArmyMoveCall = 0x12;
+// ... after it (SigFindIn), the loop over the units' old armies: cleanup(old army) (call at +6),
+// which deletes an army left without members. (0x140c41acf)
+CODE(kCodeCreateArmyCleanup, "7E ?? 49 8B 0C ?? E8 ?? ?? ?? ??")
+static const size_t kCodeCreateArmyCleanupCall = 6;
+// move(army, unit, skipIfMember, flag) itself (COrdersGroup), found inside it (SigFindIn):
+// the tag assert: the unit's tag (disp32 at +2) against the army's (disp8 at +0x17). (0x140c456ad)
+CODE(kCodeArmyMoveTag, "8B 87 ?? ?? ?? ?? 89 44 24 ?? 74 ?? 80 3D ?? ?? ?? ?? 00 75 ?? 8B 53 ??")
+static const size_t kCodeArmyMoveUnitTagDisp = 2, kCodeArmyMoveArmyTagDisp = 0x17;
+// ... the member test: the unit's entry (lea, disp32 at +6) searched in the army's member list
+// (disp8 at +0x24), count disp8 at +0xf. (0x140c45724)
+CODE(kCodeArmyMoveMembers, "40 84 F6 48 8D B7 ?? ?? ?? ?? 74 ?? 48 63 43 ?? 33 D2 85 C0 7E ?? 48 85 FF 4C 8B C6 4C 8B C8 8B CA 48 8B 43 ??")
+static const size_t kCodeArmyMoveEntryDisp = 6, kCodeArmyMoveCountDisp = 0xf, kCodeArmyMoveListDisp = 0x24;
+// ... then the unit's current army (disp32 at +3) leaves it (UngroupMember), the entry is appended
+// to the member list (lea, disp8 at +0x25), and the unit's army field is compared (disp32 at
+// +0x35) and set (disp32 at +0x41) to the new army. (0x140c4576a)
+CODE(kCodeArmyMoveUnitArmy, "48 8B 8F ?? ?? ?? ?? 48 85 C9 74 ?? 44 0F B6 C5 48 8B D7 E8 ?? ?? ?? ?? 48 8D 54 24 ?? 48 89 74 24 ?? 48 8D 4B ?? E8 ?? ?? ?? ?? 48 8D 87 ?? ?? ?? ?? 48 39 9F ?? ?? ?? ?? 74 03 C6 00 01 48 89 9F ?? ?? ?? ??")
+static const size_t kCodeArmyMoveUnitArmyDisp = 3, kCodeArmyMoveAppendListDisp = 0x25, kCodeArmyMoveUnitArmyCmpDisp = 0x35,
+                    kCodeArmyMoveUnitArmySetDisp = 0x41;
+// cleanup(army) itself: nothing unless the member count (disp8 at +0xb) is 0; then the army leaves
+// its manager and is deleted. Function start. (0x140f70840)
+CODE(kCodeArmyCleanup, "48 83 EC 28 48 85 C9 74 ?? 83 79 ?? 00 75 ?? 48 89 4C 24 ?? 48 8D 54 24 ?? 48 89 5C 24 ?? 48 8B 59 ??")
+static const size_t kCodeArmyCleanupCountDisp = 0xb;
+// CDestroyUnitEffect slot 13 (destroy_unit) calls the scope's division getter first (call at +9):
+// the unit handle in the scope (disp8 at +7), resolved (call at +0x13), minus the reference offset
+// (imm8 at +0x20, 0xF0 = -0x10). (0x14057cba0)
+static const size_t kDestroyUnitGetterCall = 9;
+CODE(kCodeScopeDivision, "48 83 EC 28 48 83 C1 ?? 83 39 00 75 06 83 79 04 00 74 ?? E8 ?? ?? ?? ?? 48 85 C0 74 ?? 48 83 C0 ?? 48 83 C4 28 C3")
+static const size_t kCodeScopeDivisionDisp = 7, kCodeScopeDivisionResolveCall = 0x13, kCodeScopeDivisionRefImm = 0x20;
+
 // --- Time control (time_control, NOTES.md Part K) ------------------------------------------------
 // CInGameIdler::TogglePause(int mode) at the slot the console calls (kSigConsoleSpeedPause): mode 1
 // = the player (button, Space, console), mode 0 = automatic (event popups: CAutomaticPause). Single
