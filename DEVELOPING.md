@@ -53,9 +53,11 @@ src/plugin_region_control.cpp, plugin_military_counts.cpp, plugin_army_condition
 src/plugin_production_data.cpp   data trigger features (numeric triggers)
 src/plugin_region_scope.cpp   region_scope feature (strategic region scope blocks, iterators)
 src/plugin_create_army.cpp    create_army feature (create_unit children -> army under a general)
+src/plugin_equipment_conversion.cpp  equipment_conversion feature (earlier generations, cost, rules)
 src/engine_data.cpp           engine access for the data triggers (read-only game state)
 src/engine_scope.cpp          engine access for scope blocks (vanilla iterator templates, child scopes)
 src/engine_army.cpp           engine access for armies (create army, set leader, characters)
+src/engine_conversion.cpp     engine access for equipment conversion (convert-from lists, generations)
 src/native_script.h, .cpp     native effect/trigger API: schemas, registration, parsing, docs
 src/native_script_engine.cpp  native API engine binding (vtable clones, registries, Scope)
 src/native_scope_engine.cpp   native API engine binding of scope blocks and iterators
@@ -69,7 +71,7 @@ tools/check_code_shapes.py    check the CODE shapes at their RTTI-found addresse
 tools/make_stubs.py           write (or --check) stubs/ from the feature list
 tools/make_release.py         build release/hoi4_loader-v<version>.zip and its SHA256SUMS
 tests/                        out-of-game smoke test (stand-in hoi4.exe)
-mod/                          companion test mod
+mod/                          companion test mod; hoi4_loader_conversion_rules (game rules only)
 stubs/                        stub pack for mod authors (MODDING.md "Stub pack")
 README.md                     players: install, uninstall, game patches, reporting problems
 MODDING.md                    mod authors: guards, stubs, every script command
@@ -278,6 +280,25 @@ The details are in NOTES.md, "Threading model".
   write, cache or allocate ("Trigger performance" above).
 - **Example:** `region_names` does exactly this. Its flag hooks only set dirty bits; the rescan
   runs from `OnMainThreadFrame`.
+
+### Global hooks
+
+Hooks on engine functions that the whole game calls, not just one class or UI element. Every one
+calls the original first and only changes its result; a fault in the loader's part is caught
+(SEH), logged once, and switches the feature to vanilla behaviour for the rest of the session.
+
+| Feature | Function hooked | Called by | What the loader changes |
+|---|---|---|---|
+| `equipment_conversion` | `BuildConvertFromList(type, database)` (0x140cf2490 in 1.19.4.2) | equipment database load, once per equipment type, before any game | appends the type's earlier generations to its convert-from list (engine allocator) |
+| `equipment_conversion` | `CanConvert(target design, source design)` (0x140c2cb00) | production line source rebuild, naval refits, production UI; any thread | refuses a pair the loader added while a rule switches it off (naval, or all) |
+| `equipment_conversion` | `ConversionCost(source, out, target, organisation, breakdown)` (0x140c29eb0) | production lines, conversion tooltips, AI production planning; any thread | scales the IC of a pair two or more generations apart by the rule's factor |
+| `equipment_conversion` (role mode) | `RebuildSources(line, tag)` (0x1419c2c30) | a production line's update (its vtable) | marks the rebuild (thread-local) so `CanConvert` refuses sources of another role while the line's type is in "same role only" mode, and stores the designs it left out for the tooltip |
+| `equipment_conversion` (role mode) | `CProductionLineMilitaryItem` convert click (0x141de8e30) | the production view, main thread | Shift+click (single player): toggles the mode at the next safe point instead of vanilla's toggle |
+| `equipment_conversion` (role mode) | the convert button's tooltip (0x1419c2fd0) | the production view, main thread | appends the mode line (the game's own `std::string::append`) |
+
+The conversion hooks read equipment type data (fixed after load) and the loader's own table,
+which is written only while the database loads; the rules are read from global flags on the main
+thread (once per in-game day) into atomics. Nothing touches graphics.
 
 ## Smoke test (no game needed)
 

@@ -1,0 +1,37 @@
+# The equipment conversion game rules as the global flags the loader reads. Game rules are fixed
+# for a game, and global flags are saved with it, so setting them once at game start is enough.
+# The defaults set no flag: the loader's defaults are the same.
+on_actions = {
+	on_startup = {
+		effect = {
+			if = {
+				limit = { has_game_rule = { rule = hoi4_loader_conversion_generations option = BLOCKED } }
+				set_global_flag = hoi4_loader_conversion_off
+			}
+			if = {
+				limit = { has_game_rule = { rule = hoi4_loader_conversion_factor option = FACTOR_100 } }
+				set_global_flag = hoi4_loader_conversion_factor_100
+			}
+			if = {
+				limit = { has_game_rule = { rule = hoi4_loader_conversion_factor option = FACTOR_90 } }
+				set_global_flag = hoi4_loader_conversion_factor_90
+			}
+			if = {
+				limit = { has_game_rule = { rule = hoi4_loader_conversion_factor option = FACTOR_50 } }
+				set_global_flag = hoi4_loader_conversion_factor_50
+			}
+			if = {
+				limit = { has_game_rule = { rule = hoi4_loader_conversion_factor option = FACTOR_25 } }
+				set_global_flag = hoi4_loader_conversion_factor_25
+			}
+			if = {
+				limit = { has_game_rule = { rule = hoi4_loader_conversion_existing option = LOADER_COST } }
+				set_global_flag = hoi4_loader_conversion_existing_loader_cost
+			}
+			if = {
+				limit = { has_game_rule = { rule = hoi4_loader_conversion_naval option = ALLOWED } }
+				set_global_flag = hoi4_loader_conversion_naval
+			}
+		}
+	}
+}

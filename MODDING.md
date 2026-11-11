@@ -38,6 +38,7 @@ Current features:
 | `production_data` | engine (needs `lifecycle`) | `hoi4_loader_plugin_production_data` | `factories_assigned` |
 | `region_scope` | engine (needs `lifecycle`) | `hoi4_loader_plugin_region_scope` | `strategic_region`, `any_`/`every_`/`random_strategic_region` and the region identity triggers, see below |
 | `create_army` | engine (needs `lifecycle`) | `hoi4_loader_plugin_create_army` | `create_army`: spawn divisions as an army under a chosen general, see below |
+| `equipment_conversion` | engine (needs `lifecycle`) | `hoi4_loader_plugin_equipment_conversion` | "Convert from Stockpile" takes every earlier generation, with game rules for the cost; no script commands, see below |
 
 On an unknown build the file tier stays on, the engine tier is off, and `loader.log` lists the
 disabled features and prints the exact line to add to `loader_config.ini`. A feature whose init
@@ -138,6 +139,7 @@ when the loader is missing or a feature is off. Without them, using a loader tri
 | `factories_assigned` | `scripted_triggers/hoi4_loader_feature_production_data.txt` |
 | `strategic_region`, `any_`/`every_`/`random_strategic_region`, `strategic_region_id`, `is_sea_region`, `region_has_state` | `scripted_triggers/hoi4_loader_feature_region_scope.txt` |
 | `create_army` | `scripted_triggers/hoi4_loader_feature_create_army.txt` |
+| `equipment_conversion` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_equipment_conversion.txt` |
 
 - **Combinations:** a block that combines features needs each feature's stub and guard, e.g.
   `air_superiority` inside `strategic_region` needs both `region_control` and `region_scope`.
@@ -831,3 +833,72 @@ loaded without the loader keeps them (they are ordinary armies).
 **Without the loader:** `create_army` is an unknown effect. The game logs it once per use when
 parsing, and the whole block, `create_unit`s included, does nothing. Guard decisions with
 `hoi4_loader_feature_create_army = yes` (stub: `stubs/common/scripted_triggers/hoi4_loader_feature_create_army.txt`).
+
+## Converting earlier generations (`equipment_conversion`)
+
+Vanilla's **Convert from Stockpile** on a production line only takes the equipment that the
+target's `can_convert_from` list names, or other variants of the same equipment. So Infantry
+Equipment 0 never becomes Infantry Equipment II, and a mod that wants it writes a
+`can_convert_from` pair for every equipment it has.
+
+With `equipment_conversion`, every equipment type also converts from all of its earlier
+generations: the types along its `parent =` chain within the same archetype
+(`infantry_equipment_0` and `_1` into `_2`, `light_tank_chassis_1` designs into
+`light_tank_chassis_2` designs). It works for every archetype and every mod that defines `parent`,
+with nothing to write. There are no script commands.
+
+**Which stock the game takes** (unchanged by the loader): a country's own designs convert only
+once they are **decommissioned** (the production view's "Decommission"); foreign designs
+(captured, from a country that is not friendly) always.
+
+**Cost:** the game's own conversion cost (the `NProduction` conversion defines, modules,
+upgrades). For a source one generation back that is all. Each further generation back multiplies
+it by a factor: with 75%, two back costs 75% and three back 56%. Strategic resources stay as the
+game computes them.
+
+**Game rules** (the rules-only mod `mod/hoi4_loader_conversion_rules`, group "Equipment
+Conversion"). Each rule becomes a global flag at `on_startup`, which a mod can also set itself:
+
+| Rule | Options (default first) | Global flag the loader reads |
+|---|---|---|
+| Convert Earlier Generations | allowed, blocked | `hoi4_loader_conversion_off` when blocked |
+| Cost per Extra Generation | 75%, 100%, 90%, 50%, 25% | `hoi4_loader_conversion_factor_<percent>` (0-100; the most recently set counts; none: 75) |
+| Conversions the Game Already Allows | game cost, factor applies | `hoi4_loader_conversion_existing_loader_cost` |
+| Earlier Ship Hulls | blocked, allowed | `hoi4_loader_conversion_naval` |
+
+- **Already allowed:** a pair the game or a mod already allows (a `can_convert_from` entry between
+  generations, such as older light tanks into light tank artillery) keeps the game's cost unless
+  "factor applies" is chosen. It is never refused by these rules.
+- **Ships:** hulls are off by default, so ships refit only as the game allows. Allowed, an older
+  hull generation's ships refit into the newer hull.
+- The rules are read once per in-game day and when a game is entered, so a flag set by script
+  counts from the next day.
+
+**Who:** every country, AI included: the extra pairs are in the game's own conversion data, which
+the AI's production planning reads too.
+
+**Same role only (Shift+click on a line's convert button, single player):** vanilla converts
+every stockpiled design of the same airframe, chassis or hull, so a fighter line also uses up CAS
+and naval bomber designs. Shift+click on the line's convert button switches that equipment type
+between "every role" (the default) and "same role only": a source design converts only if it has
+the same role as the line's design (the unit types its modules give it, `add_equipment_type`:
+fighters from fighters, CAS from CAS). The convert button's tooltip shows the mode, and in "same
+role only" mode lists the designs it leaves out, greyed (HoI4 text has no strikethrough).
+- It counts for every line of that equipment type of your country, and applies when a line next
+  updates its sources (toggle Convert from Stockpile off and on to see it at once).
+- It is saved as the global flag `hoi4_loader_conversion_role_<TAG>_<equipment type>`; a mod can
+  set it too. Without the loader the flag does nothing.
+- In multiplayer, Shift+click does nothing (logged once).
+- The tooltip text: `HOI4_LOADER_CONVERSION_MODE_ALL` / `HOI4_LOADER_CONVERSION_MODE_ROLE`, and
+  `HOI4_LOADER_CONVERSION_LEFT_OUT` / `HOI4_LOADER_CONVERSION_LEFT_OUT_ENTRY` (`$VARIANT$`) for the
+  left-out list, in the rules mod's localisation; without them the loader's English text.
+
+**Multiplayer:** the extra pairs come from the equipment files and the rules from saved global
+flags, so every machine with the loader computes the same. **Not tested in multiplayer yet;**
+every player needs the loader.
+
+**Saves:** nothing is saved by the loader. A line's "Convert from Stockpile" setting is the
+game's; a line's sources are rebuilt from the stockpile, so a save loaded without the loader
+converts only what the game allows.
+
+**Without the loader:** the rules show in the game rules screen and do nothing.

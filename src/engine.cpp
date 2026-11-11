@@ -470,6 +470,7 @@ bool Resolve() {
     ResolveData();
     ResolveScopeBlocks();
     ResolveArmies();
+    ResolveConversion();  // after ResolveData: cross-checks production_data's offsets
 
     Log("Engine: gamestate %s, flags +0x%x, regions +0x%x/+0x%x", g_ppGameState ? SigDescribe(g_ppGameState).c_str() : "-",
         g_flagsOffset, g_regionArrayOffset, g_regionCountOffset);

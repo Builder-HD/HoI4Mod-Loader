@@ -143,6 +143,76 @@ def check(path, codes):
     results += check_region_scope(img, codes, text_va, text)
     results.append(check_trigger_registry(img, codes, text_va, text))
     results += check_create_army(img, codes, text_va, text)
+    results += check_equipment_conversion(img, codes, text_va, text)
+    return results
+
+
+def check_equipment_conversion(img, codes, text_va, text):
+    """equipment_conversion (NOTES.md Part J): the shapes engine_conversion.cpp finds inside its SIG
+    functions, with the same cross-checks."""
+    sigs, _ = cs.load_signatures(pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h')
+    sigs = dict(sigs)
+    found = {}
+    for name in ('kSigConvertListBuild', 'kSigEquipPostLoad', 'kSigCanConvert', 'kSigEquipIsNaval', 'kSigConversionCost'):
+        m = [x.start() for x in cs.compile_pattern(sigs[name]).finditer(text)]
+        if len(m) != 1:
+            return [('equipment_conversion %s' % name, False, '%d matches' % len(m))]
+        found[name] = text_va + m[0]
+    build, post, can, cost = (found[n] for n in ('kSigConvertListBuild', 'kSigEquipPostLoad', 'kSigCanConvert', 'kSigConversionCost'))
+    results = []
+    grow = find_in(img, build, 0x100, codes['kCodeConvListGrow'])
+    count = i32(img, build + 0x2f)
+    lst = i32(img, grow + 0x2a) if grow else -1
+    ok = bool(grow) and i32(img, grow + 0x1f) == count and i32(img, grow + 0x39) == i32(img, grow + 3) and \
+        i32(img, grow + 0x43) == lst and i32(img, grow + 0x4d) == lst
+    results.append(('kCodeConvListGrow (list +0x%x, count +0x%x)' % (lst, count), ok, hex(grow or build)))
+    refs, _ = cs.anchor_refs(img.d, text_va, text, ' in can_convert_from list for type ')
+    ok = len(refs) == 1 and build <= refs[0] < build + 0x500 and img.match_at(refs[0], codes['kCodeConvListTypeName'])
+    results.append(('kCodeConvListTypeName (anchor lea in the builder)', ok, hex(refs[0]) if refs else '-'))
+    test = find_in(img, can, 0x100, codes['kCodeCanConvertList'])
+    dtype = i32(img, can + 0xf)
+    ok = bool(test) and i32(img, test + 3) == count and i32(img, test + 0x17) == lst and i32(img, test + 0xc) == dtype
+    results.append(('kCodeCanConvertList (design type +0x%x)' % dtype, ok, hex(test or can)))
+    depth = find_in(img, post, 0x300, codes['kCodePostLoadDepth'])
+    ok = bool(depth) and i32(img, post + 0x1c) == i32(img, post + 0x44) and calls(img, post, 0x300, build)
+    results.append(('kCodePostLoadDepth (depth +0x%x, calls the builder)' % (i32(img, depth + 0xe) if depth else -1), ok,
+                    hex(depth or post)))
+    chassis = find_in(img, cost, 0x400, codes['kCodeConvCostChassis'])
+    ok = bool(chassis) and i32(img, chassis + 0x1e) == dtype
+    role = i32(img, chassis + 0xd) if chassis else -1
+    results.append(('kCodeConvCostChassis (same design type, role +0x%x)' % role, ok, hex(chassis or cost)))
+    # The role mode: line rebuild, convert click, convert tooltip.
+    found = {}
+    for name in ('kSigLineRebuildSources', 'kSigConvertClick', 'kSigConvertTooltip'):
+        m = [x.start() for x in cs.compile_pattern(sigs[name]).finditer(text)]
+        if len(m) != 1:
+            return results + [('equipment_conversion role mode %s' % name, False, '%d matches' % len(m))]
+        found[name] = text_va + m[0]
+    rebuild, click, tip = found['kSigLineRebuildSources'], found['kSigConvertClick'], found['kSigConvertTooltip']
+    target = i32(img, rebuild + 0x2b)
+    ok = i32(img, rebuild + 0x3b) == dtype and i32(img, rebuild + 0x4b) == count and i32(img, tip + 0x39) == target
+    d, o = img.d, img.va2off(rebuild)
+    reaches = any(d[o + i] == 0xe8 and calls(img, rel32(img, rebuild + i), 0x100, can) for i in range(0x100 - 5))
+    results.append(('line rebuild (target +0x%x, reaches CanConvert)' % target, ok and reaches, hex(rebuild)))
+    ok = i32(img, click + 0x15) == i32(img, click + 0x2a)
+    results.append(('convert click (item line +0x%x)' % i32(img, click + 0x15), ok, hex(click)))
+    refs, _ = cs.anchor_refs(img.d, text_va, text, 'PRODUCTION_LINE_CONVERT_HEADER')
+    app = find_in(img, tip, 0x300, codes['kCodeConvTipAppend'])
+    ok = len(refs) == 1 and tip <= refs[0] < tip + 0x100 and bool(app)
+    results.append(('kCodeConvTipAppend (convert tooltip)', ok, hex(rel32(img, app + 0x19)) if app else '-'))
+    # The left-out list: the stockpile walk's skip rule and the design name function.
+    walk = next((rel32(img, rebuild + i) for i in range(0x100 - 5)
+                 if d[o + i] == 0xe8 and calls(img, rel32(img, rebuild + i), 0x100, can)), 0)
+    skip = find_in(img, walk, 0x100, codes['kCodeStockpileSkip']) if walk else None
+    results.append(('kCodeStockpileSkip (obsolete +0x%x, owner +0x%x)' % (i32(img, skip + 2) if skip else -1,
+                                                                        img.d[img.va2off(skip + 0xc)] if skip else -1),
+                    bool(skip), hex(skip or walk)))
+    refs, _ = cs.anchor_refs(img.d, text_va, text, 'PRODUCTION_LINE_CONVERT_ORDER_OF_CONVERSION_ENTRY')
+    lea = refs[0] if len(refs) == 1 else 0
+    before = find_in(img, lea - 0x180, 0x180, codes['kCodeConvVariantName']) if lea else None
+    after = find_in(img, lea, 0x200, codes['kCodeConvVariantName']) if lea else None
+    ok = bool(before and after) and rel32(img, before + 7) == rel32(img, after + 7)
+    results.append(('kCodeConvVariantName (same name function twice)', ok, hex(rel32(img, before + 7)) if ok else '-'))
     return results
 
 

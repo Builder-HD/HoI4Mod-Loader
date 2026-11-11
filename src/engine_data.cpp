@@ -451,6 +451,9 @@ void ResolveProduction() {
             g_countryProduction, g_lines, g_lineCount, g_lineFactoriesA, g_lineFactoriesB, g_lineEquipment, g_equipType, g_typeArchetype);
 }
 
+uint32_t EquipmentTypeOffset() { return g_equipType; }
+uint32_t TypeArchetypeOffset() { return g_typeArchetype; }
+
 bool HaveProduction() {
     return HaveCountries() && g_equipDb && g_equipLookup && g_equipDbGlobal && g_countryProduction && g_lines && g_lineCount &&
            g_lineFactoriesA && g_lineFactoriesB && g_lineEquipment && g_equipType && g_typeArchetype && g_militaryLineVt;

@@ -6,6 +6,17 @@ A–F; NOTES.md has the findings and test results behind each.
 
 ## Unreleased
 
+- **Equipment conversion** (`equipment_conversion`, engine tier): a production line's "Convert
+  from Stockpile" also takes every earlier generation of the equipment (its `parent` chain), for
+  every archetype and mod, without `can_convert_from` entries. Two or more generations back, the
+  game's conversion cost is multiplied by a factor per generation. Game rules in the new
+  rules-only mod `hoi4_loader_conversion_rules`: on/off, the factor (default 75%), whether
+  conversions the game already allows use the factor too, and ship hulls (off by default). Test
+  decisions in "HOI4 Loader: Equipment Conversion". NOTES.md Part J. Checked on 1.19.4.2 only;
+  the signatures are unchecked on 1.19.3.
+  - **Same role only:** Shift+click on a line's convert button (single player) limits that
+    equipment type's lines to sources of the same role (no CAS eaten by a fighter line); the
+    tooltip shows the mode and, greyed, the designs it leaves out. Saved as a global flag.
 - **Game 1.19.4.2** ("Operation Postern", Steam, as distributed) is supported: its hash is in
   `loader_config.ini`. Every signature matches; three create_army code shapes changed and were
   adapted (NOTES.md "1.19.4.2 added"). 1.19.3 stays supported.
