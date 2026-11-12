@@ -208,7 +208,7 @@ bool HaveDivisionCondition();  // CArmy strength / organisation getters
 // Strength and organisation of a division as ratios (100000 = full). False if not a CArmy.
 bool DivisionRatios(void* unit, int64_t* strength, int64_t* org);
 
-int GameDateHours();  // current game date in hours (0 without a game); for diagnostics
+int GameDateHours();  // current game date in hours (0 without a game); time_control's lock ends by it
 uint32_t GameDateOffset();  // CGameState -> that hour count (0 if unresolved; cross-checks)
 void ResolveProduction();
 bool HaveProduction();  // production lines, equipment database
