@@ -518,6 +518,53 @@ static const size_t kSigGuiHideDisp = 2, kSigGuiFlagsDisp = 8, kSigGuiHiddenBit 
 // state field must be the one the tooltip reads.
 SIG(kSigStateOwnerCheck, "BB ?? ?? ?? ?? B9 ?? ?? ?? ?? 83 B8 ?? ?? ?? ?? 00 0F 4F D9 48 03 D8 48 8B 47 ?? 4C 8B B0 ?? ?? ?? ?? 4D 85 F6 0F 84 ?? ?? ?? ?? 49 8D 8E ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B F0 8B 0B")
 static const size_t kSigOwnerViewStateDisp = 0x1e, kSigOwnerStateOwnerDisp = 0x2e;
+// --- Equipment conversion (equipment_conversion, NOTES.md Part J) --------------------------
+// BuildConvertFromList(CEquipmentType*, database) (0x140cf2490), the hook target: count = 0
+// (mov [rcx+disp32],r13d, disp at +0x2f), then the equal range of the type's base key (E8 at +0x3e).
+// kAnchorConvertFromList's lea lies inside it.
+SIG(kSigConvertListBuild, "48 8B C4 48 89 58 10 48 89 68 18 48 89 70 20 57 41 54 41 55 41 56 41 57 48 81 EC ?? ?? ?? ?? 0F 29 70 C8 4C 8B E2 48 8B E9 45 33 ED 44 89 A9 ?? ?? ?? ?? 4C 8B C1 48 8D 54 24 ?? 49 8B CC E8")
+static const size_t kSigConvListCountDisp = 0x2f;
+ANCHOR(kAnchorConvertFromList, " in can_convert_from list for type ")
+static const size_t kConvListAnchorWithin = 0x500;  // the anchor's lea: at most this far into the function
+// The per-type post-load (0x140cf2110): generation depth = parent hops. parent = [rcx+disp32 +0x1c]
+// (root: itself), again in the loop at +0x44; it ends with BuildConvertFromList (E8 within 0x300).
+SIG(kSigEquipPostLoad, "40 53 56 57 48 83 EC 40 8B 91 ?? ?? ?? ?? 33 F6 89 91 ?? ?? ?? ?? 48 8B D9 48 8B 81 ?? ?? ?? ?? 48 89 6C 24 68 48 3B C1 74 ?? 66 0F 1F 44 00 00 03 90 ?? ?? ?? ?? 48 8B C8 89 93 ?? ?? ?? ?? FF C6 48 8B 80 ?? ?? ?? ?? 48 3B C1")
+static const size_t kSigPostLoadParentDisp = 0x1c, kSigPostLoadParentLoopDisp = 0x44, kPostLoadCallsBuildWithin = 0x300;
+// CanConvert(targetDesign, sourceDesign) (0x140c2cb00), the hook target: design->type [disp32 +0xf],
+// design->parent design [disp32 +0x16], type "derived" byte [disp32 +0x1d]. The list test inside is
+// kCodeCanConvertList.
+SIG(kSigCanConvert, "4C 8B CA 48 3B CA 0F 84 ?? ?? ?? ?? 4C 8B 91 ?? ?? ?? ?? 48 8B 81 ?? ?? ?? ?? 41 80 BA ?? ?? ?? ?? 00 74 ?? 48 85 C0 74 ?? 0F 1F 80 00 00 00 00 48 8B C8 48 8B 80 ?? ?? ?? ?? 48 85 C0 75 F1")
+static const size_t kSigCanConvertTypeDisp = 0xf, kSigCanConvertParentDisp = 0x16;
+// IsNaval(CEquipmentType*) (0x140cf5570): recursion through the archetype [disp32 +0xc] (E8 at
+// +0x15 calls itself), archetype again at +0x3c; then the unit-type bits tested against the naval
+// mask (mov rcx,0x80004003c1, the mask ConversionCost also picks its naval formula by). Four
+// sibling tests (other masks) share everything before the mask.
+SIG(kSigEquipIsNaval, "40 53 48 83 EC 20 48 8B D9 48 8B 89 ?? ?? ?? ?? 48 3B CB 74 ?? E8 ?? ?? ?? ?? 84 C0 74 ?? B0 01 48 83 C4 20 5B C3 48 8B 83 ?? ?? ?? ?? 48 8B 8B ?? ?? ?? ?? 48 85 C0 75 ?? 48 8B 83 ?? ?? ?? ?? 48 8B 80 ?? ?? ?? ?? 48 0B C8 E8 ?? ?? ?? ?? 48 B9 C1 03 40 00 80 00 00 00")
+static const size_t kSigIsNavalArchetypeDisp = 0xc, kSigIsNavalSelfCall = 0x15, kSigIsNavalArchetypeDisp2 = 0x3c;
+// ConversionCost(sourceDesign, out cost, targetDesign, organisation, out breakdown[8]) (0x140c29eb0),
+// the hook target: *cost = 0 (mov [rdx],rsi), the resource list at cost+8 constructed. The naval
+// chassis part inside is kCodeConvCostChassis.
+// A production line's source rebuild RebuildSources(line, const int* tag) (0x1419c2c30), the hook
+// target for the role mode: line target design [disp32 +0x2b], its type [disp32 +0x3b], parent
+// design [disp32 +0x42], the type's list count [disp32 +0x4b] (convert only if one is set).
+SIG(kSigLineRebuildSources, "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 B8 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 2B E0 48 8B FA 48 8B D9 E8 ?? ?? ?? ?? 48 8B 83 ?? ?? ?? ?? 48 85 C0 0F 84 ?? ?? ?? ?? 48 8B 88 ?? ?? ?? ?? 48 83 B8 ?? ?? ?? ?? 00 75 ?? 83 B9 ?? ?? ?? ?? 00 0F 84")
+static const size_t kSigRebuildTargetDisp = 0x2b, kSigRebuildTypeDisp = 0x3b, kSigRebuildParentDisp = 0x42,
+                    kSigRebuildCountDisp = 0x4b;
+// CProductionLineMilitaryItem's `convert` click (0x141de8e30), the hook target for Shift+click: the
+// item's line [disp32 +0x15] (again at +0x2a), the line's "Convert from Stockpile" byte [disp32 +0x31].
+SIG(kSigConvertClick, "48 89 5C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B D9 48 8B 89 ?? ?? ?? ?? 48 85 C9 74 ?? E8 ?? ?? ?? ?? 84 C0 74 ?? 48 8B 8B ?? ?? ?? ?? 0F B6 81 ?? ?? ?? ?? 84 C0 40 0F 94 C7")
+static const size_t kSigClickLineDisp = 0x15, kSigClickLineDisp2 = 0x2a, kSigClickToggleDisp = 0x31;
+// The line's convert tooltip ConvertTooltip(line, ?, std::string* out) (0x1419c2fd0), the hook target
+// for the mode line: line target design [disp32 +0x39]. kAnchorConvertHeader's lea is inside.
+SIG(kSigConvertTooltip, "48 89 5C 24 18 48 89 54 24 10 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 C0 48 81 EC ?? ?? ?? ?? 49 8B F8 4C 8B E9 45 33 E4 44 89 A5 ?? ?? ?? ?? 4C 8B 89 ?? ?? ?? ?? 4D 85 C9 0F 84")
+static const size_t kSigTooltipTargetDisp = 0x39;
+ANCHOR(kAnchorConvertHeader, "PRODUCTION_LINE_CONVERT_HEADER")
+// The tooltip's per-source entry (0x141ac3390) names the source with DesignName(design, std::string*
+// out) (0x140c30510): kCodeConvVariantName before and after this anchor's lea.
+ANCHOR(kAnchorConvertOrderEntry, "PRODUCTION_LINE_CONVERT_ORDER_OF_CONVERSION_ENTRY")
+static const size_t kConvOrderEntryNameBefore = 0x180, kConvOrderEntryNameAfter = 0x200;
+static const size_t kConvTooltipAnchorWithin = 0x100, kConvTooltipAppendWithin = 0x300;
+SIG(kSigConversionCost,"4C 89 4C 24 20 48 89 54 24 10 48 89 4C 24 08 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ?? ?? ?? ?? 48 81 EC ?? ?? ?? ?? 49 8B F9 4D 8B F8 4C 8B E2 4C 8B E9 33 F6 89 74 24 ?? 48 89 32 48 8D 4A 08 E8 ?? ?? ?? ?? C7 44 24 ?? 01 00 00 00 48 89 75 ?? 4C 8D 45 ?? BA 4D 00 00 00 49 8B CF E8")
 
 // --- Code shapes at RTTI-found addresses (numeric triggers, NOTES.md E2) -------------------
 // CODE(name, "..."): checked with SigMatchAt at an address reached through an RTTI vtable, not
@@ -783,6 +830,42 @@ CODE(kCodeTopBarPauseRefresh, "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 30 48 C
 static const size_t kCodeRefreshNameLen = 0x14, kCodeRefreshNameLea = 0x18, kCodeRefreshRootDisp = 0x2a,
                     kCodeRefreshFindDisp = 0x43;
 // The CTopBar destructor (RTTI vtable slot 0) has the kCodeScalarDeletingDtor shape.
+// --- Equipment conversion (NOTES.md Part J), found inside the SIG functions with SigFindIn ----
+// BuildConvertFromList grows the list: alloc = allocator [disp32 +3] vtable [disp8 +0x18]
+// (size, 8); count [+0x1f]; memcpy from list [+0x2a]; free = allocator [+0x39] vtable [disp8
+// +0x49] (list [+0x43]); list = new [+0x4d]; capacity = new [+0x53].
+CODE(kCodeConvListGrow, "48 8B 8D ?? ?? ?? ?? 48 8B 01 8B D7 48 C1 E2 03 41 B8 08 00 00 00 FF 50 ?? 48 8B D8 4C 63 85 ?? ?? ?? ?? 49 C1 E0 03 48 8B 95 ?? ?? ?? ?? 48 8B C8 E8 ?? ?? ?? ?? 48 8B 8D ?? ?? ?? ?? 48 8B 01 48 8B 95 ?? ?? ?? ?? FF 50 ?? 48 89 9D ?? ?? ?? ?? 89 BD ?? ?? ?? ??")
+static const size_t kCodeConvGrowAlloc = 3, kCodeConvGrowAllocSlot = 0x18, kCodeConvGrowCount = 0x1f, kCodeConvGrowList = 0x2a,
+                    kCodeConvGrowAlloc2 = 0x39, kCodeConvGrowList2 = 0x43, kCodeConvGrowFreeSlot = 0x49,
+                    kCodeConvGrowList3 = 0x4d, kCodeConvGrowCap = 0x53;
+// CanConvert's list test: count = target type [disp32 +3]; source type = design [disp32 +0xc];
+// list = target type [disp32 +0x17].
+CODE(kCodeCanConvertList, "49 63 82 ?? ?? ?? ?? 33 D2 4D 8B 89 ?? ?? ?? ?? 85 C0 7E ?? 49 8B 8A ?? ?? ?? ??")
+static const size_t kCodeCanConvListCount = 3, kCodeCanConvListType = 0xc, kCodeCanConvListList = 0x17;
+// The post-load stores the generation depth: mov [rbx+disp32 +0xe],esi (esi = the parent hops).
+CODE(kCodePostLoadDepth, "83 BB ?? ?? ?? ?? 00 48 8B 6C 24 68 89 B3 ?? ?? ?? ?? 0F 84")
+static const size_t kCodePostLoadDepthDisp = 0xe;
+// ConversionCost: the source design's unit-type bits (its role: what its modules'
+// add_equipment_type make it) [disp32 +0xd] and the naval mask pick the formula; naval chassis IC =
+// source design->type [disp32 +0x1e] ->chassis IC, times the BASE_NAVAL define (imul rcx,[rip]).
+CODE(kCodeConvCostChassis, "48 B9 C1 03 40 00 80 00 00 00 49 8B 85 ?? ?? ?? ?? 48 23 C1 48 89 44 24 ?? 74 ?? 49 8B 8D ?? ?? ?? ?? 48 8B 89 ?? ?? ?? ?? 48 0F AF 0D")
+static const size_t kCodeConvCostRoleDisp = 0xd, kCodeConvCostTypeDisp = 0x1e;
+// ConvertTooltip appends with std::string::append(out, p, n): lea rdx,[rsp+x]; cmp; cmova; mov
+// r8,[size]; mov rcx,rdi (out); E8 at +0x19.
+CODE(kCodeConvTipAppend, "48 8D 54 24 ?? 48 83 7C 24 ?? 0F 48 0F 47 54 24 ?? 4C 8B 44 24 ?? 48 8B CF E8")
+static const size_t kCodeConvTipAppendCall = 0x19;
+// The stockpile walk (0x1419bd150, the rebuild's call that reaches CanConvert), after CanConvert
+// said yes: a design whose byte [disp32 +2] (obsolete) is 0 is skipped if its owner [disp8 +0xc]
+// is the country, or if both tags are set and Friendly(&owner, tag) (E8 at +0x21) is true.
+CODE(kCodeStockpileSkip, "80 BB ?? ?? ?? ?? 00 75 ?? 48 8D 4B ?? 8B 01 8B 17 3B C2 0F 84 ?? ?? ?? ?? 85 C0 74 ?? 85 D2 74 ?? E8")
+static const size_t kCodeStockpileObsoleteDisp = 2, kCodeStockpileOwnerDisp = 0xc, kCodeStockpileFriendlyCall = 0x21;
+// DesignName(design (rsi), out (lea rdx,[rbp+x])): E8 at +7, result kept in rbx.
+CODE(kCodeConvVariantName, "48 8D 55 ?? 48 8B CE E8 ?? ?? ?? ?? 48 8B D8")
+static const size_t kCodeConvVariantNameCall = 7;
+// At kAnchorConvertFromList's lea: the error message's type name, lea rdx,[rbp+disp8 +0xf] (the
+// type's name std::string).
+CODE(kCodeConvListTypeName, "48 8D 15 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8D 55 ?? 48 8B C8 E8")
+static const size_t kCodeConvListTypeNameDisp = 0xf;
 
 #undef CODE
 #undef SIG

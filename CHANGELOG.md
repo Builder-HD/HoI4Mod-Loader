@@ -30,6 +30,24 @@ A–F; NOTES.md has the findings and test results behind each.
     off (a timed lock would never have ended). The single-player decision is dropped before each
     game is entered, so `on_startup` of the next game (e.g. a multiplayer game after a single
     player one) can't use the previous game's and write flags on one machine only.
+- **Equipment conversion tools** (`equipment_conversion`, engine tier). **Off until a mod sets
+  their global flags:** without them conversion is the base game's, AI included. NOTES.md Part J.
+  - `hoi4_loader_conversion_generations`: a production line's "Convert from Stockpile" also takes
+    every earlier generation of the equipment (its `parent` chain), for every archetype and mod,
+    without `can_convert_from` entries. The pairs are reserved in the game's lists at load and
+    shown only while the flag is set. Flag changes count at game entry, and in single player also
+    mid-game; in multiplayer at game entry only.
+  - Cost: two or more generations back, the game's conversion cost times a factor per generation
+    (`hoi4_loader_conversion_factor_<percent>`, default 75); `..._existing_loader_cost` applies
+    it to pairs the game already allows; `..._naval` allows earlier ship hulls.
+  - `hoi4_loader_conversion_role_mode`: Shift+click on a line's convert button (single player)
+    limits that equipment type's lines to sources of the same role (no CAS used up by a fighter
+    line); the tooltip shows the mode and, greyed, the designs it leaves out.
+  - The separate mod [HoI4Mod Loader: Equipment Conversion](https://github.com/ni1saux/HoI4Mod-Loader-Equipment-Conversion)
+    sets the flags from game rules at `on_startup`; existing saves opt in or out from the console with
+    `event hoi4_loader_equipment_conversion.1` / `.2`. Test decisions in "HOI4 Loader: Equipment
+    Conversion" (including opt in / opt out).
+  - Eight signatures and three anchors (109 in all). Checked on 1.19.4.2 only; 1.19.3 is unchecked.
 - **Game 1.19.4.2** ("Operation Postern", Steam, as distributed) is supported: its hash is in
   `loader_config.ini`. Every signature matches; three create_army code shapes changed and were
   adapted (NOTES.md "1.19.4.2 added"). 1.19.3 stays supported.

@@ -4184,6 +4184,383 @@ The railway review (H3, "After the PR #2 review") asked the same questions of th
     *Tested 2026-11-10: the dialog opens from the province row, Cancel and OK behave as described.*
 11. **After a fault** (not reproducible on purpose; check by reading `loader.log` if one ever
     happens): state views opened afterwards show no cross.
+# Part J: equipment conversion (`equipment_conversion`)
+
+Built on `feature/equipment-conversion` (PR #4, closed in review: a gameplay change belongs in a
+mod), reworked as opt-in tools on `feature/equipment-conversion-tools`, rebased on `main` after
+#2 and #5 (J6). J1-J5 describe the first version; J6 says what changed.
+
+The goal: a production line's **Convert from Stockpile** takes equipment of any earlier
+generation (`infantry_equipment_0` / `_1` into `_2`, older chassis, airframes and hulls), for
+every archetype and mod, instead of only the pairs `can_convert_from` names.
+
+## J1 findings (1.19.4.2 `v1.19.4.2.2da5`, the H1 Ghidra project; addresses for orientation only)
+
+Static analysis only.
+
+### The convert-from list (one per equipment type)
+
+- `CEquipmentType` fields: +0x18 name; +0x538 archetype (an archetype points to itself); +0x540
+  parent (`parent =`; a root points to itself); +0x424 generation depth (parent hops, computed in
+  the per-type post-load 0x140cf2110); +0x5b6 "derived" byte (then +0x548 is the base whose key
+  +0x478 is used).
+- **+0x4f0 convert-from list:** `CEquipmentType const*` array, capacity +0x4f8, count +0x4fc,
+  allocator +0x500 (vtable +8 alloc(size, align 8), +0x10 free). The type's destructor
+  (0x140a3bfa0) frees it with that allocator.
+- **Built once per type at database load** by `BuildConvertFromList(type, database)` 0x140cf2490,
+  called at the end of the post-load:
+  1. count = 0; seed with the equal range of database+0x128 (types sorted by base key, count
+     +0x134; 0x140a42e50) for the type's base key, minus the type itself: its own variants and
+     types sharing its base;
+  2. append each `can_convert_from` token (+0x508, stride 0x20, count +0x514), resolved with
+     0x140a434d0. Errors name " in can_convert_from list for type " (unique string).
+- So vanilla has no conversion between generations unless `can_convert_from` names it
+  (`infantry_equipment_2` has none; light tank artillery lists the light tanks).
+
+### Who reads it
+
+- `CanConvert(targetDesign, sourceDesign)` 0x140c2cb00: same design root (design +0x3f8 parent
+  design, walked to the top), else the target type's list contains the source design's type
+  (design +0x3f0). Callers: the line source rebuild 0x1419bd150, naval refits 0x140de0270 /
+  0x140ed14a0 ("Trying to refit a ship to equipment type that it cannot convert to."), the
+  production UI 0x141811740 and 0x141e97a30.
+- Five design-flag helpers (0x140c34e60, 0x140c38190, 0x140c38280, 0x140c383a0, 0x140c38530;
+  design +0x427 / +0x428) read the list directly. They mark designs that can be converted to or
+  from something (designer and stockpile markers). They follow the list without a hook; with
+  naval pairs refused (J2) they can still mark a hull as convertible. Cosmetic, to look at in game.
+
+### The production line
+
+- Line +0x88 target design, +0xec "Convert from Stockpile" (saved), +0x70 sources (count +0x7c,
+  0x28-byte entries made by 0x141ac2810, each with a per-organisation cost cache).
+- **Sources are rebuilt** from the country's stockpile (country +0xf68 production, +0x200) by
+  0x1419c2c30 -> 0x1419bd150, one `CanConvert(line target, stock design)` per stockpile entry,
+  then sorted. They are not saved.
+- The line's unit cost while converting: 0x1419c2ea0, the first source's cached cost.
+- Tooltip: 0x1419c2fd0 (`PRODUCTION_LINE_CONVERT_*`), one entry per source 0x141ac3390.
+
+### The cost
+
+- `ConversionCost(sourceDesign, out cost, targetDesign, organisation, out breakdown[8])`
+  0x140c29eb0, the only reader of the `NProduction` `BASE_LAND/NAVAL_EQUIPMENT_CONVERSION_IC_COST_FACTOR`
+  and `MIN_*_EQUIPMENT_CONVERSION_RESOURCE_COST_FACTOR` defines. Module differences; the source's
+  chassis IC (type +0x3b0) times BASE_LAND (minus the organisation's bonus) or BASE_NAVAL (naval:
+  the unit-type mask 0x80004003c1 of `IsNaval`); upgrade differences; modifiers; then resources.
+  out+0 is the IC (fixed point); breakdown entries 0, 2, 4, 6 are IC parts the tooltip shows (each
+  added with +=), 1, 3, 5, 7 modifier percentages.
+- Callers: production lines (0x141ac29b0 via the source cache), the tooltip, the UI and the AI's
+  production planning (0x141143610, 0x141144830, 0x1411485e0).
+
+## J2 design (decided with the user, 2026-11-11)
+
+- **Engine tier, no generated script.** One list hook covers every reader. A generated
+  `can_convert_from` patch would have to rewrite every equipment file of every mod.
+- **Pairs:** after `BuildConvertFromList`, every type's `parent` chain within its archetype is
+  appended where the list lacks it. The index where the loader's entries start is recorded per
+  type, so "the loader added this pair" is known later.
+- **Cost:** the game's cost times factor^(g-1), g = generations back (`GenerationsBack`, along the
+  parent chain). One generation back: the game's cost. Applied to the IC and the breakdown's IC
+  parts; resources stay the game's.
+- **Pairs the game already allows** (the user's addition): the game's cost by default; a rule
+  makes the factor apply to them as well. They are never refused.
+- **Who:** every country, AI included (the list is global per type).
+- **Naval:** first decided "no naval"; then (the user, "immersion breaking") a rule, off by
+  default. The rules are only known in a game, after the lists are built, so naval pairs are
+  added like the others and `CanConvert` refuses them while the rule is off.
+- **Rules** (first version; superseded by J6 and J7): game rules in a rules-only mod set global
+  flags at `on_startup` (railways' way, H5), read at game entry and daily. Now the tools are
+  opt-in flags a mod sets (J6), read at game entry, and in single player also every 30 frames;
+  in multiplayer at game entry only (J7). The hooks read only atomics.
+
+## J3 implementation
+
+- **Hooks** (MinHook; DEVELOPING.md "Global hooks"):
+  - `BuildConvertFromList`: after the original, append (the list's own allocator; grows exactly to
+    the new count) and record.
+  - `CanConvert`: after the original, if it said yes for a pair the loader added and the design
+    roots differ (the engine's other reason), refuse while the feature is off, the "off" rule is
+    set, or the target is naval and the naval rule is not.
+  - `ConversionCost`: snapshot the breakdown, run the original, scale for g >= 2.
+- **Resolution** (5 SIG + 1 ANCHOR, engine_conversion.cpp; `tools/check_code_shapes.py`
+  `check_equipment_conversion`):
+  - list, capacity, count and allocator from the builder's grow code (`kCodeConvListGrow`), each
+    read twice there and the count again from the prologue; the alloc and free vtable slots from
+    the same code; the anchor's lea must lie inside the builder; the type name from the lea right
+    after it;
+  - `CanConvert`'s list test (`kCodeCanConvertList`) must use the same list and count; its design ->
+    type offset must equal production_data's (`EquipmentTypeOffset`) and the cost function's;
+  - parent from the post-load, read twice; depth from its store (`kCodePostLoadDepth`); the
+    post-load must call the builder;
+  - `IsNaval` by its mask (four sibling tests share all code before it); its archetype offset read
+    twice and checked against production_data's.
+- **Fail-safe:** SEH around the loader's part of each hook. On a fault: logged once, the feature
+  switched off (vanilla behaviour: the loader's pairs refused, costs unchanged), deactivated on
+  the main thread. Self-check on game entry: every recorded list still holds the loader's entries,
+  and each is an earlier generation of its type; otherwise off.
+- **Threads:** no graphics. The first `CanConvert` with the loader's pairs and the first cost call
+  log their thread; static analysis says both run on the main thread (production daily, UI) and on
+  AI planning threads. They read only type data fixed after load, the loader's table (written only
+  during the database load, under an SRW lock) and atomics.
+- **Saves:** nothing is saved by the loader; sources are rebuilt from the stockpile. Expected: a
+  save loaded without the loader converts only what the game allows (to check in game).
+- **1.19.3:** unchecked (no 1.19.3 copy here); a false match would fail a cross-check and the
+  feature would stay off.
+- `tools/check_signatures.py` and `tools/check_code_shapes.py`: all ok on the 1.19.4.2 copy
+  (SHA-256 `bccc6290…`, same as the game folder's). Smoke test: the signature total grew by 6 here (J5 and the rebases: J7).
+
+### To verify in game (1.19.4.2, single player, Germany 1936, decisions "HOI4 Loader: Equipment Conversion")
+
+1. `loader.log` at startup: "Equipment conversion: list +0x4f0 ...", `equipment_conversion`
+   active; on game entry "N lists built, M types extended, K pairs added (L naval)" and
+   "self-check passed".
+2. "Conversion: prepare", then **decommission** Infantry Equipment 0 and I (production view, the
+   variant's "Decommission": the stockpile walk uses the country's own designs only when they are
+   decommissioned, J5). An Infantry Equipment II line with Convert from Stockpile: the tooltip lists
+   Infantry Equipment I (the game's cost) and Infantry Equipment 0 (75% of the game's cost); the
+   line consumes both and produces Infantry Equipment II.
+3. Tanks: a Panzer II chassis design converts Panzer I designs.
+4. The rules mod: factor 50% shows 50% for two generations back; "blocked" removes the extra
+   sources; naval allowed lets an older hull's ships refit into a newer hull, blocked refuses it.
+5. Save, load: the same. Load that save **without** the loader: no error, the extra sources are
+   gone, the line goes on (converting what the game allows, or producing).
+6. `loader.log` thread lines; no "fault" line.
+
+## J4 investigation: choosing which sources a line converts (the user's request)
+
+Vanilla converts **every** stockpiled design that `CanConvert` accepts. A small airframe line
+(say a fighter design) therefore also eats CAS and naval bomber designs of the same airframe: they
+are designs of the same type, so not even a generation question. The user asked for a button to
+enable or disable conversion per kind of source.
+
+Findings so far:
+- The line entry (`production_military_line_entry`, countryproductionlineview.gui ~line 1720) has
+  one `convert` button (`GFX_production_line_convert`), the line's +0xec toggle. The sources are
+  shown only in its tooltip ("Order of conversion"); there is no list UI to put checkboxes in.
+- The per-line rebuild 0x1419c2c30(line, tag) is the place to filter: it knows the line, and after
+  the original the loader can drop sources (line +0x70 / +0x7c) it should not use. The cost then
+  follows (the line uses its first source).
+- Saved state: the loader may not add fields to a line. Choices are country flags (saved with the
+  game, harmless without the loader) or per-session state.
+- A button needs a .gui change: the virtual file patch `register_file_patch` from Part I4 (PR #3),
+  not on `main` yet.
+- Clicks are UI on one machine: single player first, as railway badges and the building cross.
+
+Options to decide:
+- **A, one button, a mode per line:** next to `convert`, cycling "all sources" / "same role only"
+  (the source design's role equals the line's: fighter only from fighters) / maybe "same type
+  only" (no generation conversion). Small UI; the role field of a design is still to be found.
+- **B, a list per line:** a popup listing the stockpiled sources with a checkbox each. Full
+  control; a new window and a dynamic list, much more UI work.
+
+**Decided (2026-11-11): A.**
+
+### J5: the role mode (built)
+
+Findings:
+- **Role:** a design's unit-type bits at design +0x408 (`FUN_140c29730` builds them from the type
+  and its modules: module +0x78 `add_equipment_type` bits, +0x88 removed bits, the `type_override`
+  slot when set). `ConversionCost` tests the same field against the naval mask; that instruction
+  gives the offset (`kCodeConvCostChassis`).
+- **The line UI item** `CProductionLineMilitaryItem` (constructor 0x141dd3be0): `convert` is
+  item +0x3880, its observer glue item +0x27e0 calls 0x141de8e30, which posts the toggle command
+  (0x1411d16c0) for the line at item +0x3878 (toggle byte line +0xec).
+- **The convert tooltip** 0x1419c2fd0(line, ?, std::string* out) writes into `out` with the game's
+  `std::string::append` (0x14012b330).
+- **Rebuild:** 0x1419c2c30(line, const int* tag) is reached from the line's vtable (its update
+  0x1419c4750 and another slot 0x1419c4f90); not checked how often it runs.
+
+Design (A without a new GUI element, so no file patch is needed on `main`):
+- **Shift+click on `convert`** (single player; GetAsyncKeyState at the click): toggles "same role
+  only" for (player country, the line's equipment type) at the next safe point, instead of
+  vanilla's toggle. Stored as the global flag `hoi4_loader_conversion_role_<TAG>_<type>`; the rule
+  reading rebuilds the table from these flags. In multiplayer Shift+click is swallowed and logged.
+- **Filter:** the rebuild hook sets a thread-local context (target design, its role) when the
+  line's type is in the mode; `CanConvert` then refuses a source whose role differs. Nothing is
+  freed or edited in the line: the engine just builds fewer sources.
+- **Tooltip:** the mode line is appended (localisation keys `HOI4_LOADER_CONVERSION_MODE_ALL` /
+  `_ROLE`, else English).
+- **Resolution:** 3 SIG + 1 ANCHOR (signatures now 56). The rebuild's target, type, parent and
+  count offsets must match the list and `CanConvert`; one of its calls must reach `CanConvert`;
+  the tooltip reads the same target offset and contains the header anchor; the click reads the
+  item's line twice. Without them the role mode stays off and the rest works.
+- A dedicated button (option A as first described) can follow once the file patch from Part I4
+  is on `main`.
+
+**The stockpile walk's own rule** (0x1419bd150, after `CanConvert` says yes): a design whose byte
++0x424 is 0 is skipped if its owner (+0x1c) is the country, or a friendly country (0x140c085f0).
+So **the country's own designs convert only when decommissioned** (the production view's
+"Decommission", `PRODUCTION_VARIANT_OBSOLETE_NO`: "marking it as outdated equipment"), foreign
+ones when captured from a non-friendly country. +0x424 is read as "decommissioned" from that, not
+checked in game yet.
+
+**Left-out list (2026-11-11, the user's request):** HoI4 text has no strikethrough, so in "same
+role only" mode the convert tooltip gets a greyed section "Not converted (another role):" with
+one line per design the mode left out.
+- `CanConvert`, refusing a source for role during a rebuild, records it (at most 48, no
+  duplicates) if the stockpile walk would have used it (its rule above, `kCodeStockpileSkip`:
+  the byte, owner and friendly test read from that code). After the rebuild the list is stored
+  per line with its target design.
+- The tooltip names them with the game's `DesignName(design, std::string*)` 0x140c30510, the
+  function the "Order of conversion" entry uses (`kCodeConvVariantName`, the same call before and
+  after `kAnchorConvertOrderEntry`'s lea), freed with the engine's delete (needs the scope block
+  pieces). Colours via the rules mod's `HOI4_LOADER_CONVERSION_LEFT_OUT` / `_ENTRY` ($VARIANT$,
+  formatted by `Localize`); without them plain text.
+- Signatures 57 (+1 ANCHOR).
+
+To verify in game:
+1. A fighter line on a small airframe, with **decommissioned** fighter and CAS designs of that
+   airframe in the stockpile and Convert from Stockpile on: the tooltip lists both and ends with
+   "Sources: designs of every role".
+2. Shift+click convert: `loader.log` "... lines of GER: same role only"; the tooltip line
+   changes; after the line's next update (or toggling convert off and on) only the fighters are
+   listed, and the CAS designs show greyed under "Not converted (another role)". A CAS line of the
+   same airframe lists only the CAS.
+3. Save and load: the mode stays (the flag). Shift+click again: every role, no greyed section.
+
+### In-game results (2026-11-11, 1.19.4.2, Germany 1936, single player)
+
+- **Decommissioning is required, as J5 read it:** with Hs 123 and Ju 87 still in commission, a
+  Ju 87 G 'Kanonenvogel' line said "no equipment in stock that we could use". The user had not
+  decommissioned them; the CAS chain (Hs 123, two generations back) is still to be retried.
+- **Bf 109 D line** (Basic Small Airframe, fighter), Convert from Stockpile, with decommissioned
+  stock: "Order of conversion" listed 280 He 51, 72 Do 22 and 1 Ju 87, then "Sources: designs of
+  every role".
+- **Shift+click:** the tooltip at once showed "Sources: designs of the same role only", only 280
+  He 51 in the order of conversion, and greyed under "Not converted (another role)": Do 22, Ju 87.
+  So the line's sources were rebuilt right after the toggle (the rebuild is not only daily).
+- Not yet checked: the factor on a source two or more generations back (Infantry Equipment 0, or
+  Hs 123 into the Kanonenvogel, which also tells whether the duplicated CAS airframes chain to
+  each other), the naval rule, save/load (mode flag) and loading without the loader.
+
+## J6: opt-in tools (after the PR #4 review, 2026-11-11)
+
+**The review (Builder-HD, PR #4 closed):** earlier-generation conversion and the cost factor change
+the balance for every country, AI included, as soon as the loader is installed, even for players
+who installed it for an unrelated mod. That is a gameplay feature and belongs in a mod; the loader
+gives mods tools that script cannot provide and does nothing until a mod uses them. Also a bug:
+`ResolveRoleMode` treated every `E8` byte in the rebuild's first 0x100 bytes as a call and read
+0x100 bytes at the target without a range check, so on another build a wildcard byte could send it
+outside the image and crash the game at startup.
+
+**What script cannot do** (why the loader is still needed): generation pairs for every equipment
+of every mod (vanilla: a `can_convert_from` entry per type, and none for other mods' equipment);
+a cost per generation (the `NProduction` conversion defines are global); a line's sources and the
+convert tooltip (no script access).
+
+**Changes:**
+- **Opt-in flags.** `hoi4_loader_conversion_generations` and `hoi4_loader_conversion_role_mode`
+  switch the two tools on; the factor, `..._existing_loader_cost` and `..._naval` only count with
+  generations on. The old `hoi4_loader_conversion_off` is gone (its meaning is now the default).
+- **No list change without the opt-in.** At load `BuildConvertFromList`'s hook only plans (read
+  only: the type's earlier generations its list lacks). `Sync` (game entry, and `OnMainThreadFrame`
+  every 30 frames in a game, so an `on_startup` flag counts before the first day) appends the
+  planned pairs when the flag is set and truncates each list back to where the loader's entries
+  start when it is gone (J7 replaced appending at runtime with entries reserved at load and a
+  count change). Safe points only: no tick, no conversion test running. After appending, the self-check runs;
+  on a failure the pairs are removed again and the feature switches off.
+- **Pass-through without the flags.** `CanConvert` refuses a loader pair while the flag is gone but
+  the entries are not removed yet; the cost hook scales nothing; the rebuild hook marks nothing;
+  Shift+click is the game's click; the tooltip is the game's.
+- **All or none at init:** the hooks are queued from one list; on a failure the ones queued so far
+  are removed before anything is applied (`HookUnqueue` since J7).
+- **E8 fix:** `InText` checks every range against `.text` (`ImageSection`); `CallsTarget` returns
+  false outside it, and the rebuild's E8 scan only follows targets inside it.
+- **The mod:** the rules-only mod became the example opt-in mod (it sets the opt-in flags from
+  game rules, plus a new rule "Same Role Only (Shift+Click)"); since moved to its own repository
+  (below). The test mod got "Conversion: opt in (as a mod would)" / "opt out".
+- **Console opt-in** (the user's question): the game has no console command that sets a flag or
+  runs an effect (only the script effects `set_global_flag` / `clr_global_flag` exist in the exe),
+  but its `event` command fires any event. The example mod's rule-to-flag logic moved into the
+  scripted effect `hoi4_loader_conversion_apply_rules` (it clears first, then sets per the rules),
+  used by `on_startup` and by the hidden event `hoi4_loader_equipment_conversion.1`; `.2` runs
+  `hoi4_loader_conversion_clear_flags`. So a save started without the mod opts in with one console
+  line, and stays opted in (the flags are saved).
+
+**First in-game test (2026-11-11, 1.19.4.2):**
+- Without opt-in: three new games, each "230 types have earlier generations to add (471 pairs, 91
+  naval), used only while a mod sets hoi4_loader_conversion_generations"; no list changed.
+- "Conversion: opt in": at once "flags: earlier generations ON ... role mode ON", "471 pairs added
+  to 230 types' lists", "self-check passed"; the first `CanConvert` with the pairs on the main thread.
+- **The example mod did not opt in at game start** (two bugs, from `error.log`, fixed):
+  - `on_startup` effects have no scope, and a scripted effect needs one ("hoi4_loader_conversion_apply_rules:
+    Invalid Scope ... provided: None"); the call now runs inside `every_country = { limit = { is_ai = no } }`,
+    as the test mod does it.
+  - A rule-level `desc` is not accepted ("Unexpected token: desc", although vanilla's format
+    comment lists it); removed, the option descriptions stay. `main`'s railway rules mod has the
+    same five errors.
+- **Rebase on `main`** (#2 railways, #5 time control): union merges; signatures 84 + 11 = 95. The
+  test mod's create_army category on `main` had lost its `visible` block and brace in the railway
+  merge (the railway category ended up inside it); restored.
+- **The mod moved out of the loader** (the user, 2026-11-11, as with the railway rules mod): the
+  opt-in mod is now its own repository, "HoI4Mod Loader: Equipment Conversion"
+  ([ni1saux/HoI4Mod-Loader-Equipment-Conversion](https://github.com/ni1saux/HoI4Mod-Loader-Equipment-Conversion);
+  launcher file `hoi4_loader_equipment_conversion.mod`). The loader
+  keeps only the tools and the test mod's opt-in decisions; the mod's tooltip localisation keys
+  fall back to the loader's English text without it.
+
+**To verify in game:**
+1. Loader and test mod, no conversion mod, no opt-in: Infantry Equipment II with decommissioned
+   0 and I lists only Infantry Equipment I (the base game); Shift+click on convert toggles convert
+   as usual; no mode line. `loader.log`: "N types have earlier generations to add ..., used only
+   while a mod sets hoi4_loader_conversion_generations", no "ON" line.
+2. "Conversion: opt in": within a second `loader.log` says "earlier generations ON: ... pairs
+   added" and "self-check passed"; Infantry Equipment 0 is listed (75%); Shift+click and the tooltip
+   work as in J5.
+3. "Conversion: opt out": "earlier generations OFF"; back to step 1.
+4. A new game with the example mod and its default rules: the flags are set at `on_startup` and
+   step 2 holds without the decision.
+5. A save started without the mod, then loaded with it: nothing changes until the console's
+   `event hoi4_loader_equipment_conversion.1`; then step 2 holds (`game.log`: "opted in from the
+   game rules"). `event hoi4_loader_equipment_conversion.2`: step 3.
+
+## J7: PR #7 review (2026-11-11)
+
+**The review (Builder-HD):** opt-in answers #4; one blocker and smaller points.
+
+- **Blocker, multiplayer:** `Frame()` read the flags every 30 frames and `Sync()` then changed the
+  lists. Frame rates differ between machines, so a flag a mod sets or clears mid-game would change
+  `CanConvert`, the cost and the lists at a different tick on each machine (out of sync). **Fixed:**
+  in multiplayer the flags are read at game entry only (new game after `on_startup`, loaded save,
+  hot join: the same point everywhere); a flag set mid-game counts from the next load (logged once,
+  documented in MODDING). Single player keeps the 30-frame read, so a decision or the console still
+  counts within a second. "Single player" is the session as classified at game entry
+  (`SessionAllowsLocalWrites`).
+- **Growing the list freed the old buffer** at runtime, safe only because of the safe-point rule.
+  **Fixed:** at load, right after the game built a type's list (no conversion test runs yet), the
+  loader appends that type's earlier generations and sets the count back at once
+  (`ConvertListSetCount`): the entries sit in the buffer beyond the count, invisible to the game. At
+  runtime only the count changes (`first + n` while opted in, `first` otherwise); nothing is
+  allocated or freed after load. Before raising the count, `StillReserved` checks that the game's
+  count is unchanged and the entries are still there (otherwise that list is skipped and logged).
+- **Shift+click in multiplayer** swallowed the click. **Fixed:** it falls through to the game's
+  convert toggle.
+- **Hook removal:** `HookUnqueue` (from #3) instead of `MH_RemoveHook` in the plugin.
+- **NOTES:** J2 and J3 corrected, J6's mod path and a local path removed.
+- **Rebase on `main`** (#3, #6, #8, #9): the two branch commits squashed into one, then rebased;
+  add-only conflicts resolved as unions. The test mod's categories fix is now `main`'s (#9).
+  Signatures 98 + 11 = 109.
+
+**In-game checks** (still to run, from the review):
+1. Opting out removes the pairs ("earlier generations OFF"; the tooltip back to the base game).
+2. The factor on a source two or more generations back (Infantry Equipment 0 into II at 75%).
+3. The naval flag: without it no hull refits into a newer hull; check whether the designer or
+   stockpile still marks a hull as convertible (the design-flag helpers read the list; cosmetic).
+4. A new game with the separate mod: the flags at game entry, no `desc` or scope errors.
+5. A save made while opted in: loaded with the loader (still opted in), and without it (base game,
+   no errors).
+6. Multiplayer: a flag set mid-game changes nothing until the next load; no out of sync.
+
+**Results (2026-11-11, the user, 1.19.4.2, single player; the build installed before the J7
+changes, i.e. runtime append rather than reserved entries):** 2 (factor two or more generations
+back), 4 (new game with the separate mod) and 5 (save made while opted in, loaded with and without
+the loader) passed. Multiplayer (6) is not tested for now. Still open: 1 (opt-out), 3 (naval), and a
+run of the J7 build itself (the list is now reserved at load).
+
+**Results on the J7 build (2026-11-11, the user, 1.19.4.2, single player):** opt in, opt out and opt
+in again work (1; the reserved entries shown, hidden and shown again by the count alone); the naval
+flag works (3; whether a hull is still marked as convertible in the designer or stockpile was not
+reported). Only multiplayer (6) remains untested.
+
 
 # Part K: game speed and date display (`time_control`)
 

@@ -1,0 +1,97 @@
+# Test decisions for hoi4_loader's equipment_conversion (MODDING.md "Converting earlier
+# generations", NOTES.md Part J). Play as Germany (1936 start). The loader's tools are off until a
+# mod sets their flags: enable the separate "HoI4Mod Loader: Equipment Conversion" mod (its game rules set them),
+# or take "Opt in" here, which sets them the way a mod would ("Opt out" clears them again).
+#
+# 0. Without either: everything below behaves as the base game (Infantry Equipment 0 is not listed,
+#    Shift+click on convert is the normal toggle, no mode line in the tooltip).
+# 1. "Prepare": researches Infantry Equipment II and the Panzer II chassis, and puts Infantry
+#    Equipment 0 and I into the stockpile.
+#    Then DECOMMISSION Infantry Equipment 0 and I (production view): the game converts a
+#    country's own equipment only once it is decommissioned.
+# 2. A production line for Infantry Equipment II: tick "Convert from Stockpile". Its tooltip's
+#    "Order of conversion" should list Infantry Equipment I (the game's cost) and Infantry
+#    Equipment 0 (two generations back: the game's cost times the factor).
+# 3. Tanks: design a tank on the Panzer II chassis (light_tank_chassis_2), give it a line and tick
+#    "Convert from Stockpile": Panzer I designs (light_tank_chassis_1) and older are listed.
+# 4. "Rules": logs the rule flags to logs/game.log.
+#
+# Every decision is guarded with hoi4_loader_feature_equipment_conversion = yes, so without the
+# loader they are hidden.
+
+hoi4_loader_conversion_category = {
+
+	hoi4_loader_conversion_opt_in = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_equipment_conversion = yes
+			NOT = { has_global_flag = hoi4_loader_conversion_generations }
+		}
+		complete_effect = {
+			set_global_flag = hoi4_loader_conversion_generations
+			set_global_flag = hoi4_loader_conversion_role_mode
+			log = "hoi4_loader_test: conversion tools opted in (generations, role mode)"
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	hoi4_loader_conversion_opt_out = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_equipment_conversion = yes
+			has_global_flag = hoi4_loader_conversion_generations
+		}
+		complete_effect = {
+			clr_global_flag = hoi4_loader_conversion_generations
+			clr_global_flag = hoi4_loader_conversion_role_mode
+			log = "hoi4_loader_test: conversion tools opted out"
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	hoi4_loader_conversion_prepare = {
+		icon = generic_research
+		cost = 0
+		visible = { tag = GER hoi4_loader_feature_equipment_conversion = yes }
+		complete_effect = {
+			set_technology = { infantry_weapons1 = 1 infantry_weapons2 = 1 improved_infantry_weapons = 1 }
+			set_technology = { basic_light_tank_chassis = 1 improved_light_tank_chassis = 1 }
+			add_equipment_to_stockpile = { type = infantry_equipment_0 amount = 3000 }
+			add_equipment_to_stockpile = { type = infantry_equipment_1 amount = 3000 }
+			log = "hoi4_loader_test: conversion prepared (Infantry Equipment II and Panzer II researched; 3000 infantry_equipment_0 and _1 in stock)"
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	hoi4_loader_conversion_rules = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_equipment_conversion = yes }
+		complete_effect = {
+			if = {
+				limit = { has_global_flag = hoi4_loader_conversion_generations }
+				log = "hoi4_loader_test: conversion flag: earlier generations ON"
+			}
+			else = { log = "hoi4_loader_test: conversion flag: earlier generations off (no mod opted in)" }
+			if = {
+				limit = { has_global_flag = hoi4_loader_conversion_role_mode }
+				log = "hoi4_loader_test: conversion flag: role mode ON"
+			}
+			if = { limit = { has_global_flag = hoi4_loader_conversion_factor_100 } log = "hoi4_loader_test: conversion factor 100" }
+			if = { limit = { has_global_flag = hoi4_loader_conversion_factor_90 } log = "hoi4_loader_test: conversion factor 90" }
+			if = { limit = { has_global_flag = hoi4_loader_conversion_factor_50 } log = "hoi4_loader_test: conversion factor 50" }
+			if = { limit = { has_global_flag = hoi4_loader_conversion_factor_25 } log = "hoi4_loader_test: conversion factor 25" }
+			if = {
+				limit = { has_global_flag = hoi4_loader_conversion_existing_loader_cost }
+				log = "hoi4_loader_test: already allowed pairs use the factor"
+			}
+			if = {
+				limit = { has_global_flag = hoi4_loader_conversion_naval }
+				log = "hoi4_loader_test: earlier ship hulls allowed"
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+}
