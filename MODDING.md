@@ -1023,6 +1023,17 @@ queue_railway_dismantle = { start_province = 6521 target_province = 6282 levels 
   dismantle is taken over; every other combination, and Ctrl+Alt+Shift, stays vanilla. In
   multiplayer the click is ignored (a click happens on one machine only; it would desync), and
   `loader.log` says so once.
+- **A segment being dismantled** looks like one being upgraded: its circle shows the dismantle
+  entry's target level in red with vanilla's under-construction mark, and the tooltip adds
+  "Currently dismantling Railway Connection to level N" plus its own click hints. A **click** or
+  **right click** on it dismantles one level less (the entry goes one level up); **Shift+click** or
+  Shift+right click stops dismantling there (the entry is cancelled and leaves the queue at the
+  next daily update). Vanilla's own click there would turn the entry into a rebuild, so it is not
+  used. Single player, like Alt+Shift+click. The texts are built-in English; a mod can define
+  ```yaml
+   HOI4_LOADER_RAILWAY_DISMANTLING:0 "Currently dismantling §YRailway Connection§! to level §Y$LEVEL$§!"
+   HOI4_LOADER_RAILWAY_DISMANTLE_HINTS:0 "§GClick§! or §GRight-Click§! to dismantle one level less\n§GShift+Click§! to stop dismantling\n§GAlt+Shift+Click§! to dismantle one more level"
+  ```
 - **Where the player may dismantle** (the X, Alt+Shift+click, and every day for a queued entry): every
   province of the segment must be controlled by the player's country, or by a country these
   global flags allow:

@@ -327,6 +327,11 @@ bool HookRailwayTooltip();
 // first (the shared line lookup).
 const char kRailwayDismantlePrefixKey[] = "HOI4_LOADER_RAILWAY_DISMANTLE_PREFIX";
 const char kRailwayBuildPrefixKey[] = "HOI4_LOADER_RAILWAY_BUILD_PREFIX";
+// The railway badge tooltip on a segment being dismantled: a line after the engine's text
+// ($LEVEL$ = the target level) and the click hints that replace vanilla's. Built-in English
+// without these keys.
+const char kRailwayDismantlingKey[] = "HOI4_LOADER_RAILWAY_DISMANTLING";
+const char kRailwayDismantleHintsKey[] = "HOI4_LOADER_RAILWAY_DISMANTLE_HINTS";
 bool HookRailwayEntryTitle();
 // Where the player's dismantling (map badges, the queued line's daily check) is allowed besides
 // provinces the country controls itself: a bit mask the plugin computes from global flags a mod
@@ -341,10 +346,20 @@ const int kRailwayDismantleDefaultPercent = 30;
 using RailwayCost_t = int (*)();
 void SetRailwayDismantleCost(RailwayCost_t cost);
 // Railway map badges (the level circle on each segment): while Alt+Shift is held they show a red
-// X where the player may dismantle, and a Alt+Shift+click calls onClick(segment path) instead of
-// vanilla's upgrade when onClick returns true. UI thread; onClick must defer game-state changes.
-using RailwayIconClick_t = bool (*)(const std::vector<int>& path);
+// X where the player may dismantle, and a Alt+Shift+click calls onClick(segment path, deepen)
+// instead of vanilla's upgrade when onClick returns true. On a segment with the player's dismantle
+// entry the badge shows its target in red with the under-construction mark, and a click or right
+// click calls onClick(path, lessen), Shift+click or Shift+right click onClick(path, stop), instead
+// of vanilla (whose level change would turn the entry into a rebuild). UI thread; onClick must
+// defer game-state changes.
+enum class RailwayClick : int { kDeepen, kLessen, kStop };
+using RailwayIconClick_t = bool (*)(const std::vector<int>& path, RailwayClick action);
 bool HookRailwayMapIcons(RailwayIconClick_t onClick);
+// One dismantle level less on a segment (kLessen), or no dismantling there at all (kStop): the
+// country's dismantle entry for this path (or one sharing a link with it) goes one level up, or is
+// cancelled when nothing would be left to dismantle (the queue drops it at the next daily update).
+// Returns 2 cancelled, 1 one level less, 0 no entry. Main thread, at a safe point.
+int LessenRailwayDismantle(int tag, const std::vector<int>& path, bool stop);
 // One more dismantle level on a segment: deepens the country's dismantle entry for exactly this
 // path by one level (adding that level's cost), or queues a new one (top level -> top - 1).
 // Returns 2 deepened, 1 queued, 0 nothing to do. Main thread, at a safe point.
