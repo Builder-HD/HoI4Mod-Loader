@@ -4777,3 +4777,21 @@ Test mod decisions in the category "hoi4_loader test", guarded by
   - step 6 (release; the trigger `has_forced_game_speed`);
   - step 9 (the save without the loader);
   - whether Space / numpad +/− act while the panel is hidden *without* a lock.
+
+## K4 after the #5 review (2026-11-12, fixed on main)
+
+- **Lock that never ends without the game date.** `ResolveDate` accepted the top bar's date format
+  when `kSigGameDate` had not resolved (`GameDateOffset() == 0`). `GameDateHours()` then always
+  returned 0, so a timed lock (`days`, `hours`, `until`) never ended and the player stayed at that
+  speed with pause blocked, also after loading. Now the game date is required: without it the
+  calendar is off and `TimeControlInit` fails (time_control off, logged).
+- **Stale single-player decision.** `g_sessionOk` was set in `OnEntered` and never reset, but
+  `on_startup` runs inside the game's own entry, before the callbacks. After a single-player game,
+  `force_game_speed` / `hide_date_display` in the next game's `on_startup` (e.g. hosting a
+  multiplayer game in the same session) passed with the old `true` and wrote global flags on one
+  machine only. Now lifecycle has `OnGameEntering` (before the game's entry; it also forgets the
+  previous session), and time_control sets `g_sessionOk = false` there. `on_startup` effects do
+  nothing, as MODDING already said.
+- Not changed (smaller points of the review, for later): the lock stays set in the main menu until
+  the next entry; the fault path doesn't restore the previous speed; speed 10 can't be saved;
+  two mode-1 pause callers unexamined; `ResolvePanel`'s memcmp without SEH.

@@ -316,12 +316,16 @@ void ResolveDate(uint8_t* ud, uint8_t* pc, uint8_t* hw) {
     }
     uint32_t dateObj = Rd<uint32_t>(tail, kCodeTopBarDateObjDisp);
     uint32_t hours = dateObj + Rd<uint8_t>(fmt, kCodeGameDateHoursDisp);
-    // The same hour count the loader reads elsewhere (kSigGameDate), when that resolved.
-    if (GameDateOffset() == 0 || GameDateOffset() == hours) {
+    // The same hour count the loader reads elsewhere (kSigGameDate). Required: a timed lock ends by
+    // that date, so without it a lock would never end (GameDateHours() would stay 0).
+    if (GameDateOffset() != 0 && GameDateOffset() == hours) {
         g_dateBase = (int)Rd<uint32_t>(fmt, kCodeGameDateBaseImm);
         g_calendar = g_dateBase > 0 && g_dateBase % kHoursPerYear == 0;
     }
-    if (!g_calendar) Log("ERROR: time_control: the date format disagrees with the game date (+0x%x / +0x%x)", hours, GameDateOffset());
+    if (!g_calendar)
+        Log("ERROR: time_control: %s (+0x%x / +0x%x); time_control off", GameDateOffset() ? "the date format disagrees with the game date"
+                                                                       : "the game date (kSigGameDate) was not found",
+            hours, GameDateOffset());
 
     uint8_t* refresh = SigFollowRel32(pc + kSigTopBarPauseRefreshJmp);
     uint8_t* hide = SigFindIn(refresh, 0x200, kCodeWidgetHide);

@@ -285,6 +285,9 @@ The details are in NOTES.md, "Threading model".
     this runs. A feature that depends on it must then stay off.
 - **Callbacks that run on the main thread:** game-entered callbacks run there, outside the tick,
   so they may read and write game state. So do native effects.
+- **Per-game decisions:** `OnGameEntering(fn)` runs right before every new game start or save
+  load is entered, before the game's own entry (and its `on_startup`). Drop anything decided for
+  the previous game there, e.g. "this session is single player"; `OnGameEntered` decides it anew.
 - **Native triggers can be evaluated on any thread,** but unlike hooks they may *read* game state:
   they run where vanilla triggers run, never while game state is being written. They must not
   write, cache or allocate ("Trigger performance" above).

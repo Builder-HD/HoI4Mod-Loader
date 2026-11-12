@@ -9,6 +9,10 @@ bool LifecycleInstall();
 // Once, right after the lexer is synchronized: dynamic tokens may be created, scripts using
 // them are not parsed yet. Register native effects here.
 void OnLexerReady(void (*fn)());
+// Right before every new game start and every save load is entered, before the game's own entry
+// (and so before on_startup). Drop per-game decisions here, e.g. "this session is single player":
+// script run during the entry must not see the previous game's.
+void OnGameEntering(void (*fn)());
 // After every new game start and every save load. The game state is fully set up.
 void OnGameEntered(void (*fn)(bool loadedFromSave));
 // Same moment, but after every OnGameEntered callback (on_game_loaded must see refreshed state).
