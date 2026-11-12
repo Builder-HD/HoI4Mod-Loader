@@ -25,6 +25,7 @@ LexerSync_t g_origLexerSync = nullptr;
 GameEntered_t g_origGameEntered = nullptr;
 DoFrame_t g_origDoFrame = nullptr;
 std::vector<void (*)()> g_onLexerReady;
+std::vector<void (*)()> g_onGameEntering;
 std::vector<void (*)(bool)> g_onGameEntered;
 std::vector<void (*)(bool)> g_onGameEnteredLate;
 std::atomic<bool> g_lexerReady{false};
@@ -136,6 +137,11 @@ void __fastcall LexerSyncDetour() {
 }
 
 void __fastcall GameEnteredDetour(void* idler) {
+    // Before the game's own entry (which runs on_startup for a new game): the previous game's
+    // session no longer applies, and features drop what they decided for it.
+    g_session = Engine::SessionInfo{};
+    for (auto& fn : g_onGameEntering)
+        if (fn && !CallSafe(fn)) fn = nullptr;
     g_origGameEntered(idler);
     bool loaded = Engine::IsLoadedFromSave(Engine::GameState());
     g_session = Engine::QuerySession(idler);
@@ -179,6 +185,7 @@ bool LifecycleInstall() {
 }
 
 void OnLexerReady(void (*fn)()) { g_onLexerReady.push_back(fn); }
+void OnGameEntering(void (*fn)()) { g_onGameEntering.push_back(fn); }
 void OnGameEntered(void (*fn)(bool loadedFromSave)) { g_onGameEntered.push_back(fn); }
 void OnGameEnteredLate(void (*fn)(bool loadedFromSave)) { g_onGameEnteredLate.push_back(fn); }
 bool LexerReady() { return g_lexerReady.load(); }

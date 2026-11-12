@@ -62,7 +62,7 @@ Lock g_lock;
 std::atomic<int> g_lockedSpeed{0};
 bool g_dateHidden = false;
 bool g_panelHidden = false;
-bool g_sessionOk = false;   // single player, decided on game entry
+bool g_sessionOk = false;   // single player, decided on game entry (false while a game is entered)
 bool g_applyLock = false;   // frame: request the locked speed
 bool g_unpause = false;     // frame: ... and unpause first
 int g_restore = 0;          // frame: request this speed (the lock ended)
@@ -267,6 +267,11 @@ void ReadFlag(const Engine::FlagEntry& f, void* ctx) {
     if (f.token == g_tokPanel) s->panel = true;
 }
 
+// Before a game is entered: on_startup runs inside the game's own entry, before OnEntered. Without
+// this, it would see the previous game's decision (e.g. single player, then hosting a multiplayer
+// game in the same session) and write global flags on this machine only.
+void OnEntering() { g_sessionOk = false; }
+
 void OnEntered(bool loaded) {
     // Nothing carries over from the previous game.
     SetLock(Lock{});
@@ -391,6 +396,7 @@ bool TimeControlInit() {
                              &ForcedTooltip},
                             kFeature);
     OnLexerReady(&InternTokens);
+    OnGameEntering(&OnEntering);
     OnGameEntered(&OnEntered);
     OnMainThreadFrame(&Frame);
     return true;
