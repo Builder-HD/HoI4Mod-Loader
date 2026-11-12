@@ -220,6 +220,55 @@ bool FactoriesAssigned(int tag, const void* equipment, int64_t* out);
 // Diagnostics ([diagnostics] production_lines = 1): logs the country's lines, their factories and
 // equipment names. Main thread.
 void LogProductionLines(int tag);
+// Field offsets production_data resolved (0 if not), for other resolvers' cross-checks.
+uint32_t EquipmentTypeOffset();  // design (line equipment) -> CEquipmentType
+uint32_t TypeArchetypeOffset();  // CEquipmentType -> its archetype
+
+// --- Equipment conversion (equipment_conversion; engine_conversion.cpp, NOTES.md Part J) -------
+// Types are CEquipmentType (infantry_equipment_1, light_tank_chassis_2); designs are the variants
+// stockpiles and production lines hold (each has a type).
+void ResolveConversion();
+bool HaveConversion();
+extern void* pConvertListBuild;  // void (CEquipmentType*, database): builds the type's convert-from list
+extern void* pCanConvert;        // bool (targetDesign, sourceDesign)
+// int64_t* (sourceDesign, out cost {int64 IC, resources...}, targetDesign, organisation, int64 breakdown[8] or null)
+extern void* pConversionCost;
+const void* DesignType(const void* design);
+const void* DesignRoot(const void* design);   // the first design of its parent chain
+const void* TypeParent(const void* type);     // the previous generation (`parent =`), null for a root
+const void* TypeArchetype(const void* type);
+bool TypeIsArchetype(const void* type);
+int TypeDepth(const void* type);              // parent hops, as the engine computes them at load
+bool TypeIsNaval(const void* type);           // the engine's own test (naval refits require it)
+const char* TypeName(const void* type);
+// How many generations source is behind target along target's parent chain; 0 if it is not on it.
+int GenerationsBack(const void* target, const void* source);
+// The convert-from list: types whose designs may be converted into designs of this type.
+int ConvertListCount(const void* type);
+const void* ConvertListAt(const void* type, int i);
+// Appends with the list's own allocator (the type's destructor frees it); may reallocate and free
+// the old buffer, so only during the database load (no conversion test runs yet).
+bool ConvertListAppend(void* type, const void* const* add, int n);
+int ConvertListCapacity(const void* type);
+// Sets the count within the capacity, without allocating: entries already written beyond the count
+// become visible, or entries are hidden again. The buffer itself never changes.
+bool ConvertListSetCount(void* type, int count);
+// The role mode (Shift+click on a line's convert button), optional:
+bool HaveRoleMode();
+extern void* pLineRebuild;     // void (line, const int* tag): rebuilds the line's conversion sources
+extern void* pConvertClick;    // void (CProductionLineMilitaryItem*): the convert button's click
+extern void* pConvertTooltip;  // void (line, ?, std::string* out): the convert button's tooltip
+uint64_t DesignRole(const void* design);  // unit-type bits from its modules (fighter, cas, ...)
+const void* LineTarget(const void* line);  // the design a production line makes
+void* ItemLine(const void* item);          // the production line of a line UI item
+// std::string::append in the game's own STL (the string may reallocate with the game's heap).
+void AppendEngineString(EngineString* s, const char* p, size_t n);
+// The convert tooltip's list of left-out designs (optional on top of the role mode):
+bool HaveSkippedList();
+// Would the line's stockpile walk use this design once CanConvert says yes? (the game's rule:
+// marked for conversion (obsolete), or foreign and not friendly). Any thread.
+bool StockpileUses(const void* design, int tag);
+std::string DesignName(const void* design);  // the name the game shows; main thread only
 
 // --- Region data (region_scope; engine_data.cpp) ----------------------------------------------
 bool HaveRegionData();  // province lists of states and regions, the region's sea share

@@ -63,6 +63,11 @@ src/engine_time.cpp           engine access for time_control (game speed, pause,
 src/plugin_province_buildings.cpp  province_building_removal feature (removal cross, deferred click)
 src/engine_province_buildings.cpp  engine access for it (state view item hooks, button binding, removal)
 src/gui_patch.cpp             the countrystateview.gui patch that adds the cross (pure text, tested)
+src/plugin_equipment_conversion.cpp  equipment_conversion feature (opt-in tools: generations, cost, role mode)
+src/engine_data.cpp           engine access for the data triggers (read-only game state)
+src/engine_scope.cpp          engine access for scope blocks (vanilla iterator templates, child scopes)
+src/engine_army.cpp           engine access for armies (create army, set leader, characters)
+src/engine_conversion.cpp     engine access for equipment conversion (convert-from lists, generations)
 src/native_script.h, .cpp     native effect/trigger API: schemas, registration, parsing, docs
 src/native_script_engine.cpp  native API engine binding (vtable clones, registries, Scope)
 src/native_scope_engine.cpp   native API engine binding of scope blocks and iterators
@@ -76,7 +81,7 @@ tools/check_code_shapes.py    check the CODE shapes at their RTTI-found addresse
 tools/make_stubs.py           write (or --check) stubs/ from the feature list
 tools/make_release.py         build release/hoi4_loader-v<version>.zip and its SHA256SUMS
 tests/                        out-of-game smoke test (stand-in hoi4.exe)
-mod/                          companion test mod
+mod/                          companion test mod (the conversion opt-in mod is its own repository)
 stubs/                        stub pack for mod authors (MODDING.md "Stub pack")
 README.md                     players: install, uninstall, game patches, reporting problems
 MODDING.md                    mod authors: guards, stubs, every script command
@@ -319,10 +324,24 @@ once, and from then on the hooks do what the game does and the feature switches 
 | `time_control` | `CInGameIdler::TogglePause(mode)` (vtable slot read from the console command; 0x140e4e0b0) | the pause button and Space (mode 1), the console, `CAutomaticPause` (mode 0); main thread | while the lock blocks pausing: a mode-1 call that would pause returns without doing anything; mode 0 and unpausing pass |
 | `time_control` | `CTopBar::UpdateDate()` (0x14192f460) | the top bar's game state listener on a date change, its setup | after the original: hides or shows the `DateText` widget, and the whole `time_control_window` (found by name through the top bar's root window), with the engine's own hide/show calls (UI, main thread) |
 | `time_control` | `CTopBar` scalar deleting destructor (RTTI vtable slot 0) | the top bar's end | forgets the top bar pointer before the original runs |
+| `equipment_conversion` | `BuildConvertFromList(type, database)` (0x140cf2490 in 1.19.4.2) | equipment database load, once per equipment type, before any game | nothing: after the original it records the type's earlier generations (read only) |
+| `equipment_conversion` | `CanConvert(target design, source design)` (0x140c2cb00) | production line source rebuild, naval refits, production UI; any thread | refuses a pair the loader added while its flag is gone or naval is not allowed, and other roles during a "same role only" rebuild; otherwise passes |
+| `equipment_conversion` | `ConversionCost(source, out, target, organisation, breakdown)` (0x140c29eb0) | production lines, conversion tooltips, AI production planning; any thread | with `hoi4_loader_conversion_generations` set: scales the IC of a pair two or more generations apart by the factor |
+| `equipment_conversion` | `RebuildSources(line, tag)` (0x1419c2c30) | a production line's update (its vtable) | with `hoi4_loader_conversion_role_mode` and the type in "same role only": marks the rebuild (thread-local) for `CanConvert` and stores the designs left out for the tooltip |
+| `equipment_conversion` | `CProductionLineMilitaryItem` convert click (0x141de8e30) | the production view, main thread | with the role-mode flag: Shift+click (single player) toggles the mode at the next safe point instead of the game's click |
+| `equipment_conversion` | the convert button's tooltip (0x1419c2fd0) | the production view, main thread | with the role-mode flag: appends the mode line and the left-out designs (the game's own `std::string::append`) |
 
 The loader's own speed request, unpause and date refresh run from `OnMainThreadFrame`, outside
 the tick. Each hook logs once which thread it runs on (`time_control: ... runs on thread`), the
 evidence that the UI parts stay on the main thread.
+
+The conversion lists themselves change only while a mod sets `hoi4_loader_conversion_generations`.
+The loader's entries are written into each list's buffer beyond the count during the database load;
+at runtime only the count changes (no buffer is allocated or freed after load), on game entry and,
+in single player, from `OnMainThreadFrame`. In multiplayer the flags count at game entry only, the
+same point on every machine. The hooks read equipment type data (fixed after load),
+the loader's own tables (SRW locks) and atomics; the flags are read on the main thread. Nothing
+touches graphics.
 
 ## Smoke test (no game needed)
 

@@ -49,6 +49,15 @@ hoi4_loader_province_building_category = {
 	}
 }
 
+# equipment_conversion tests (player only).
+hoi4_loader_conversion_category = {
+	icon = generic_research
+	visible = {
+		is_ai = no
+		hoi4_loader_present = yes
+	}
+}
+
 # AI cost measurement: visible to every country while the loader is present.
 hoi4_loader_ai_cost_category = {
 	icon = generic_research
