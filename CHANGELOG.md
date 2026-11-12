@@ -26,6 +26,10 @@ A–F; NOTES.md has the findings and test results behind each.
     everything shown. Effects do nothing in multiplayer.
   - Hooks four engine functions (DEVELOPING.md "Global hooks"); seven new signatures (53 in all).
     Checked on 1.19.4.2 only; 1.19.3 is unchecked.
+  - **Fixed after the #5 review:** without the game date (`kSigGameDate`), time_control now stays
+    off (a timed lock would never have ended). The single-player decision is dropped before each
+    game is entered, so `on_startup` of the next game (e.g. a multiplayer game after a single
+    player one) can't use the previous game's and write flags on one machine only.
 - **Game 1.19.4.2** ("Operation Postern", Steam, as distributed) is supported: its hash is in
   `loader_config.ini`. Every signature matches; three create_army code shapes changed and were
   adapted (NOTES.md "1.19.4.2 added"). 1.19.3 stays supported.
