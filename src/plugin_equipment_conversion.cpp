@@ -655,6 +655,11 @@ bool SafeSelfCheck(long* checked, const char** why) {
 }
 
 bool g_statsLogged = false;
+// Before a game is entered: the previous game's "single player" no longer applies. Until OnEntered
+// decides it anew, frames (e.g. while a multiplayer game loads after a single-player one) must not
+// read the flags mid-game.
+void OnEntering() { g_singlePlayer.store(false); }
+
 void OnEntered(bool) {
     const char* why = "";
     g_singlePlayer.store(SessionAllowsLocalWrites(&why));
@@ -716,6 +721,7 @@ bool EquipmentConversionInit() {
         return false;
     }
     OnLexerReady(&InternTokens);
+    OnGameEntering(&OnEntering);
     OnGameEntered(&OnEntered);
     OnMainThreadFrame(&Frame);
     return true;
