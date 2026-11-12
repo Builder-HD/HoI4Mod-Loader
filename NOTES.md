@@ -20,7 +20,12 @@ Addresses below are for orientation in the named build only. Code uses the signa
   Steam's 1.19.3 update then replaced `hoi4.exe` and left the stale backup, and the patcher was
   re-run on 2026-10-10.
 - It is probably an unpatched 1.19.2, but that can't be confirmed locally, and 1.19.2 isn't the
-  build in use. So it was not added to `loader_config.ini`.
+  build in use. So it was not added to `loader_config.ini` at first.
+- **2026-11-12:** both 1.19.2 hashes (the table below) are now listed in `loader_config.ini`, at the
+  owner's request ("nothing major changed"). The signatures and code shapes added since October
+  (create_army's 1.19.4.2 shapes, add_to_army, railways, time_control, province buildings) were
+  never checked on 1.19.2 or 1.19.3; on those builds each feature whose patterns do not match
+  stays off (fail safe).
 
 **What universal-checksum-patcher changes (verified 2026-10-12):**
 - On 2026-10-12 22:54 the game folder's `hoi4.exe` was replaced. The file is

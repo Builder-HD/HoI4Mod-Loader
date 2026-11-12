@@ -6,6 +6,9 @@ A–F; NOTES.md has the findings and test results behind each.
 
 ## Unreleased
 
+- **Game 1.19.2** (vanilla and checksum-patched) is now listed in `loader_config.ini`, from the
+  hashes recorded in October. Features added since were not re-checked there; any whose
+  signatures don't match stay off.
 - **Railway rules mod removed from the repo:** `mod/hoi4_loader_railway_rules` is no longer part
   of the loader or its release zip; the global flags it set stay documented in MODDING.md.
 - **New feature `time_control`** (engine tier, single player; guard
