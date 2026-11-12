@@ -4795,3 +4795,138 @@ Test mod decisions in the category "hoi4_loader test", guarded by
 - Not changed (smaller points of the review, for later): the lock stays set in the main menu until
   the next entry; the fault path doesn't restore the previous speed; speed 10 can't be saved;
   two mode-1 pause callers unexamined; `ResolvePanel`'s memcmp without SEH.
+
+# Part L: air scenario variants (investigation)
+
+Branch `feature/air-scenario-variants` (from `main`). Investigation only, nothing implemented.
+Feature request from GloomyJZ (Discord, 2026-11-11): air scenarios, the 3D animations on the map
+for air missions (patrols, dogfights, bombing runs, CAS), can't be extended: their list is in
+the exe. Addresses are from vanilla **1.19.4.2** and only for orientation.
+
+## L1 findings
+
+### L1.1 What a scenario is (game files)
+
+- **A scenario is an entity** named `<scenario>_entity` (`gfx/entities/units_planes.asset`),
+  e.g. `fighter_1_vs_fighter_1_entity`. It uses a pdxmesh `<scenario>_mesh`
+  (`gfx/entities/planes.gfx`): "empty animated joints that we attach above meshes". The
+  attachment nodes are the joints, e.g. `fighter_1`, `fighter_2`, `bomber_1`, `defender_1`.
+- **Its states are the outcome:**
+  - `default` (patrol, bombing, supplying);
+  - `pass` / `success` / `fail` (fights).
+
+  Their events fire the planes' own states, e.g. `a_fire`, `d_crash`.
+- **Mods can already replace** a vanilla scenario's entity and mesh (same name), but not add one:
+  the game loads exactly the 21 names below.
+
+### L1.2 The exe
+
+- **Name table** (`.data`, writable, `0x14312ae30`): 21 `char*`, index 0-20:
+  - `fighter_1_patrol`, `fighter_3_patrol`, `scout_1_patrol`, `scout_3_patrol`;
+  - `bomber_1_CAS`, `bomber_3_CAS`, `bomber_1_bombing`, `bomber_3_bombing`;
+  - `bomber_1/3_carpetbombing`, `bomber_1/3_firebombing`;
+  - `fighter_1_vs_bomber_1`, `fighter_1_vs_fighter_1`, `fighter_3_vs_fighter_3`;
+  - `missile_1_bombing`, `fighter_1/3_kamikaze`, `fighter_1_vs_transport_1`;
+  - `transport_1/3_supplying`.
+
+  After it, the result names (`0x14312aed8`): `default`, `pass`, `success`, `fail`. Besides the
+  template loader, only the console command `airc` reads the tables: name to index
+  (`FUN_1412db3c0`, `0x15` = not found) and the help text.
+- **Templates at startup.** The manager's constructor (`FUN_1412d0e50`, one caller) loops
+  `i = 0 .. 0x15`:
+  - `template = new(0x40)`, then `FUN_1412cfcc0(template, i)`;
+  - the result goes to `manager+0x48 + 8*i`.
+- **The template loader** (`FUN_1412cfcc0(template, index)`):
+  - `template+0 = index`; looks up the entity `table[index] + "_entity"` through the entity
+    database (`FUN_1422ff090()` → `FUN_142301290(db, name)`, a plain hash lookup that logs
+    nothing) into `template+8`;
+  - null logs "Failed to read airplane scenario entity: <name>" to error.log;
+  - then a **hardcoded `switch (index)`** lists the attachment node names per side and role:
+    attackers at `template+0x10` (count `+0x1c`), defenders at `+0x28` (count `+0x34`);
+  - the node analysis logs "Airplane animation analyze - failed to find attachment node".
+- **Playing a scenario:**
+  - `FUN_1412d1e40(manager, ..., index, ...)` allocates the instance (0x88 bytes):
+    `instance+0 = manager`, `instance+8 = manager+0x48[index]` (the template);
+  - then `FUN_1412db6c0(instance, ...)` instantiates the template's entity
+    ("Failed to instantiate scenario entity" if not) and attaches the planes to the template's
+    nodes.
+  - Two callers (`FUN_1412dc9a0`, `FUN_1412dcc20`). Which index a mission uses, and how many
+    planes per side (the `NAirGfx` defines `AIRPLANES_1_..._ANIM` / `AIRPLANES_3_...`), is decided
+    before that.
+- **Graphics only.** Scenarios read the game state but never write it. A different animation on
+  each machine changes nothing in the game.
+
+## L2 What is possible
+
+- **More animations per scenario: yes ("variants").**
+  - The loader can load extra templates for the same index from other entities, with the
+    game's own template loader: give it the index and, for that one call, the variant's name in
+    the name table.
+  - It keeps them for the session; when a scenario plays, it puts a random one of them in the
+    instance (the vanilla template or a variant).
+  - A variant uses the same node layout as its scenario (the switch above), so its mesh needs
+    the same attachment nodes and the same states (`pass` / `success` / `fail` or `default`).
+  - Everything else is free: the flight paths, the timing, the events and the particles.
+- **New scenario types: no, not as a general feature.** Which scenario a mission plays, the
+  plane counts per side and the node layout are all hardcoded per index. A new type would
+  need a new mission mapping in the engine. Variants cover the request: "you just can't add new
+  air scenarios/animations".
+
+## L3 Proposal
+
+**Feature `air_scenario_variants`** (engine tier, needs `lifecycle`; no script commands). It does
+nothing until a mod defines variant entities.
+
+**For modders:**
+```
+# gfx/entities/my_planes.asset
+entity = {
+    name = "fighter_1_vs_fighter_1_variant_1_entity"     # <scenario>_variant_<N>_entity, N = 1..16
+    pdxmesh = "my_dogfight_loop_mesh"                     # same nodes as the vanilla scenario
+    state = { name = "pass"    animation = "pass"    event = { time = 1.0 id = a_fire } ... }
+    state = { name = "success" animation = "success" ... }
+    state = { name = "fail"    animation = "fail"    ... }
+}
+```
+
+**Behaviour:**
+- **When variants are loaded:** at the manager's construction, right after the game's 21
+  templates.
+  - For each scenario, the loader looks for `<scenario>_variant_1_entity` …
+    `_variant_16_entity` with the entity lookup, which logs nothing.
+  - For each one found, it builds a template with the game's loader (the name table entry is
+    swapped for that call only, then restored).
+- **A variant is kept only if** its entity loads and its node counts (attackers, defenders)
+  equal the vanilla template's. Otherwise it is skipped with one `loader.log` line naming it.
+- **Picking:** each time a scenario plays, one of {vanilla, its variants} at equal chance, with
+  the loader's own random numbers (not the game's synced ones: graphics only).
+  - To get only the variants, a mod also replaces the vanilla entity.
+  - **Open:** weights.
+- **Fail-safe:**
+  - every piece is found by signature or code shape, cross-checked (the table count 21 from
+    the console helper's bound; the loader's `lea` to the same table; the instance's template
+    field at `+8` from the constructor);
+  - SEH around both hooks;
+  - any fault logs once and returns to vanilla (no swap).
+  - Variant templates are kept for the whole session and never freed, so no instance can point
+    at a freed one.
+- **Multiplayer:** graphics only. Different machines may show different variants; nothing in the
+  game state differs.
+- **Saves:** nothing is saved.
+
+**Hooks:** the manager constructor (after it: load the variants) and the instance constructor
+(after it: swap `instance+8`). The second runs on the map's update path; to check: its thread
+(log it once).
+
+**Effort:** about 1-2 days. **Risk:** low (graphics only, the game's own loader, one field swapped).
+
+## L4 Open
+
+- **Approval** of L3: the name `air_scenario_variants`, the naming convention
+  `<scenario>_variant_<N>_entity` (N 1..16), equal chance, no weights for now.
+- Whether the manager is built once per session or per game (the variants follow it either way).
+- **In game:**
+  - the test mod gets one variant (e.g. a copy of `fighter_1_vs_fighter_1` with another
+    animation, or vanilla's own mesh with different events), shown through the console command
+    `airc fighter_1_vs_fighter_1 pass <province> ...`;
+  - GloomyJZ can test with real animations.
