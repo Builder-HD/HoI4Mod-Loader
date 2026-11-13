@@ -5041,7 +5041,7 @@ in two mock mods in `C:\test`): format **B**.
 - **Test mod:** four entries from `C:\test` format B (gunship orbit, long chase, head-on
   weight 3, interception with a defender block), using vanilla meshes and animations.
 
-## L6 In-game test (to do)
+## L6 In-game test (passed 2026-11-13: real dogfight and CAS)
 
 Single player, test mod enabled, 1.19.5. Start any game and use the console:
 1. **Load:** `loader.log` has:
@@ -5084,3 +5084,10 @@ Single player, test mod enabled, 1.19.5. Start any game and use the console:
   a slot with entries starts a scenario no entry matches) named the planes:
   `small_plane_cas_airframe_0 (small_plane_cas_airframe, GER)`. Both CAS animations seen so far
   were vanilla's. The test entry now uses the archetype `small_plane_cas_airframe`.
+- **CAS, third try: passed.** `hlt_air_gunship_orbit plays for the first time (bomber_1_CAS, 1
+  candidate(s))`; the owner saw the CAS plane circle the battle and fire in bursts, as the entity
+  says. With the long chase earlier, a mod scenario has now replaced vanilla's in two slots in
+  real play.
+- **Not seen in play:** head-on's weight (needs German `fighter_equipment_1` attackers; the owner's
+  fighters are designer types) and the interception's defender block (needs British or American
+  heavy bombers). Both rest on the matching and pick code the unit test covers.
