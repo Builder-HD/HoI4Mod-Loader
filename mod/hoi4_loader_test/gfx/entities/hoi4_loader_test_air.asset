@@ -1,0 +1,97 @@
+# hoi4_loader test mod: the air scenario entities, written like vanilla's in units_planes.asset.
+# Where each one plays is in common/hoi4_loader_air_scenarios/hoi4_loader_test_air.txt.
+
+# Gunship orbit: the CAS plane circles and fires in bursts.
+entity = {
+	name = "hlt_air_gunship_orbit_entity"
+	pdxmesh = "hlt_air_orbit_mesh"
+	state = { name = "default" animation = "default"
+		event = { time = 0.5 id = a_fire }
+		event = { time = 1.5 id = a_idle }
+		event = { time = 3.0 id = a_fire }
+		event = { time = 4.0 id = a_idle }
+		event = { time = 5.5 id = a_fire }
+		event = { time = 6.5 id = a_idle }
+	}
+}
+
+# Long chase: in "pass" nobody is shot down.
+entity = {
+	name = "hlt_air_long_chase_entity"
+	pdxmesh = "hlt_air_chase_mesh"
+	state = { name = "pass" animation = "pass"
+		event = { time = 1.0 id = a_fire }
+		event = { time = 2.0 id = a_idle }
+		event = { time = 4.0 id = a_fire }
+		event = { time = 5.0 id = a_idle }
+		event = { time = 7.0 id = a_fire }
+		event = { time = 8.0 id = a_idle }
+	}
+	state = { name = "success" animation = "success"
+		event = { time = 1.0 id = a_fire }
+		event = { time = 2.0 id = a_idle }
+		event = { time = 8.0 id = a_fire }
+		event = { time = 9.0 id = a_idle }
+		event = { time = 8.51 id = d_crash }
+		event = { time = 9.5 id = d_idle }
+	}
+	state = { name = "fail" animation = "fail"
+		event = { time = 6.76 id = d_fire }
+		event = { time = 7.0 id = d_idle }
+		event = { time = 7.0 id = a_crash }
+		event = { time = 7.5 id = a_idle }
+	}
+}
+
+# Head-on: both sides fire almost all the time.
+entity = {
+	name = "hlt_air_head_on_entity"
+	pdxmesh = "hlt_air_head_on_mesh"
+	state = { name = "pass" animation = "pass"
+		event = { time = 0.5 id = a_fire }
+		event = { time = 0.5 id = d_fire }
+		event = { time = 3.0 id = a_idle }
+		event = { time = 3.0 id = d_idle }
+		event = { time = 6.0 id = a_fire }
+		event = { time = 6.0 id = d_fire }
+		event = { time = 8.0 id = a_idle }
+		event = { time = 8.0 id = d_idle }
+	}
+	state = { name = "success" animation = "success"
+		event = { time = 0.5 id = a_fire }
+		event = { time = 0.5 id = d_fire }
+		event = { time = 3.0 id = d_idle }
+		event = { time = 8.51 id = d_crash }
+		event = { time = 9.0 id = a_idle }
+		event = { time = 9.5 id = d_idle }
+	}
+	state = { name = "fail" animation = "fail"
+		event = { time = 0.5 id = a_fire }
+		event = { time = 0.5 id = d_fire }
+		event = { time = 3.0 id = a_idle }
+		event = { time = 7.0 id = a_crash }
+		event = { time = 7.5 id = a_idle }
+		event = { time = 7.5 id = d_idle }
+	}
+}
+
+# Interception: the bomber fires back.
+entity = {
+	name = "hlt_air_interception_entity"
+	pdxmesh = "hlt_air_interception_mesh"
+	state = { name = "pass" animation = "pass"
+		event = { time = 1.0 id = a_fire }
+		event = { time = 1.2 id = d_fire }
+		event = { time = 2.0 id = a_idle }
+		event = { time = 2.5 id = d_idle }
+	}
+	state = { name = "success" animation = "success"
+		event = { time = 1.0 id = a_fire }
+		event = { time = 1.2 id = d_fire }
+		event = { time = 2.0 id = a_idle }
+		event = { time = 2.5 id = d_idle }
+		event = { time = 5.0 id = a_fire }
+		event = { time = 6.0 id = d_crash }
+		event = { time = 6.5 id = a_idle }
+	}
+}

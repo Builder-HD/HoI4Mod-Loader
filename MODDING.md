@@ -44,6 +44,7 @@ Current features:
 | `time_control` | engine (needs `lifecycle`) | `hoi4_loader_plugin_time_control` | `force_game_speed`, `release_game_speed`, `hide_date_display`, `hide_time_controls`, `has_forced_game_speed`: lock the game speed (and the pause) for a while, hide the top bar's date; single player, see below |
 | `province_building_removal` | engine (needs `lifecycle`) | `hoi4_loader_plugin_province_building_removal` | a removal cross on the state view's province buildings (supply hub, naval base, bunkers); no script commands, see below |
 | `equipment_conversion` | engine (needs `lifecycle`) | `hoi4_loader_plugin_equipment_conversion` | tools a mod switches on with global flags: "Convert from Stockpile" from every earlier generation, a cost factor, "same role only"; off until a mod sets them, see below |
+| `air_scenarios` | engine | `hoi4_loader_plugin_air_scenarios` | new air scenarios (the 3D air animations on the map) for chosen missions, planes and countries, defined in `common/hoi4_loader_air_scenarios/`; no script commands, see below |
 
 On an unknown build the file tier stays on, the engine tier is off, and `loader.log` lists the
 disabled features and prints the exact line to add to `loader_config.ini`. A feature whose init
@@ -150,6 +151,7 @@ when the loader is missing or a feature is off. Without them, using a loader tri
 | `force_game_speed`, `release_game_speed`, `hide_date_display`, `hide_time_controls`, `has_forced_game_speed` | `scripted_triggers/hoi4_loader_feature_time_control.txt` |
 | a check that `province_building_removal` is on (it has no script commands) | `scripted_triggers/hoi4_loader_feature_province_building_removal.txt` |
 | `equipment_conversion` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_equipment_conversion.txt` |
+| `air_scenarios` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_air_scenarios.txt` |
 
 - **Combinations:** a block that combines features needs each feature's stub and guard, e.g.
   `air_superiority` inside `strategic_region` needs both `region_control` and `region_scope`.
@@ -1260,3 +1262,137 @@ needs the loader.
 stockpile, so a save loaded without the loader converts only what the game allows.
 
 **Without the loader:** the flags do nothing; the mod's rules show and do nothing.
+
+## Air scenarios (`air_scenarios`)
+
+The 3D air animations on the map (patrols, dogfights, interceptions, CAS and bombing runs) are
+"air scenarios". The game has a fixed list of 21. A mod can replace one, by defining an entity
+of the same name, but can't add any. With the loader, a mod can add **new air scenarios** and say
+**which planes** they play for: a mission (the slot), the attacking or defending planes'
+equipment, and their country.
+
+A new scenario has three parts. The first two are written exactly as for vanilla's scenarios
+(`gfx/entities/planes.gfx` and `units_planes.asset`):
+
+1. **The mesh** (`gfx/entities/*.gfx`): an animated skeleton whose joints the planes are attached
+   to, with its animations by id.
+   ```
+   objectTypes = {
+       pdxmesh = {
+           name = "my_gunship_orbit_mesh"
+           file = "gfx/models/units/planes/my_gunship_orbit.mesh"
+           animation = { id = "default" type = "my_gunship_orbit_animation" }
+       }
+   }
+   ```
+2. **The entity** (`gfx/entities/*.asset`): uses the mesh, with one state per result. Its events
+   make the planes fire, bomb or crash: `a_...` is the attacking side, `d_...` the defending side.
+   The name must end with `_entity`, as all of the game's scenario entities do.
+   ```
+   entity = {
+       name = "my_gunship_orbit_entity"
+       pdxmesh = "my_gunship_orbit_mesh"
+       state = { name = "default" animation = "default"
+           event = { time = 0.5 id = a_fire }
+           event = { time = 1.5 id = a_idle }
+       }
+   }
+   ```
+3. **The entry** (`common/hoi4_loader_air_scenarios/*.txt`, the only new part): where it plays.
+   ```
+   my_gunship_orbit = {
+       entity = my_gunship_orbit_entity
+       slot = bomber_1_CAS                   # the game's scenario: mission + number of planes
+       attacker = {                          # optional
+           equipment = { CAS_gunship_unique_1 }   # equipment types or archetypes
+           country = { GER }                       # country tags
+       }
+       defender = { ... }                    # optional, same keys; only for the "_vs_" slots
+       weight = 1                            # optional: chance against other matching entries
+   }
+   ```
+
+**Which entry plays:**
+- When the game starts a scenario, the candidates are the entries for its slot whose conditions
+  all hold. Within a side, **one matching plane is enough**: the plane's equipment type or its
+  archetype is listed, and its country is listed. A missing list, key or block matches anything.
+- With candidates, one is picked by `weight` and plays **instead of** the game's scenario. With
+  none, the game's own scenario plays.
+- **The country** is the plane equipment's creator, as the game uses it for the plane model
+  (`<tag>_<equipment>_entity`). For planes a country built itself, that is its own tag.
+  Licensed or captured planes show their creator's tag.
+- Types and archetypes as in `common/units/equipment/`: e.g. `fighter_equipment_1` or
+  `small_plane_cas_airframe_1` (types), `small_plane_airframe` (an archetype, all its types).
+  Names are compared without case.
+
+**Slots.** The number in a slot's name is **how many planes fly in the scene**, not a plane
+generation. A new scenario needs the slot's **joints** (the mesh's attachment points) and
+**states**; the game decides per slot how many planes there are and which side they are on.
+
+| Slot | Mission | Attacker joints (`a_...`) | Defender joints (`d_...`) | States |
+|---|---|---|---|---|
+| `fighter_1_patrol`, `fighter_3_patrol` | patrol (air superiority) | `fighter` / `fighter_1..3` | - | `default` |
+| `scout_1_patrol`, `scout_3_patrol` | scouting | `fighter` / `fighter_1..3` | - | `default` |
+| `bomber_1_CAS`, `bomber_3_CAS` | close air support | `fighter` / `fighter_1..3` | - | `default` |
+| `bomber_1_bombing`, `bomber_3_bombing` | strategic bombing | `bomber` / `bomber_1..3` | - | `default` |
+| `bomber_1_carpetbombing`, `bomber_3_carpetbombing` | heavier strategic bombers | `bomber` / `bomber_1..3` | - | `default` |
+| `bomber_1_firebombing`, `bomber_3_firebombing` | the heaviest strategic bombers | `bomber` / `bomber_1..3` | - | `default` |
+| `fighter_1_vs_bomber_1` | interception: the fighter attacks the bomber | `fighter` | `bomber` | `pass`, `success` |
+| `fighter_1_vs_transport_1` | interception of a transport plane | `fighter` | `bomber` (the transport) | `pass`, `success` |
+| `fighter_1_vs_fighter_1` | dogfight, 1 vs 1 | `fighter1` | `fighter2` | `pass`, `success`, `fail` |
+| `fighter_3_vs_fighter_3` | dogfight, 3 vs 3 | `fighter_1..3` | `defender_1..3` | `pass`, `success`, `fail` |
+| `fighter_1_kamikaze`, `fighter_3_kamikaze` | kamikaze | `fighter_1` / `fighter_1..3` | - | `default`, `success` |
+| `missile_1_bombing` | V2 rocket | `rocket` | - | `idle` |
+| `transport_1_supplying`, `transport_3_supplying` | air supply | `bomber` / `bomber_1..3` | - | `default` |
+
+- **Attacker and defender** are the two sides of the animation, not of the war. In an
+  interception, the fighter is the attacker and the bomber the defender, whichever country
+  started the raid.
+- **The result** is seen from the attacker: `pass` (nobody falls; in an interception the bomber
+  gets through), `success` (the attacker wins), `fail` (the defender wins).
+- In the 1 vs 1 and 3 vs 3 dogfights both sides are fighters; which of them the game puts on the
+  attacking joints is not known yet.
+
+**Files and mods:**
+- The loader reads `common/hoi4_loader_air_scenarios/*.txt` from the game folder and from every
+  mod enabled in the launcher (`dlc_load.json` in the game's documents folder), in that order.
+  - A file of the same name in a later mod replaces the earlier one, as the game does.
+  - An entry of the same name replaces an earlier entry.
+  - A mod with `replace_path = "common/hoi4_loader_air_scenarios"` drops the earlier mods' files.
+  - Zipped (`archive=`) mods can't be read.
+- The files use the game's script syntax: `#` comments, quoted or bare words.
+
+**Checks and messages** (`loader.log`, when the game builds its scenarios at game start):
+- Each entry that is ready: `air_scenarios: my_gunship_orbit: my_gunship_orbit_entity plays in
+  bomber_1_CAS (...)`.
+- **Skipped**, with file, line and reason:
+  - a syntax error or an unknown key;
+  - a missing `entity` or `slot`;
+  - an unknown slot or entity;
+  - a `defender` block on a slot without defenders.
+- **A missing joint** is reported by the game itself in `error.log` ("Airplane animation analyze -
+  failed to find attachment node: fighter1"), as when a vanilla scenario is replaced with a wrong
+  mesh. The plane then has no flight path.
+- **The first time an entry plays:** `air_scenarios: my_gunship_orbit plays for the first time
+  (bomber_1_CAS, 2 candidate(s))`.
+
+**Testing:** play the mission in a game (e.g. fighters on air superiority where the enemy flies,
+CAS where your divisions fight) and watch `loader.log`:
+- `air_scenarios: my_gunship_orbit plays for the first time (...)`: your entry played;
+- `air_scenarios: bomber_1_CAS started without a matching entry (attackers: small_plane_airframe_2
+  (small_plane_airframe, GER); defenders: none)`: a scenario of that slot started, but no entry
+  matched these planes. The line names their equipment type, archetype and country, so you can
+  compare them with your entry. Once per slot.
+
+The game's console command `airc` (vanilla's own scenario test, listed in `units_planes.asset`)
+is for Paradox's developers only and doesn't run in the Steam game, not even with `-debug`.
+The test mod has four entries (`common/hoi4_loader_air_scenarios/hoi4_loader_test_air.txt`) built
+from vanilla's meshes and animations.
+
+**Multiplayer:** graphics only. Each machine picks for itself, so they may show different
+scenarios; nothing in the game state changes.
+
+**Saves:** nothing is saved.
+
+**Without the loader:** the entries are ignored (a folder the game doesn't read); the game's own
+scenarios play. The mod's extra entities are unused. Guard: `hoi4_loader_feature_air_scenarios`.

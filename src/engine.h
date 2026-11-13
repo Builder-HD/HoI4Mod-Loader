@@ -474,6 +474,35 @@ bool JoinArmy(void* army, void* division, std::string* oldName, bool* oldDeleted
 // army's member list, and the army carries the division's tag. False and *why on a mismatch.
 bool JoinSelfCheck(int tag, int* armies, const char** why);
 
+// --- Air scenarios (air_scenarios; engine_air.cpp, NOTES.md Part L) ------------------------------
+// The 3D air animations on the map. The game builds one template per scenario slot
+// (fighter_1_patrol, bomber_1_CAS, ...) from the entity "<slot>_entity"; the loader builds more
+// templates from other entities with the game's own loader and swaps one into a scenario when it
+// starts. Graphics only: nothing here reads or writes game state beyond equipment data.
+void ResolveAirScenarios();
+bool HaveAirScenarios();
+int AirSlotCount();
+const char* AirSlotName(int slot);  // the game's name table entry
+bool AirEntityExists(const char* name);  // the entity database's lookup (logs nothing)
+void* AirVanillaTemplate(int slot);      // the game's template for the slot, once built
+int AirTemplateNodes(const void* tmpl, bool defenders);
+const void* AirTemplateEntity(const void* tmpl);
+// Builds a template for `entity` (ending in "_entity") in `slot` with the game's loader: the
+// slot's name table entry is swapped for that call only. Call only from the templates-built
+// callback. Null on failure (logged).
+void* AirBuildTemplate(int slot, const std::string& entity);
+// A scenario side: the game's list of plane designs (may be null).
+int AirListCount(const void* list);
+const void* AirListDesign(const void* list, int i);
+// A plane design's equipment type name, its archetype's name ("" if unknown) and the creator tag
+// the game uses for the plane model (0 if unknown).
+bool AirReadDesign(const void* design, std::string* equipment, std::string* archetype, int* creatorTag);
+using AirBuilt_t = void (*)();  // after the game built its templates (every time it does)
+// When a scenario starts: a template to play instead of the slot's own, or null for the game's.
+using AirPick_t = void* (*)(int slot, const void* attackers, const void* defenders);
+bool HookAirScenarios(AirBuilt_t built, AirPick_t pick);  // all hooks or none
+void DisableAirScenarios();  // after a fault: the game's own templates from now on
+
 // --- Time control (time_control; engine_time.cpp, NOTES.md Part K) -----------------------------
 void ResolveTimeControl();
 bool HaveGameSpeed();    // game speed field, its only writer, the speed request, the in-game idler

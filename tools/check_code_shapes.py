@@ -208,6 +208,7 @@ def check(path, codes):
                         hex(fn)))
     results += check_create_army(img, codes, text_va, text)
     results += check_add_to_army(img, codes, text_va, text)
+    results += check_air_scenarios(img, codes, text_va, text)
     results += check_time_control(img, codes, text_va, text)
     results += check_equipment_conversion(img, codes, text_va, text)
     return results
@@ -510,6 +511,54 @@ def check_add_to_army(img, codes, text_va, text):
     ok = bool(getter) and img.match_at(getter, codes['kCodeScopeDivision'])
     ok = ok and u8(getter + 7) == 0x70 and rel32(img, getter + 0x13) == resolve and u8(getter + 0x20) == 0xf0
     results.append(('kCodeScopeDivision (destroy_unit slot 13 + 9; scope +0x70, resolver, -0x10)', ok, hex(getter)))
+    return results
+
+
+def check_air_scenarios(img, codes, text_va, text):
+    """air_scenarios (NOTES.md Part L): the same pieces engine_air.cpp resolves, with its cross-checks."""
+    sigs, _ = cs.load_signatures(pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h')
+    sigs = dict(sigs)
+    t = [m.start() for m in cs.compile_pattern(sigs['kSigAirTemplates']).finditer(text)]
+    s = [m.start() for m in cs.compile_pattern(sigs['kSigAirSpawn']).finditer(text)]
+    if len(t) != 1 or len(s) != 1:
+        return [('air_scenarios signatures', False, '%d/%d matches' % (len(t), len(s)))]
+    u8 = lambda va: img.d[img.va2off(va)]
+    u32 = lambda va: struct.unpack_from('<I', img.d, img.va2off(va))[0]
+    t_va, s_va = text_va + t[0], text_va + s[0]
+    templates, slots = u8(t_va + 3), u8(t_va + 0x35)
+    loader = rel32(img, t_va + 0x20)
+    results = []
+    head = find_in(img, loader, 0x100, codes['kCodeAirLoaderHead'])
+    look = find_in(img, loader, 0x200, codes['kCodeAirLoaderLookup'])
+    ok = bool(head and look)
+    names = []
+    if ok:
+        entity, attackers, defenders = u8(head + 6), u8(head + 0xa), u8(head + 0x14)
+        lea = head + 0x23
+        base = lea + 7 + struct.unpack_from('<i', img.d, img.va2off(lea) + 3)[0]
+        table = base + u32(head + 0x2e)
+        for i in range(slots):
+            p = struct.unpack_from('<Q', img.d, img.va2off(table + 8 * i))[0]
+            o = img.va2off(p)
+            names.append(img.d[o:img.d.index(b'\0', o)].decode('ascii', 'replace'))
+        ok = base == 0x140000000 and u8(look + 0x13) == entity and attackers + 0x18 == defenders and all(names)
+    results.append(('kCodeAirLoaderHead / Lookup (%d slots: %s ... %s)' % (slots, names[0] if names else '-', names[-1] if names else '-'),
+                    ok, hex(loader)))
+    inst, start = rel32(img, s_va + 0xa), rel32(img, s_va + 0x3c)
+    ic = find_in(img, inst, 0x60, codes['kCodeAirInstance'])
+    ok = bool(ic) and img.match_at(start, codes['kCodeAirStart']) and u8(ic + 0xd) == templates and         u8(start + 0x39) == u8(ic + 0x24) and (not head or u8(start + 0x4b) == u8(head + 6))
+    results.append(('kCodeAirInstance / kCodeAirStart (instance template +0x%x)' % (u8(ic + 0x24) if ic else -1), ok, hex(start)))
+    attach = None
+    for i in range(0x600 - 5):
+        if u8(start + i) == 0xe8 and img.match_at(rel32(img, start + i), codes['kCodeAirAttach']):
+            attach = rel32(img, start + i)
+            break
+    creator = rel32(img, attach + 0x20) if attach else 0
+    model = rel32(img, attach + 0x2f) if attach else 0
+    mt = find_in(img, model, 0x400, codes['kCodeAirModelType']) if model else None
+    ok = bool(attach and mt) and img.match_at(creator, codes['kCodeAirCreator']) and u8(creator + 6) == u8(creator + 0xb)
+    results.append(('kCodeAirAttach / Creator / ModelType (design type +0x%x, type name +0x%x)' %
+                    (u32(mt + 3) if mt else -1, u8(mt + 0xa) if mt else -1), ok, hex(attach or 0)))
     return results
 
 
