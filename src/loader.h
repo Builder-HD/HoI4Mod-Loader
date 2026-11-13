@@ -12,7 +12,7 @@
 // 3: set_strategic_region_name no longer accepts the `id` alias (only `region`).
 #define LOADER_VERSION 3
 // Release version of the DLL package (CHANGELOG.md). Independent of LOADER_VERSION.
-#define LOADER_RELEASE "0.5.0-beta"
+#define LOADER_RELEASE "0.6.0-beta"
 
 // ---------------------------------------------------------------------------
 // main.cpp
