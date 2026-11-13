@@ -6,6 +6,19 @@ A–F; NOTES.md has the findings and test results behind each.
 
 ## Unreleased
 
+- **New feature `air_scenarios`** (engine tier; guard `hoi4_loader_feature_air_scenarios`; no
+  script commands; script version unchanged). NOTES.md Part L.
+  - New air scenarios (the 3D air animations on the map) from mods: a vanilla-style mesh and
+    entity, plus an entry in `common/hoi4_loader_air_scenarios/*.txt` with `entity`, `slot` (the
+    game's scenario: mission and plane count), optional `attacker` / `defender` blocks
+    (`equipment` types or archetypes, `country` tags) and `weight`.
+  - A matching entry plays instead of the game's scenario; one matching plane per side is enough.
+    Files come from the game folder and the launcher's enabled mods in load order.
+  - The loader builds the templates with the game's own loader and swaps one in when a scenario
+    starts. Graphics only, so multiplayer is unaffected. Two signatures (111 in all) and seven
+    code shapes, checked on 1.19.4.2 and 1.19.5.
+  - Test mod: four entries built from vanilla's meshes (a CAS orbit, two dogfights, an
+    interception).
 - **Game 1.19.2** (vanilla and checksum-patched) is now listed in `loader_config.ini`, from the
   hashes recorded in October. Features added since were not re-checked there; any whose
   signatures don't match stay off.

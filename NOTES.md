@@ -4796,7 +4796,7 @@ Test mod decisions in the category "hoi4_loader test", guarded by
   the next entry; the fault path doesn't restore the previous speed; speed 10 can't be saved;
   two mode-1 pause callers unexamined; `ResolvePanel`'s memcmp without SEH.
 
-# Part L: air scenarios (investigation)
+# Part L: air scenarios (`air_scenarios`)
 
 Branch `feature/air-scenario-variants` (from `main`). Investigation only, nothing implemented.
 Revised on 2026-11-13 after GloomyJZ named what is needed (L2): new scenarios per mission and equipment.
@@ -4966,7 +4966,7 @@ mesh with a different event timing.
 
 ## L4 Open
 
-- **Approval** of L3:
+- **Decided** (L5): format B, with attacker/defender blocks. Was: approval of L3:
   - the name `air_scenarios`;
   - the folder `common/hoi4_loader_air_scenarios/`;
   - the keys `entity`, `slot`, `equipment`, `weight`;
@@ -4979,3 +4979,90 @@ mesh with a different event timing.
 - **Later, if wanted:** a script effect `play_air_scenario` to play a scenario (vanilla or a
   mod's) at a province from events or decisions (the console command's path).
 - **Older builds:** unchecked, as for the other 1.19.4.2 features.
+
+## L5 Agreed design and implementation (2026-11-13)
+
+**Agreed with the owner** (after comparing a naming-rule format "A" with a definition file "B"
+in two mock mods in `C:\test`): format **B**.
+- Entries in `common/hoi4_loader_air_scenarios/*.txt` with `entity`, `slot`, optional `attacker`
+  and `defender` blocks (`equipment` types or archetypes, `country` tags) and `weight`.
+- A matching entry replaces vanilla. One matching plane per side is enough; every condition
+  written must hold.
+- An entry or file of the same name in a later mod replaces the earlier one.
+- "Attacker" and "defender" are the animation's sides (`a_` / `d_` events): in an interception
+  the fighter is the attacker and the bomber the defender, whoever started the raid.
+- The `1` / `3` in a slot's name is the plane count, not a generation.
+
+**Found while implementing:**
+- **The country per side is the equipment's creator.** The plane model function reads it with
+  `FUN_140c323c0(design)` (`&design->creator`, `+0x20`), and the console command `airc` takes
+  "2 country tags for equipment creator". MODDING says so.
+- **Each side's list holds designs.** design → type at `+0x3f0` (the same field as
+  production_data's), type name `std::string` at `+0x18` (the same as equipment_conversion's),
+  archetype from production_data's `+0x538`.
+- **A missing joint** is not detectable from the template: the game logs "Airplane animation
+  analyze - failed to find attachment node" and keeps the node without a path. That message,
+  in the game's own error.log, is the report, as for a wrongly replaced vanilla scenario.
+- **The name table is image-relative** (`lea rax,[image base]; mov rdx,[rax+r14*8+disp32]`). The
+  loader swaps the slot's entry for its own build call only (the table is in `.data`) and
+  restores it in a `__finally`.
+- **1.19.5** (`v1.19.5.0.7c6c`, Steam update of 2026-11-12) has every pattern at the same
+  addresses as 1.19.4.2.
+
+**Implemented** (`src/engine_air.cpp`, `src/air_scenarios.cpp`, `src/plugin_air_scenarios.cpp`):
+- **Signatures:** `kSigAirTemplates` (the manager's template loop: the allocator, the loader, the
+  slot count) and `kSigAirSpawn` (the common spawn path: the instance constructor and the
+  scenario start).
+- **Code shapes,** each cross-checked against the next:
+  - the loader's fields, entity database and name table;
+  - the entity lookup;
+  - the instance's template field (the same as the start's);
+  - the start;
+  - the plane model function among the start's calls, the creator getter and the design's type.
+- **Hooks:**
+  - the template loader: after the game's last template, the plugin builds its own once per
+    session (re-recording the game's templates if the manager is rebuilt);
+  - the scenario start: before it, the instance's template may be swapped. Only the game's own
+    template for that slot is replaced.
+  - SEH around both; a fault switches to the game's scenarios.
+- **Definitions** are read when the templates are built: the game folder, then each mod from
+  `dlc_load.json` (descriptor `path`, absolute or relative to the documents folder;
+  `replace_path` supported; zip `archive` mods logged as unreadable), in file name order. The
+  parser, mod list, matching and weighted pick have no engine access and a unit test
+  (`tests/air_scenarios_test.cpp`, 32 checks, smoke test step 0a2).
+- **An entry is skipped** (logged with file and line) on a syntax error or unknown key, a missing
+  entity or slot, an unknown slot or entity, a `defender` on a slot without defenders, or a
+  template whose node counts differ from the slot's.
+- **Picking** uses the loader's own random numbers (graphics only).
+- **Checks:**
+  - `check_signatures.py`: 111/111 on 1.19.4.2 and on 1.19.5;
+  - `check_code_shapes.py`: 62/62 on both;
+  - build clean; unit tests and smoke test pass.
+- **Test mod:** four entries from `C:\test` format B (gunship orbit, long chase, head-on
+  weight 3, interception with a defender block), using vanilla meshes and animations.
+
+## L6 In-game test (to do)
+
+Single player, test mod enabled, 1.19.5. Start any game and use the console:
+1. **Load:** `loader.log` has:
+   - `air_scenarios: 21 slots ...`;
+   - at game start, "4 definition(s) from 1 file(s)";
+   - one line per entry ("hlt_air_gunship_orbit: hlt_air_gunship_orbit_entity plays in
+     bomber_1_CAS ...");
+   - "4 new air scenario(s) ready".
+   `error.log` has no "failed to find attachment node" for them.
+2. **CAS:** `airc bomber_1_CAS default 11471 126 29 small_plane_cas_airframe_1
+   small_plane_cas_airframe_1 GER FRA`: the plane circles and fires in bursts (instead of
+   vanilla's dive). With `small_plane_cas_airframe_2`: vanilla's dive.
+3. **Dogfight weights:** `airc fighter_1_vs_fighter_1 pass 11471 126 29 fighter_equipment_1
+   fighter_equipment_1 GER FRA`, several times: mostly head-on (both fire almost all the time),
+   sometimes the long chase. With `ITA` as the first tag, only the long chase (head-on needs GER).
+4. **Interception with a defender block:** `airc fighter_1_vs_bomber_1 success 6103 126 29
+   fighter_equipment_0 strat_bomber_equipment_1 GER ENG`: the bomber fires back. With `GER GER`
+   (the bomber's creator isn't ENG/USA): vanilla's interception.
+5. **Normal play:** a few days of an air war with CAS or fighters; nothing breaks, and
+   `loader.log` shows "plays for the first time" if a matching plane flies. With By Blood Alone
+   designs, the test entries only match through archetypes (the long chase), because CAS designs
+   are `small_plane_airframe` types.
+6. **Without the loader** (`version.dll` renamed): vanilla scenarios, no new error.log lines from
+   the test mod's air files beyond unused entities.
