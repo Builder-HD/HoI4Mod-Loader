@@ -5603,3 +5603,129 @@ thin white outline.
 - **Eighth test: works** ("Perfect!", Ganzhou - Wenzhou): one complete white outline around the
   whole line, the start province included.
 - Right-click verified in the same test: the idler's centre-on-province hook caught it (`right-click on a railway entry: fitting the whole line (11 provinces, box 94x50)`) and the camera framed the whole line.
+
+
+## M8: `style = outline | band` (branch `outline-style`, 2026-11-13)
+
+Owner's test of the fill decisions in the supply map mode: the gradient band shows as solid red
+there and looks broken (the band lives in the political map's border layer; special map modes draw
+the layer differently). Owner's choice: a style per area.
+
+- `style = outline` (default): each area gets its own group outline (the railway hover mark's
+  renderer, M7) at priority 90 - its index (the hover mark stays at 100, above). Released on
+  remove, replace (all outlines are rebuilt on every change) and game entry.
+- Colours: when the renderer builds its outline colour table (the hook of M7), the loader appends
+  32 zeroed entries with the table's own allocator (vt[1] alloc(bytes, 16), vt[2] free; data,
+  cap, count, allocator at count field - 0xc / - 4 / 0 / + 4) and keeps the base id. An area's
+  colour is written into a free slot when the area is drawn; identical colours share one; a
+  rebuild of the table writes them again. The colour id is the style's first byte, so base + 32
+  must stay below 256 (the table has about 26 entries).
+- **Open (first test of M8):** does a colour written after the setup reach the screen (is the
+  table uploaded every frame, or once)? Is the shader's table larger than the game's count, or
+  are entries past the built-in ones read at all? If outlines come out black or in a wrong colour,
+  that is the cause; then the fallback is a fixed set of colours written at the build.
+- **First test (owner, "Very nice"):** `chi_coast` drew a thin cyan outline around China's whole
+  coast. A colour written into an extra slot after the table's build does reach the screen, so the
+  open question above is answered: the dynamic slots work.
+- `style = band` is the earlier path unchanged (width, pulse, glow).
+
+## M9: the stripe texture (`CMapSecondaryMask`), traced for a stripe / custom fill style (2026-11-13)
+
+Owner's question: the area defense order stripes its states diagonally; can that be a fill style,
+or can a modder use any shader for the fill? Addresses from the Part M Ghidra project, for
+orientation only.
+
+**Shader side** (`gfx/FX`, plain text, moddable). After the gradient borders, the terrain, water,
+tree and mesh shaders call `secondary_color_mask` (`standardfuncsgfx.fxh`) with sampler
+`ProvinceSecondaryColorMap` (index 6 in `pdxmap.shader`). It samples a map-sized RGBA texture at
+the map uv: rgb is the stripe colour, alpha scales the stripes (`CalculateOccupationMask`:
+diagonal cosine stripes, fading with camera distance). Alpha 0 means no stripes. Occupation in the
+political map, the supply map mode, operative missions and battle-plan orders all draw here.
+
+**Engine side: `CMapSecondaryMask`** (the gradient border manager holds it at +0x40; map modes keep
+a pointer too):
+- +0x00 CPdxArray<uint32> colour per province id (RGBA bytes; alpha = stripe strength).
+- +0x18 CPdxArray<int> provinces changed since the last paint (count +0x24, allocator +0x28).
+- +0x30 the CPU image (RGBA, map size), +0x38 its byte size, +0x3c width, +0x40 height.
+- +0x44 repaint everything.
+- `Clear(mask)` FUN_141a6e6a0: zeroes the image and every colour, sets +0x44. Called by every map
+  mode refresh, the supply overlay, the area defense / battle-plan code (FUN_140fd27d0, FUN_140fdc9b0).
+- `SetProvince(mask, province, rgba)` FUN_141a6eaa0: writes the colour if it changed and queues
+  the province. `SetProvinceRgbAlpha(mask, province, rgb, alpha byte)` FUN_141a6ead0.
+  `SetState(mask, state, rgba)` FUN_141a6eb10: every province of the state.
+- `Paint(mask, gamestate, ..., out)` FUN_141a6ecb0, called from the border manager's update
+  (FUN_140fbf610, throttled) right after the gradient layers: paints the queued provinces (or all)
+  into the image with a parallel job (`CUpdateSecondaryColorThreaded`, body FUN_141a6dd50: the
+  province's pixel spans at province +0xb8 -> +0x58, 6 bytes each {x, y, length}, count +100) and
+  marks the dirty 256-pixel tiles for upload.
+- Operative missions colour states through it (`OperativesMapModeColorOperativeMissionTargetState(...,
+  EOrderInstanceType, CMapSecondaryMask&)`); the order-type switch suggests battle-plan orders such
+  as area defense use the same path. Not checked in game yet.
+
+**Plan for `style = stripes`:**
+- Hook `Paint`: before the original runs, call `SetProvince` for every province of every stripe
+  area with the area's colour (alpha = the area's alpha). It only queues provinces whose colour
+  changed, so this costs little. The game's own writes (a map mode refresh after `Clear`) are
+  overwritten again before the next paint.
+- Remember the colour the game had in each province when the loader first overwrote it. On remove,
+  write that colour back (the next map mode refresh corrects it if it went stale).
+- Needs: signatures for Clear/SetProvince/Paint and the manager's mask offset (+0x40, read from the
+  call site in the border update), and the manager pointer, which the attention hooks already get.
+- Trade-off: the texture is shared, so marked provinces lose occupation or supply stripes while
+  marked.
+
+**Custom shaders:** the loader writes the area's colour, and puts a pattern number in the alpha
+byte (for example 255 = default stripes, 1..254 = pattern ids). A mod ships its own
+`secondary_color_mask` in `standardfuncsgfx.fxh` that decodes the alpha into its own patterns
+(solid, crosshatch, dots, pulse with `vGlobalTime`). Without such a mod, the vanilla shader treats
+the alpha as stripe strength, so low pattern ids would show faint stripes. A pattern encoding with
+high alpha values keeps vanilla visible. Conflict: two mods replacing `standardfuncsgfx.fxh`.
+- **Built (2026-11-13):** `style = stripes`. `kSigStripePaint` (unique on 1.19.4.2 and 1.19.5.0)
+  hooks Paint; the detour writes the areas' colours into mask +0 (bytes r, g, b, a) before the
+  original. After an area change it gives back the game's colours where areas left (kept per
+  province when first overwritten, 0 where the game had none) and sets +0x44 (repaint all);
+  otherwise it only rewrites colours the game changed (those provinces are queued already). The
+  set is guarded by an SRW lock. Untested in game: the byte order (if red shows blue, the texture
+  is BGRA), whether the paint runs often enough, and the supply map mode.- **First in-game test (owner): works.** Diagonal stripes over Shandong, as area defense draws them.
+  `color = red` came out blue: the texture is BGRA (byte 0 blue, byte 2 red); fixed in the plugin.
+
+## M10: can mods add shader code without replacing game files? (2026-11-13) Yes.
+
+Question: the fill and outline pattern shaders would have to replace `standardfuncsgfx.fxh` and
+`border.shader`, global files two mods cannot both replace. Could the loader stitch each mod's
+pattern code into the vanilla files instead?
+
+- **Shader sources are plain text, built at every start.** `gfx/FX/*.shader` and `*.fxh` are read
+  at startup; each effect variant's full HLSL source is assembled and cached by a hash of it in
+  `Documents/Paradox Interactive/Hearts of Iron IV/shadercache/dx11_win32/{ps,vs}_5_0/<hash>.scache`
+  (the source, comments kept) and `.bin` (the bytecode). A changed source gets a new hash and is
+  compiled. Map shaders compile when a map loads, not at the main menu.
+- **`.fxh`/`.shader` are Paradox script**: `ConstantBuffer(...) { }`, `Code [[ ... ]]`,
+  `PixelShader = { Code [[ ... ]] }`. HLSL is only legal inside `[[ ]]`; anything after the last
+  `]]` is a script parse error (`Unexpected token: //` in error.log).
+- **Probe, run 1:** a file patch (`register_file_patch(L"gfx/FX/standardfuncsgfx.fxh")`) appended a
+  comment at the end. The loader log showed the game reading the file through the patch
+  (44889 -> 44918 bytes, about 80 s after start) and error.log reported the parse error at line
+  1254: the game parsed the patched copy.
+- **Probe, run 2:** the comment went before the last `]]` (inside the PixelShader code). No errors.
+  Nothing compiled at the main menu; after starting a game as CHI, 57 new cache entries appeared,
+  every one with the probe comment. **The patched HLSL is compiled and used.** Probe removed.
+
+**Consequence:** mods can ship pattern functions in their own files; the loader can insert them
+(and a dispatcher keyed by pattern id) into `standardfuncsgfx.fxh`'s PixelShader code and into
+`border.shader` at read time, on top of whatever copy is loaded (vanilla or a graphics mod's).
+Still open: that the group outline is drawn by `border.shader` with the colour table entry as
+`vSelectionColor`; test-compiling mod patterns (D3DCompile) so one broken pattern cannot break the
+map; the first start after a pattern change recompiles the affected shaders (slower once).
+**Outline path checked (static):** the outline renderer's segment sort (FUN_14130f0e0) puts every
+map border segment into one of 12 buckets (renderer +0x4a00, stride 0x18, just before the colour
+table at +0x4b20); each 8-byte entry carries the segment, its colour id (the outline style's first
+byte; 5 for the hovered item) and a float. Of all `gfx/FX` shaders only `border.shader` has a
+selection colour: `ConstantBuffer(2) { float4 vSelectionColor; float2 vTime_Transparency; }`, added
+to the border texture's colour with a pulse (`vColor.rgb + vSelectionColor.rgb * pulse`, the pulse
+scaled by `vSelectionColor.a`). No shader reads a colour array. So outline colours reach the screen
+as `vSelectionColor` in `border.shader` (per draw, from the table entry), which also explains the
+first tests' colours mixing with the white border texture. A pattern id can ride in the table
+entry: the loader writes the floats, so for example alpha = 2 + id (vanilla saturates the pulse,
+showing the plain colour) is free for a mod's `border.shader` code to decode; `Input.uv.y` runs
+along the border (marching ants), `uv.x` across it.

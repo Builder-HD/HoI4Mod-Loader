@@ -479,7 +479,6 @@ uint32_t g_hlOwner = 0;            // ui -> highlight owner (list of weak refere
 int g_hlSecond = 0;                // construction mode's priority (logged for comparison)
 const int kOutlinePriority = 100;  // the loader's outline: above the game's own outlines
 const int* g_paletteCount = nullptr;   // float count of BORDER_COLOR_CUSTOM_HIGHLIGHTS
-void* g_hlShared[2] = {nullptr, nullptr};  // our shared_ptr { object, control block }
 // The renderer's colour table: palette colour kWhiteSlot is made white there (vanilla colour 14,
 // FACTION_THEATER_HIGHLIGHT_COLOR_INDEX, the faction theatre map icon hover: that outline turns
 // white too). A colour past the vanilla 15 is drawn as colour 14 (second in-game test).
@@ -571,20 +570,193 @@ bool WhiteRaw(void* renderer) {
     }
 }
 
+// Extra colours for script outlines: kExtraSlots entries appended to the renderer's colour table at
+// its build (CPdxArray<float4>: data, cap, count, allocator* at +0x10), filled as areas need them.
+const int kExtraSlots = 32;
+void* g_renderer = nullptr;   // the renderer whose table was extended
+int g_extraBase = 0;          // colour id of the first extra slot (0: none)
+float g_extraRgba[kExtraSlots][4];
+int g_extraUsed = 0;          // slots handed out since the last reset
+
+using TableAlloc_t = void*(__fastcall*)(void* allocator, size_t bytes, size_t align);
+using TableFree_t = void(__fastcall*)(void* allocator, void* p);
+
+// Appends `extra` zeroed entries (grown with the table's own allocator, as the build grows it).
+bool GrowRaw(void* renderer, int extra, int* base) {
+    __try {
+        uint8_t* arr = (uint8_t*)renderer + g_tableCount - 0xc;
+        int count = Rd<int>(arr, 0xc), cap = Rd<int>(arr, 8);
+        float* data = Rd<float*>(arr, 0);
+        void* alloc = Rd<void*>(arr, 0x10);
+        if (!data || !alloc || count <= 0) return false;
+        int need = count + extra;
+        if (need > cap) {
+            float* fresh = (float*)((TableAlloc_t)(*(void***)alloc)[1])(alloc, (size_t)need * 16, 16);
+            if (!fresh) return false;
+            memcpy(fresh, data, (size_t)count * 16);
+            ((TableFree_t)(*(void***)alloc)[2])(alloc, data);
+            data = fresh;
+            Wr<float*>(arr, 0, fresh);
+            Wr<int>(arr, 8, need);
+        }
+        memset(data + count * 4, 0, (size_t)extra * 16);
+        Wr<int>(arr, 0xc, need);
+        *base = count;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool WriteSlotRaw(void* renderer, int id, const float* rgba) {
+    __try {
+        int count = Rd<int>(renderer, g_tableCount);
+        float* data = Rd<float*>(renderer, g_tableCount - 0xc);
+        if (!data || id < 0 || id >= count) return false;
+        memcpy(data + id * 4, rgba, 16);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 void __fastcall TableDetour(void* renderer) {
     g_tableOrig(renderer);
     bool ok = WhiteRaw(renderer);
     g_tableWhite = ok;
-    Log("attention_area: outline colour %d %s", kWhiteSlot, ok ? "made white in the renderer's colour table" : "NOT changed (table not as expected)");
+    int base = 0;
+    bool grown = GrowRaw(renderer, kExtraSlots, &base) && base + kExtraSlots <= 255;  // colour ids are bytes
+    g_renderer = renderer;
+    g_extraBase = grown ? base : 0;
+    for (int i = 0; grown && i < g_extraUsed; ++i) WriteSlotRaw(renderer, base + i, g_extraRgba[i]);  // a rebuild keeps them
+    Log("attention_area: outline colour %d %s; %d extra outline colours %s", kWhiteSlot,
+        ok ? "made white in the renderer's colour table" : "NOT changed (table not as expected)", kExtraSlots,
+        grown ? "added" : "NOT added (script outlines use palette colours)");
+}
+
+// --- Stripes: the stripe texture (CMapSecondaryMask, NOTES.md M9) -----------------------------------
+// mask +0: CPdxArray<uint32> colour per province (bytes r, g, b, a; a = stripe strength), count +0xc;
+// +0x44: repaint every province. The shader draws diagonal stripes where alpha > 0, in every map mode.
+// Right before the game paints, the loader writes its areas' colours over the game's. A province
+// the game changed is already queued for the paint; after an area change everything is repainted.
+using StripePaint_t = char(__fastcall*)(void* mask, void* gamestate, void* tiles, char* out);
+uint8_t* g_stripeFn = nullptr;
+StripePaint_t g_stripeOrig = nullptr;
+SRWLOCK g_stripeLock = SRWLOCK_INIT;
+std::vector<StripeArea> g_stripeWant;     // guarded by g_stripeLock
+bool g_stripeChanged = false;             // guarded: g_stripeWant changed since the last paint
+std::vector<int64_t> g_stripeSaved;       // guarded: per province, the game's colour where ours went (-1: none)
+std::vector<int> g_stripeMine;            // guarded: provinces holding our colour
+volatile long g_stripeFaultLogged = 0, g_stripeFirstLogged = 0;
+
+void ResolveStripes() {
+    g_stripeFn = SigFindUnique("stripe_paint", kSigStripePaint);
+    if (!g_stripeFn) Log("attention_area: the stripe paint function was not found: style = stripes is drawn as an outline");
+}
+
+// The mask's colour array, checked readable and writable at both ends.
+bool StripeColoursRaw(uint8_t* mask, uint32_t** colours, int* count) {
+    __try {
+        uint32_t* c = Rd<uint32_t*>(mask, 0);
+        int n = Rd<int>(mask, 0xc);
+        if (!c || n <= 1 || n > 1000000) return false;
+        volatile uint32_t* v = c;
+        v[0] = v[0];
+        v[n - 1] = v[n - 1];
+        *colours = c;
+        *count = n;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// Writes the wanted colours into the mask (main thread, in the paint call).
+bool ApplyStripes(uint8_t* mask, const std::vector<StripeArea>& want, bool changed) {
+    uint32_t* colours = nullptr;
+    int count = 0;
+    if (!StripeColoursRaw(mask, &colours, &count)) return false;
+    {
+        if ((int)g_stripeSaved.size() != count) g_stripeSaved.assign((size_t)count, -1);
+        bool repaint = false;
+        if (changed) {
+            // Give the game back what it had in provinces no longer wanted (0 where it had nothing;
+            // a later map mode refresh corrects a colour that went stale meanwhile).
+            std::vector<char> wanted((size_t)count, 0);
+            for (const StripeArea& a : want)
+                for (int p : a.provinces)
+                    if (p > 0 && p < count) wanted[p] = 1;
+            for (int p : g_stripeMine) {
+                if (p >= count || wanted[p]) continue;
+                colours[p] = g_stripeSaved[p] >= 0 ? (uint32_t)g_stripeSaved[p] : 0;
+                g_stripeSaved[p] = -1;
+            }
+            g_stripeMine.clear();
+            for (const StripeArea& a : want)
+                for (int p : a.provinces)
+                    if (p > 0 && p < count) g_stripeMine.push_back(p);
+            repaint = true;
+        }
+        for (const StripeArea& a : want)
+            for (int p : a.provinces) {
+                if (p <= 0 || p >= count || colours[p] == a.rgba) continue;
+                // The game's own colour (or a later change of it) is kept for the restore.
+                bool ours = false;
+                for (const StripeArea& b : want) ours = ours || colours[p] == b.rgba;
+                if (!ours) g_stripeSaved[p] = colours[p];
+                colours[p] = a.rgba;  // a province the game changed is queued already
+            }
+        if (repaint) mask[0x44] = 1;
+        return true;
+    }
+}
+
+char __fastcall StripePaintDetour(void* mask, void* gamestate, void* tiles, char* out) {
+    AcquireSRWLockExclusive(&g_stripeLock);
+    bool changed = g_stripeChanged;
+    g_stripeChanged = false;
+    if ((changed || !g_stripeWant.empty()) && !ApplyStripes((uint8_t*)mask, g_stripeWant, changed) &&
+        InterlockedExchange(&g_stripeFaultLogged, 1) == 0)
+        Log("ERROR: attention_area: writing stripe colours faulted (contained; logged once)");
+    if (changed && InterlockedExchange(&g_stripeFirstLogged, 1) == 0)
+        Log("attention_area: stripe colours applied (%zu stripe area(s); first paint, logged once)", g_stripeWant.size());
+    ReleaseSRWLockExclusive(&g_stripeLock);
+    return g_stripeOrig(mask, gamestate, tiles, out);
 }
 
 }  // namespace
+
+bool g_stripeHooked = false;
+bool HaveStripes() { return g_stripeHooked; }
+
+bool HookStripes() {
+    g_stripeHooked = g_stripeFn && HookQueue(g_stripeFn, (void*)&StripePaintDetour, (void**)&g_stripeOrig, "stripe_paint");
+    return g_stripeHooked;
+}
+
+void SetStripes(const std::vector<StripeArea>& areas) {
+    AcquireSRWLockExclusive(&g_stripeLock);
+    g_stripeWant = areas;
+    g_stripeChanged = true;
+    ReleaseSRWLockExclusive(&g_stripeLock);
+}
+
+void ForgetStripes() {
+    // A new game: the old provinces' saved colours mean nothing there.
+    AcquireSRWLockExclusive(&g_stripeLock);
+    g_stripeWant.clear();
+    g_stripeSaved.assign(g_stripeSaved.size(), -1);
+    g_stripeMine.clear();
+    g_stripeChanged = false;
+    ReleaseSRWLockExclusive(&g_stripeLock);
+}
 
 void ResolveAttention() {
     ResolveBorders();
     ResolveCamera();  // before ResolveProvinces: the province id offset comes from goto_state
     ResolveProvinces();
     ResolveHighlight();  // after ResolveCamera: cross-checks the UI global
+    ResolveStripes();
 }
 
 bool HaveHighlight() { return g_createHighlight && g_hlOwner && g_paletteCount && g_ppUi && g_tableFixed; }
@@ -671,35 +843,60 @@ bool HookHighlightWhite() {
     return g_tableFn && HookQueue(g_tableFn, (void*)&TableDetour, (void**)&g_tableOrig, "highlight_colour_table");
 }
 
-void HideHighlight() {
-    void* ctrl = g_hlShared[1];
-    g_hlShared[0] = g_hlShared[1] = nullptr;
+void ReleaseOutline(OutlineRef* ref) {
+    void* ctrl = ref ? ref->ctrl : nullptr;
+    if (ref) ref->obj = ref->ctrl = nullptr;
     if (ctrl && !ReleaseRaw(ctrl)) Log("ERROR: attention_area: releasing a province outline faulted (contained)");
 }
 
-bool ShowHighlight(const std::vector<int>& provinces, int paletteIndex) {
-    HideHighlight();
-    if (!HaveHighlight() || provinces.empty() || paletteIndex < 0 || paletteIndex >= HighlightPaletteSize()) return false;
+bool CreateOutline(const std::vector<int>& provinces, int colourId, int priority, OutlineRef* out) {
+    ReleaseOutline(out);
+    if (!HaveHighlight() || provinces.empty() || colourId < 0 || colourId > 255) return false;
     void* ui = *g_ppUi;
     void* owner = ui ? Rd<void*>(ui, g_hlOwner) : nullptr;
     if (!owner) return false;
     IntArray arr = {provinces.data(), (int)provinces.size(), (int)provinces.size(), nullptr};
     // The style's first byte is the colour id in the renderer's table (FUN_14130f0e0 reads it): ids
-    // 0-9 are the fixed border colours, 10 + i palette colour i. Construction mode's {10, 2} is
-    // palette 0 (teal); the earlier tests drew {15, 2} as palette 5 (green) and {10, x} as teal.
-    // The second number is the priority: the owner's list is sorted by it, highest first, and an edge
-    // shared by several outlines gets the first one's colour (FUN_140bb2cd0 / FUN_14130f0e0). The game's
-    // own start-province outline of a hovered railway entry ranks above construction mode's 2 and took
-    // the start province's edges (sixth test), so the loader's outline ranks high.
-    int style[2] = {g_tableFixed + paletteIndex, kOutlinePriority};
-    void* out[2] = {nullptr, nullptr};
-    if (!CreateRaw(owner, &arr, style, out)) {
+    // 0-9 are the fixed border colours, 10 + i palette colour i, then the loader's extra colours.
+    // Construction mode's {10, 2} is palette 0 (teal); the earlier tests drew {15, 2} as palette 5
+    // (green) and {10, x} as teal. The second number is the priority: the owner's list is sorted by
+    // it, highest first, and an edge shared by several outlines gets the first one's colour
+    // (FUN_140bb2cd0 / FUN_14130f0e0).
+    int style[2] = {colourId, priority};
+    void* res[2] = {nullptr, nullptr};
+    if (!CreateRaw(owner, &arr, style, res)) {
         Log("ERROR: attention_area: creating a province outline faulted (contained)");
         return false;
     }
-    g_hlShared[0] = out[0];
-    g_hlShared[1] = out[1];
-    return out[1] != nullptr;
+    out->obj = res[0];
+    out->ctrl = res[1];
+    return res[1] != nullptr;
+}
+
+int OutlineWhiteId() { return g_tableWhite ? g_tableFixed + kWhiteSlot : -1; }
+
+int OutlineColourId(float r, float g, float b, float a) {
+    if (!g_extraBase || !g_renderer) return -1;
+    float rgba[4] = {r, g, b, a};
+    for (int i = 0; i < g_extraUsed; ++i)
+        if (memcmp(g_extraRgba[i], rgba, 16) == 0) return g_extraBase + i;
+    if (g_extraUsed >= kExtraSlots) return -1;
+    memcpy(g_extraRgba[g_extraUsed], rgba, 16);
+    if (!WriteSlotRaw(g_renderer, g_extraBase + g_extraUsed, rgba)) return -1;
+    return g_extraBase + g_extraUsed++;
+}
+
+void ResetOutlineColours() { g_extraUsed = 0; }
+
+// The railway hover mark: one outline above everything (priority 100: the game's own start-province
+// outline of a hovered railway entry ranks above construction mode's 2, sixth test).
+namespace {
+OutlineRef g_hover;
+}
+void HideHighlight() { ReleaseOutline(&g_hover); }
+bool ShowHighlight(const std::vector<int>& provinces, int paletteIndex) {
+    if (paletteIndex < 0 || paletteIndex >= HighlightPaletteSize()) return false;
+    return CreateOutline(provinces, g_tableFixed + paletteIndex, kOutlinePriority, &g_hover);
 }
 
 bool HaveAttentionBorders() {

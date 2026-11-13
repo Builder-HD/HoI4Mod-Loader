@@ -1,8 +1,14 @@
 // attention_area feature (NOTES.md Part M): mark provinces on the map with an outline in a chosen
 // colour, width and effect, and move the camera to them.
 //
-//   add_attention_area = { id = <name> color = <name> red/green/blue/alpha = <0..1> width = <number>
-//                          pulse = yes/no glow = yes/no area = { ... } area = { ... } }
+//   add_attention_area = { id = <name> style = outline|band|stripes color = <name> red/green/blue/alpha = <0..1>
+//                          width = <number> pulse = yes/no glow = yes/no area = { ... } area = { ... } }
+//
+// style = outline (the default): the game's thin province group outline (as construction mode marks
+// build targets), in every map mode. style = band: the gradient border band (width, pulse and glow
+// apply to it), drawn in the political map's border layer; special map modes (supply) draw it badly.
+// style = stripes: the diagonal stripes of occupation and battle-plan orders (the map's secondary
+// colour texture, NOTES.md M9), in every map mode; alpha is the stripe strength.
 //   remove_attention_area = <name> | all
 //   focus_attention_area = { id = <name> zoom = <camera height> }     (the player's country only)
 //   has_attention_area = <name>                                        (trigger)
@@ -35,6 +41,7 @@ const float kFitFactor = 1.6f;  // camera height per pixel of the box's larger s
 struct Area {
     int token = 0;          // id (engine token)
     std::string name;
+    int style = 0;          // 0 outline (group outline), 1 band (gradient borders), 2 stripes
     Engine::AttentionLook look;
     std::vector<int> provinces;
     int box[4] = {};        // bounding box in map pixels {x, y, w, h}
@@ -43,6 +50,9 @@ struct Area {
 };
 
 std::vector<Area> g_areas;  // written by effects (main thread), read by the trigger
+std::vector<Engine::OutlineRef> g_outlines;  // the outlines shown for style = outline areas
+const int kAreaPriority = 90;                // below the railway hover mark (100)
+volatile long g_noColourLogged = 0, g_noOutlineLogged = 0, g_noStripesLogged = 0;
 bool g_dirty = false;
 int g_focusToken = 0;
 float g_focusHeight = 0;
@@ -129,7 +139,7 @@ const float kRgb[][3] = {{1, 0.9f, 0.1f}, {1, 1, 1},  {0, 0, 0},       {0.9f, 0.
                          {0, 0.9f, 0.9f}, {0.9f, 0, 0.9f}, {1, 0.55f, 0}, {0.55f, 0.2f, 0.85f}, {0.6f, 0.6f, 0.6f}, {1, 0.5f, 0.7f}};
 
 // --- Parameters -------------------------------------------------------------------------------------
-enum AddParam { kId, kColor, kRed, kGreen, kBlue, kAlpha, kWidth, kPulse, kGlow, kArea };
+enum AddParam { kId, kStyle, kColor, kRed, kGreen, kBlue, kAlpha, kWidth, kPulse, kGlow, kArea };
 enum AreaKey { kProvince, kState, kRegion, kOwner, kController, kCoastal };
 
 ParamSpec Repeat(const char* name) {
@@ -246,6 +256,7 @@ void ExecAdd(const Args& a, const Scope& s) {
     Area area;
     area.token = a.i(kId);
     area.name = a.key(kId);
+    area.style = a.has(kStyle) ? a.i(kStyle) : 0;
     int c = a.has(kColor) ? a.i(kColor) : 0;
     area.look.r = kRgb[c][0], area.look.g = kRgb[c][1], area.look.b = kRgb[c][2];
     if (a.has(kRed)) area.look.r = Clamp01(a.num(kRed));
@@ -298,6 +309,57 @@ bool EvalHas(const Args& a, const Scope&) {
 }
 
 // --- Frame, game entry ------------------------------------------------------------------------------
+void ReleaseOutlines() {
+    for (Engine::OutlineRef& o : g_outlines) Engine::ReleaseOutline(&o);
+    g_outlines.clear();
+}
+
+// All areas drawn again (adds and removes are rare): bands through the gradient borders, outlines as
+// one game outline each. Identical colours share a colour slot. Areas added later rank lower, so on an
+// edge two outlines share, the earlier area's colour shows.
+void Redraw() {
+    ReleaseOutlines();
+    Engine::ResetOutlineColours();
+    std::vector<Engine::AttentionDraw> draw;
+    std::vector<Engine::StripeArea> stripes;
+    for (size_t i = 0; i < g_areas.size(); ++i) {
+        const Area& a = g_areas[i];
+        if (a.provinces.empty()) continue;
+        if (a.style == 2 && Engine::HaveStripes()) {
+            auto byte = [](float v) { return (uint32_t)(v * 255.0f + 0.5f); };
+            Engine::StripeArea s;
+            // The texture is BGRA: byte 0 blue, byte 2 red (first in-game test: red came out blue).
+            s.rgba = byte(a.look.b) | byte(a.look.g) << 8 | byte(a.look.r) << 16 | byte(a.look.a) << 24;
+            s.provinces = a.provinces;
+            stripes.push_back(std::move(s));
+            continue;
+        }
+        if (a.style == 2 && InterlockedExchange(&g_noStripesLogged, 1) == 0)
+            Log("attention_area: the stripe hook is not there: style = stripes areas are drawn as outlines");
+        bool band = a.style == 1;
+        if (band || !Engine::HaveHighlight()) {
+            if (!band && InterlockedExchange(&g_noOutlineLogged, 1) == 0)
+                Log("attention_area: the game's outline functions are not there: style = outline areas are drawn as bands");
+            draw.push_back({a.look, a.provinces});
+            continue;
+        }
+        int colour = Engine::OutlineColourId(a.look.r, a.look.g, a.look.b, a.look.a);
+        if (colour < 0) {
+            colour = Engine::OutlineWhiteId();
+            if (colour < 0) colour = 10;  // palette colour 0
+            if (InterlockedExchange(&g_noColourLogged, 1) == 0)
+                Log("attention_area: no free outline colour (the renderer's colour table was not extended, or more than 32 "
+                    "colours are in use): such outlines use colour %d (logged once)", colour);
+        }
+        Engine::OutlineRef ref;
+        int priority = kAreaPriority - (int)std::min<size_t>(i, 80);
+        if (Engine::CreateOutline(a.provinces, colour, priority, &ref)) g_outlines.push_back(ref);
+        else Log("attention_area: the outline of '%s' could not be created", a.name.c_str());
+    }
+    Engine::SetAttentionDraw(draw);
+    if (Engine::HaveStripes()) Engine::SetStripes(stripes);
+}
+
 void Frame() {
     HoverFrame();
     if (g_lineFocusPending) {
@@ -314,10 +376,7 @@ void Frame() {
     }
     if (g_dirty) {
         g_dirty = false;
-        std::vector<Engine::AttentionDraw> draw;
-        for (const Area& a : g_areas)
-            if (!a.provinces.empty()) draw.push_back({a.look, a.provinces});
-        Engine::SetAttentionDraw(draw);
+        Redraw();
     }
     Engine::AttentionTick();
     if (g_focusPending) {
@@ -350,7 +409,10 @@ void OnEntering() {
     g_hoverPath.clear();
     g_hoverShown = g_hoverChanged = false;
     Engine::HideHighlight();
+    ReleaseOutlines();
+    Engine::ResetOutlineColours();
     Engine::ForgetAttentionDraw();
+    Engine::ForgetStripes();
 }
 
 void OnFault(const char* where) { FeatureDeactivate(kFeature, where); }
@@ -367,9 +429,9 @@ bool AttentionAreaInit() {
     if (!MainThreadQueueAvailable()) {
         Log("attention_area: needs the main-thread frame hook; off");
         return false;
-    }
-    std::vector<ParamSpec> add = {
+    }    std::vector<ParamSpec> add = {
         {"id", ParamType::Token, true},
+        {"style", ParamType::Choice, false, ScopeDefault::None, "outline|band|stripes"},
         {"color", ParamType::Choice, false, ScopeDefault::None, kColors},
         {"red", ParamType::Number, false},
         {"green", ParamType::Number, false},
@@ -382,9 +444,11 @@ bool AttentionAreaInit() {
     };
     bool ok = register_native_effect(
         {"add_attention_area",
-         "Marks provinces on the map with an outline (the game's gradient borders), in every map mode. id names the area "
-         "(adding it again replaces it). color: a named colour, or red/green/blue/alpha from 0 to 1. width: the border "
-         "thickness. pulse: the border pulses. glow: the soft fading edge (glow = no: a sharp edge). Each area = { } block "
+         "Marks provinces on the map. id names the area (adding it again replaces it). style = outline (default): the "
+         "game's thin province outline, in every map mode. style = band: a gradient border band in the political map "
+         "(width: its thickness, pulse: it pulses, glow = no: a sharp edge). style = stripes: diagonal stripes like "
+         "occupation, in every map mode (alpha: stripe strength). color: a named colour, or red/green/blue/alpha "
+         "from 0 to 1. Each area = { } block "
          "selects provinces: province, state and strategic_region ids (any number, added up; none: every land province), "
          "then owner, controller and coastal keep those that match. Several area blocks add up. Not saved: add areas again "
          "after loading (on_game_loaded).",
@@ -413,12 +477,15 @@ bool AttentionAreaInit() {
         Log("attention_area: the gradient border hooks could not be queued; off");
         return false;
     }
+    if (!Engine::HookStripes()) Log("attention_area: style = stripes is drawn as an outline (no stripe hook)");
     OnMainThreadFrame(&Frame);
     OnGameEntering(&OnEntering);
     // Optional: the hovered railway queue entry is marked (railway_queue's tooltip hook).
     bool hover = Engine::HaveHighlight() && FeatureActive("railway_queue") && Engine::SetRailwayHoverHandler(&OnRailwayHover);
-    // White for the outline: one colour of the renderer's outline colour table (colour 14).
-    if (hover && !Engine::HookHighlightWhite()) Log("attention_area: the outline colour hook is not there; hover outlines use colour 0");
+    // The outline colours: white (colour 14) and the extra colours of style = outline areas, written into
+    // the renderer's outline colour table when it is built.
+    if (Engine::HaveHighlight() && !Engine::HookHighlightWhite())
+        Log("attention_area: the outline colour hook is not there; outlines use the game's palette colours");
     bool rightClick = hover && Engine::HookCentreOnProvince(&OnCentre);
     if (hover && !Engine::HookHoveredProvince(&IsHoveredLineEnd))
         Log("attention_area: the hovered-item hook is not there; the game's start-province mark may cover the outline");

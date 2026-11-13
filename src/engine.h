@@ -317,6 +317,16 @@ void SetAttentionDraw(const std::vector<AttentionDraw>& areas);
 void AttentionTick();
 // The game entry: forget the borders of the previous game without touching them.
 void ForgetAttentionDraw();
+// Stripes (NOTES.md M9): the diagonal stripes the map draws for occupation and battle-plan orders,
+// in a chosen colour per province set, in every map mode. Colour bytes b, g, r, a (a: stripe strength).
+struct StripeArea {
+    uint32_t rgba = 0;
+    std::vector<int> provinces;
+};
+bool HookStripes();   // queues the stripe paint hook; false if its signature was not found
+bool HaveStripes();   // the hook is in place
+void SetStripes(const std::vector<StripeArea>& areas);  // replaces the set; applied at the next paint
+void ForgetStripes();  // a new game is entered
 // Province group outlines (the thin lines construction mode draws around build targets): one
 // outline at a time for the UI. Main thread. Palette index: BORDER_COLOR_CUSTOM_HIGHLIGHTS.
 bool HaveHighlight();
@@ -333,6 +343,18 @@ bool HookHoveredProvince(HoverFilter_t filter);
 // Main thread: clears the hovered item now if it is a province the filter accepts. True if cleared.
 bool ClearHoveredProvinceIf(HoverFilter_t filter);
 bool ShowHighlight(const std::vector<int>& provinces, int paletteIndex);  // replaces the previous one
+// Any number of outlines (script areas): one game outline per handle, shown while it is held.
+struct OutlineRef {
+    void* obj = nullptr;
+    void* ctrl = nullptr;  // the shared_ptr's control block
+};
+bool CreateOutline(const std::vector<int>& provinces, int colourId, int priority, OutlineRef* out);  // replaces *out
+void ReleaseOutline(OutlineRef* ref);
+// Colour ids: the white slot (-1 before the colour table is built), and an extra slot holding
+// this colour (-1 if none is free or the table could not be extended). Main thread.
+int OutlineWhiteId();
+int OutlineColourId(float r, float g, float b, float a);
+void ResetOutlineColours();  // the extra slots may be handed out again
 void HideHighlight();
 // Main thread, at a safe point: centre the camera on the box (map pixels) and set the target
 // height (height <= 0: fit the box, times fitFactor). `ref` and `ref2` are provinces of the area

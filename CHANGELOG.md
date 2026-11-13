@@ -41,6 +41,13 @@ A–F; NOTES.md has the findings and test results behind each.
   entry in the construction queue outlines its provinces with the game's thin province outline in white
   (outline colour 14 is made white in the map renderer's colour table); a right-click on the entry
   shows the whole line. UI only. Five new signatures (139 in all). NOTES.md M7.
+- **`add_attention_area` `style = outline|band`:** `outline`, the new default, draws the area with
+  the game's thin province outline in the area's colour (32 colour slots appended to the renderer's
+  outline colour table), in every map mode; `band` is the earlier gradient border band (width, pulse,
+  glow), which special map modes such as supply draw badly. NOTES.md M8.
+- **`add_attention_area` `style = stripes`:** the diagonal stripes of occupation and area defense
+  in the area's colour, in every map mode (the map's secondary colour texture: the loader writes
+  its colours right before the game paints it). One new signature (140 in all). NOTES.md M9.
 - **Native script API:** parameters of type `Number` (decimals) and `Block` (a nested
   `key = { ... }` read by the game's own clause reader), `ParamSpec::repeat` (a key written several
   times keeps every value), and up to 16 parameters per command (was 8).

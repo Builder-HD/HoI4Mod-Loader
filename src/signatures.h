@@ -701,6 +701,11 @@ static const size_t kSigTablePaletteRel = 8, kSigTableFixedImm = 0x32, kSigTable
 // a +0x428 setter at +0x20; SetHoveredState at +0x30: type (disp32 +0x32) = 1, item (+0x3d). (0x140bbff00)
 SIG(kSigHoverSetters, "C7 81 ?? ?? 00 00 00 00 00 00 48 89 91 ?? ?? 00 00 C3 CC CC CC CC CC CC CC CC CC CC CC CC CC CC 48 89 91 ?? ?? 00 00 C3 CC CC CC CC CC CC CC CC C7 81 ?? ?? 00 00 01 00 00 00 48 89 91 ?? ?? 00 00 C3")
 static const size_t kSigHoverTypeDisp = 2, kSigHoverItemDisp = 0xd, kSigHoverStateTypeDisp = 0x32, kSigHoverStateItemDisp = 0x3d;
+// The stripe texture's paint (CMapSecondaryMask, NOTES.md M9): Paint(mask, gamestate, tiles, out),
+// called from the gradient border update; paints the queued provinces (or all, when the byte at
+// mask +0x44 is set: the `cmp byte [rcx+0x44], 0` and `mov byte [rcx+0x44], 0` in the pattern)
+// from the colour per province at mask +0 (count +0xc). Function start. (0x141a6ecb0)
+SIG(kSigStripePaint, "48 89 5C 24 20 4C 89 44 24 18 48 89 54 24 10 55 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 ?? 48 81 EC ?? ?? 00 00 4D 8B E9 48 8B F9 80 79 44 00 0F 84 ?? ?? ?? ?? 41 C6 01 01 C6 41 44 00")
 
 // --- Code shapes at RTTI-found addresses (numeric triggers, NOTES.md E2) -------------------
 // CODE(name, "..."): checked with SigMatchAt at an address reached through an RTTI vtable, not

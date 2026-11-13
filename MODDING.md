@@ -45,7 +45,7 @@ Current features:
 | `province_building_removal` | engine (needs `lifecycle`) | `hoi4_loader_plugin_province_building_removal` | a removal cross on the state view's province buildings (supply hub, naval base, bunkers); no script commands, see below |
 | `equipment_conversion` | engine (needs `lifecycle`) | `hoi4_loader_plugin_equipment_conversion` | tools a mod switches on with global flags: "Convert from Stockpile" from every earlier generation, a cost factor, "same role only"; off until a mod sets them, see below |
 | `air_scenarios` | engine | `hoi4_loader_plugin_air_scenarios` | new air scenarios (the 3D air animations on the map) for chosen missions, planes and countries, defined in `common/hoi4_loader_air_scenarios/`; no script commands, see below |
-| `attention_area` | engine (needs `lifecycle`) | `hoi4_loader_plugin_attention_area` | `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area`: outline any set of provinces on the map (colour, width, pulse, glow) and move the camera to it; display only, not saved, see below |
+| `attention_area` | engine (needs `lifecycle`) | `hoi4_loader_plugin_attention_area` | `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area`: outline any set of provinces on the map (thin outline or gradient band; colour, width, pulse, glow) and move the camera to it; display only, not saved, see below |
 
 On an unknown build the file tier stays on, the engine tier is off, and `loader.log` lists the
 disabled features and prints the exact line to add to `loader_config.ini`. A feature whose init
@@ -1419,16 +1419,19 @@ scenarios; nothing in the game state changes.
 scenarios play. The mod's extra entities are unused. Guard: `hoi4_loader_feature_air_scenarios`.
 ## Attention areas (`attention_area`)
 
-Outline any set of provinces on the map, in a colour, width and edge a mod chooses, and move the
-camera there. Display only: nothing in the game state changes, and nothing is saved.
+Outline any set of provinces on the map, in a colour (and for bands a width and edge) a mod
+chooses, and move the camera there. Display only: nothing in the game state changes, and nothing
+is saved.
 
 ```
 add_attention_area = {
     id = chi_coast          # the area's name; adding it again replaces it
+    style = outline         # outline (default): thin outline; band: gradient border band; stripes: diagonal stripes
     color = cyan            # yellow (default) white black red green blue cyan magenta orange purple grey pink
     # red = 0 green = 1 blue = 1 alpha = 0.8   # or the colour as numbers from 0 to 1 (override color)
-    width = 3               # border thickness (default 1)
-    pulse = no              # yes: the border pulses (the game's "highlighted")
+    # band only:
+    width = 3               # band thickness (default 1)
+    pulse = no              # yes: the band pulses (the game's "highlighted")
     glow = yes              # yes (default): soft fading edge; no: sharp edge
     area = { owner = CHI coastal = yes }
     area = { state = 124 }  # several area blocks add up
@@ -1448,12 +1451,20 @@ has_attention_area = chi_coast                         # trigger
   (a front line), run the effect again (for example from `on_daily`/`on_weekly`): the area is
   replaced.
 
-**How it looks.** The outline is drawn with the game's gradient borders, the same coloured borders
-scripted map modes use, and shows in every map mode. One outline goes around the whole area, not
-around each province. Inside the area the area's colour takes the place of the map's own colouring
-(for example the country colour in the political map). A province is in at most one area: when
-areas overlap, the later one wins. Which edge `glow = yes` and `glow = no` give, and how `width`
-looks, is still to be checked in game (NOTES.md M5).
+**How it looks.** One outline goes around the whole area, not around each province.
+- `style = outline` (default): the game's thin province group outline, the one construction mode
+  draws around build targets, in the area's colour. Up to 32 different colours at a time (more fall
+  back to white); `width`, `pulse` and `glow` do nothing. Where two areas share an edge, the earlier
+  added area's colour shows.
+- `style = band`: the game's gradient borders, the coloured bands scripted map modes use. Inside the
+  band the area's colour takes the place of the map's own colouring (the country colour in the
+  political map); `width = 100` fills small areas. A province is in at most one band: when bands
+  overlap, the later one wins. Bands are drawn in the political map's border layer; special map
+  modes (supply, for example) draw them badly.
+- `style = stripes`: the diagonal stripes the game draws for occupation and battle-plan orders
+  (area defense), in the area's colour, in every map mode. `alpha` sets how strong the stripes
+  are. Marked provinces lose the game's own stripes (occupation, supply) while marked; they come
+  back when the area is removed.
 
 **The camera.** `focus_attention_area` moves only the camera of the player whose country is the
 scope (as vanilla `goto_state`), so it is safe in multiplayer. It centres the area and sets the
