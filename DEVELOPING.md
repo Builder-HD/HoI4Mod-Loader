@@ -71,6 +71,8 @@ src/engine_data.cpp           engine access for the data triggers (read-only gam
 src/engine_scope.cpp          engine access for scope blocks (vanilla iterator templates, child scopes)
 src/engine_army.cpp           engine access for armies (create army, set leader, characters)
 src/engine_conversion.cpp     engine access for equipment conversion (convert-from lists, generations)
+src/plugin_attention_area.cpp attention_area feature (outlines on the map, camera focus, the area selector)
+src/engine_attention.cpp      engine access for it (gradient borders, camera, province data) and its hooks
 src/native_script.h, .cpp     native effect/trigger API: schemas, registration, parsing, docs
 src/native_script_engine.cpp  native API engine binding (vtable clones, registries, Scope)
 src/native_scope_engine.cpp   native API engine binding of scope blocks and iterators
@@ -336,6 +338,9 @@ once, and from then on the hooks do what the game does and the feature switches 
 | `equipment_conversion` | `RebuildSources(line, tag)` (0x1419c2c30) | a production line's update (its vtable) | with `hoi4_loader_conversion_role_mode` and the type in "same role only": marks the rebuild (thread-local) for `CanConvert` and stores the designs left out for the tooltip |
 | `equipment_conversion` | `CProductionLineMilitaryItem` convert click (0x141de8e30) | the production view, main thread | with the role-mode flag: Shift+click (single player) toggles the mode at the next safe point instead of the game's click |
 | `equipment_conversion` | the convert button's tooltip (0x1419c2fd0) | the production view, main thread | with the role-mode flag: appends the mode line and the left-out designs (the game's own `std::string::append`) |
+| `attention_area` | `CGradientBorderManager::SetActiveLayers(pair)` (0x140fb5fc0) | every map mode setup | records the manager; when the drawn layers change, moves the loader's borders to the new top layer (the old one is rebuilt by the game's own rebuild) |
+| `attention_area` | `CGradientBorderManager::RebuildAll(bool)` (0x140fbeef0) | map mode changes, refreshes | the loader's borders out of their layer before, back in after |
+| `attention_area` | `CGradientBorderManager::Rebuild(type, bool)` (0x140fb7ff0) | the frame update for dirty layers, map modes | the same, only for the layer holding the loader's borders; otherwise one compare |
 
 The loader's own speed request, unpause and date refresh run from `OnMainThreadFrame`, outside
 the tick. Each hook logs once which thread it runs on (`time_control: ... runs on thread`), the

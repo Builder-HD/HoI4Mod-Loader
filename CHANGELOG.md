@@ -25,6 +25,20 @@ A–F; NOTES.md has the findings and test results behind each.
   links already taken down. A railway being removed entirely (dismantled to 0) keeps its badge,
   showing its current level in red, until it is gone; vanilla made no badge for it. Hooks the badge
   tooltip and right click; four new signatures.
+- **New feature `attention_area`** (engine tier; guard `hoi4_loader_feature_attention_area`; script
+  version unchanged). NOTES.md Part M. **Not tested in game yet.**
+  - `add_attention_area = { id color red green blue alpha width pulse glow area = { ... } }`
+    outlines provinces with the game's gradient borders, in every map mode. Each `area` block
+    selects provinces by `province`, `state`, `strategic_region` ids, then `owner`, `controller`,
+    `coastal`.
+  - `remove_attention_area = <id>|all`, `focus_attention_area = { id zoom }` (centre and zoom the
+    player's camera), trigger `has_attention_area = <id>`.
+  - Display only, not saved: mods add areas again after loading.
+  - Hooks three engine functions (DEVELOPING.md "Global hooks"); 15 new signatures (133 in all),
+    checked on 1.19.4.2 only.
+- **Native script API:** parameters of type `Number` (decimals) and `Block` (a nested
+  `key = { ... }` read by the game's own clause reader), `ParamSpec::repeat` (a key written several
+  times keeps every value), and up to 16 parameters per command (was 8).
 
 ## 0.6.0-beta (2026-11-13), script version 3
 

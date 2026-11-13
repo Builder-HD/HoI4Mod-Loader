@@ -22,4 +22,5 @@ hoi4_loader_init = {
 	clr_global_flag = hoi4_loader_plugin_province_building_removal
 	clr_global_flag = hoi4_loader_plugin_air_scenarios
 	clr_global_flag = hoi4_loader_plugin_equipment_conversion
+	clr_global_flag = hoi4_loader_plugin_attention_area
 }

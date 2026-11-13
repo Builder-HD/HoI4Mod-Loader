@@ -45,6 +45,7 @@ Current features:
 | `province_building_removal` | engine (needs `lifecycle`) | `hoi4_loader_plugin_province_building_removal` | a removal cross on the state view's province buildings (supply hub, naval base, bunkers); no script commands, see below |
 | `equipment_conversion` | engine (needs `lifecycle`) | `hoi4_loader_plugin_equipment_conversion` | tools a mod switches on with global flags: "Convert from Stockpile" from every earlier generation, a cost factor, "same role only"; off until a mod sets them, see below |
 | `air_scenarios` | engine | `hoi4_loader_plugin_air_scenarios` | new air scenarios (the 3D air animations on the map) for chosen missions, planes and countries, defined in `common/hoi4_loader_air_scenarios/`; no script commands, see below |
+| `attention_area` | engine (needs `lifecycle`) | `hoi4_loader_plugin_attention_area` | `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area`: outline any set of provinces on the map (colour, width, pulse, glow) and move the camera to it; display only, not saved, see below |
 
 On an unknown build the file tier stays on, the engine tier is off, and `loader.log` lists the
 disabled features and prints the exact line to add to `loader_config.ini`. A feature whose init
@@ -152,6 +153,7 @@ when the loader is missing or a feature is off. Without them, using a loader tri
 | a check that `province_building_removal` is on (it has no script commands) | `scripted_triggers/hoi4_loader_feature_province_building_removal.txt` |
 | `equipment_conversion` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_equipment_conversion.txt` |
 | `air_scenarios` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_air_scenarios.txt` |
+| `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area` | `scripted_triggers/hoi4_loader_feature_attention_area.txt` |
 
 - **Combinations:** a block that combines features needs each feature's stub and guard, e.g.
   `air_superiority` inside `strategic_region` needs both `region_control` and `region_scope`.
@@ -307,6 +309,14 @@ gets one line. Inside `NOT` that counts as true.
   region.
 - So write the parameter explicitly wherever the scope isn't certain, or wrap the trigger together
   with a condition that guarantees the scope.
+
+**Other parameter forms** (the docs file names them per parameter):
+- **number:** a decimal, `alpha = 0.8`, `width = 2.5`.
+- **may be written several times:** each value counts, `province = 994 province = 1038`. Lists in
+  braces (`province = { 994 1038 }`) are not read.
+- **block:** a nested `key = { ... }` with its own keys, e.g. `area = { owner = CHI coastal = yes }`.
+  A wrong key inside is the game's own "Unexpected token" error with file and line, and that use
+  does nothing. A country inside a block may be a tag or THIS/ROOT/FROM/PREV.
 
 ## Versions and compatibility
 
@@ -1407,3 +1417,56 @@ scenarios; nothing in the game state changes.
 
 **Without the loader:** the entries are ignored (a folder the game doesn't read); the game's own
 scenarios play. The mod's extra entities are unused. Guard: `hoi4_loader_feature_air_scenarios`.
+## Attention areas (`attention_area`)
+
+Outline any set of provinces on the map, in a colour, width and edge a mod chooses, and move the
+camera there. Display only: nothing in the game state changes, and nothing is saved.
+
+```
+add_attention_area = {
+    id = chi_coast          # the area's name; adding it again replaces it
+    color = cyan            # yellow (default) white black red green blue cyan magenta orange purple grey pink
+    # red = 0 green = 1 blue = 1 alpha = 0.8   # or the colour as numbers from 0 to 1 (override color)
+    width = 3               # border thickness (default 1)
+    pulse = no              # yes: the border pulses (the game's "highlighted")
+    glow = yes              # yes (default): soft fading edge; no: sharp edge
+    area = { owner = CHI coastal = yes }
+    area = { state = 124 }  # several area blocks add up
+}
+remove_attention_area = chi_coast      # or: remove_attention_area = all
+focus_attention_area = { id = chi_coast }              # zoom to fit
+focus_attention_area = { id = chi_coast zoom = 600 }   # a chosen camera height (larger = farther out)
+has_attention_area = chi_coast                         # trigger
+```
+
+**Selecting provinces** (each `area = { }` block):
+- `province = <id>`, `state = <id>`, `strategic_region = <id>`: any number of each, added up.
+  Without any of them the block starts from every land province (every province in a state).
+- `owner = <country>` (the state's owner), `controller = <country>` (the province's controller),
+  `coastal = yes/no`: keep the provinces that match all of them.
+- The selection is made when the effect runs, from the game state then. To follow later changes
+  (a front line), run the effect again (for example from `on_daily`/`on_weekly`): the area is
+  replaced.
+
+**How it looks.** The outline is drawn with the game's gradient borders, the same coloured borders
+scripted map modes use, and shows in every map mode. One outline goes around the whole area, not
+around each province. Inside the area the area's colour takes the place of the map's own colouring
+(for example the country colour in the political map). A province is in at most one area: when
+areas overlap, the later one wins. Which edge `glow = yes` and `glow = no` give, and how `width`
+looks, is still to be checked in game (NOTES.md M5).
+
+**The camera.** `focus_attention_area` moves only the camera of the player whose country is the
+scope (as vanilla `goto_state`), so it is safe in multiplayer. It centres the area and sets the
+camera height to fit it; the game's height limits apply.
+
+**Not saved.** Areas belong to the session: they are gone after loading a save or starting another
+game. Add them again from `on_startup` and from `on_game_loaded` (feature `game_loaded`). In
+multiplayer every machine runs the same effects, so every player sees the same areas.
+
+**Guard** native commands with `hoi4_loader_feature_attention_area = yes` (stub:
+`stubs/common/scripted_triggers/hoi4_loader_feature_attention_area.txt`). Without the loader the
+effects are dropped (nothing is marked) and `has_attention_area` is dropped too, so keep it next
+to the guard.
+
+An example mod with decisions (China's coast, Sweden's controlled coast, Gotland plus two
+provinces, clear all) is its own repository: "HoI4Mod Loader: Attention Areas".

@@ -278,6 +278,50 @@ bool RegionIsSea(int regionId, bool* sea);
 bool RegionHasState(int regionId, int stateId, bool* has);
 // The region holding the state's first province (0 if none).
 int RegionOfState(int stateId);
+// Valid state ids are 1 .. StateCount()-1 (0 without a game). Main thread or trigger reads.
+int StateCount();
+// The CProvince objects of a state or strategic region, in the engine's list order. False if the
+// area does not exist or the list layout is unresolved.
+bool AreaProvinceObjects(AreaKind kind, int id, std::vector<void*>* out);
+
+// --- Attention areas (attention_area; engine_attention.cpp, NOTES.md Part M) -------------------
+void ResolveAttention();
+bool HaveAttentionBorders();  // gradient border API, layer slots, allocation, rebuild hooks
+bool HaveAttentionCamera();   // UI, camera, centre on province, look-at, target height
+bool HaveProvinceData();      // province objects, ids, rects, controller, coastal, state owner
+// Province data (main thread or trigger reads; ids 1 .. ProvinceCount()-1).
+int ProvinceCount();
+int ProvinceIdOf(const void* province);      // CProvince -> id, 0 if unreadable
+bool ProvinceIsCoastal(int id);
+int ProvinceController(int id);              // tag, 0 if unknown
+int StateOwner(int stateId);                 // tag, 0 if unknown
+bool ProvinceRect(int id, int rect[4]);      // map pixels {x, y, width, height}
+// One drawn area: the look and the provinces (ids, ascending).
+struct AttentionLook {
+    float r = 1, g = 1, b = 0, a = 1;
+    float width = 1;     // border thickness (outline mode)
+    bool pulse = false;  // the engine's "highlighted" pulsing
+    bool glow = true;    // the engine's soft gradient (no fixed thickness)
+};
+struct AttentionDraw {
+    AttentionLook look;
+    std::vector<int> provinces;
+};
+// Queues the three hooks (layer pair, rebuild all, rebuild one). onFault: a fault in the loader's
+// part switched the drawing off for the session. Call from the feature's init.
+bool HookAttention(void (*onFault)(const char* where));
+// Main thread, at a safe point: replaces what is drawn (empty: nothing). Borders go into the
+// layer the map currently draws (NOTES.md M5); they are re-added after the game rebuilds it.
+void SetAttentionDraw(const std::vector<AttentionDraw>& areas);
+// Main thread, every frame (cheap): draws wanted areas once the map's layers are known.
+void AttentionTick();
+// The game entry: forget the borders of the previous game without touching them.
+void ForgetAttentionDraw();
+// Main thread, at a safe point: centre the camera on the box (map pixels) and set the target
+// height (height <= 0: fit the box, times fitFactor). `ref` and `ref2` are provinces of the area
+// used to calibrate the map -> camera mapping through the game's own centre-on-province. False if
+// not possible now (no game UI).
+bool FocusCamera(const int box[4], int ref, int ref2, float height, float fitFactor);
 
 // --- Railways (railways; engine_railway.cpp, NOTES.md Part H) ---------------------------------
 // Main thread only: the effect that uses them runs there, and DowngradeRailway writes game state.

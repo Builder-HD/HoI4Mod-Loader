@@ -20,7 +20,7 @@ bool g_finalized = false;
 NativeBackend* g_backend = nullptr;  // set by NativeScriptFinalize; resolves country tags at parse time
 bool g_timing = false;
 
-const size_t kMaxParams = 8;  // runtime argument resolution uses a fixed stack array
+const size_t kMaxParams = 16;  // runtime argument resolution uses a fixed stack array
 
 const char* KindName(CommandKind k) { return k == CommandKind::Effect ? "effect" : "trigger"; }
 const char* AKind(CommandKind k) { return k == CommandKind::Effect ? "an effect" : "a trigger"; }
@@ -40,6 +40,8 @@ const char* TypeName(ParamType t) {
         case ParamType::Choice: return "choice";
         case ParamType::Token: return "name";
         case ParamType::Text: return "text";
+        case ParamType::Number: return "number";
+        case ParamType::Block: return "block";
         default: return "key";
     }
 }
@@ -78,10 +80,22 @@ std::string ChoiceText(const char* choices, int index) {
     return "";
 }
 
-std::string CheckParams(const std::vector<ParamSpec>& params) {
-    if (params.size() > kMaxParams) return "at most 8 parameters";
+std::string CheckParams(const std::vector<ParamSpec>& params, bool inBlock = false) {
+    if (params.size() > kMaxParams) return "at most 16 parameters";
     for (size_t i = 0; i < params.size(); ++i) {
         const ParamSpec& p = params[i];
+        if (p.repeat && p.type != ParamType::Int && p.type != ParamType::Block)
+            return std::string("only int and block parameters can repeat ('") + p.name + "')";
+        if (p.type == ParamType::Block) {
+            if (inBlock) return std::string("block parameter '") + p.name + "' cannot be nested in a block";
+            if (!p.block || p.block->empty()) return std::string("block parameter '") + p.name + "' needs its keys";
+            std::string why = CheckParams(*p.block, true);
+            if (!why.empty()) return std::string("in block '") + p.name + "': " + why;
+        } else if (p.block) {
+            return std::string("parameter '") + p.name + "' has keys but is not a block";
+        }
+        if (inBlock && p.fromScope != ScopeDefault::None)
+            return std::string("key '") + p.name + "' inside a block cannot come from scope";
         if (!ValidIdentifier(p.name)) return "parameter names must be 1-64 characters of a-z 0-9 _";
         for (size_t j = 0; j < i; ++j)
             if (strcmp(p.name, params[j].name) == 0) return std::string("duplicate parameter '") + p.name + "'";
@@ -138,9 +152,19 @@ Command* NewCommand(CommandKind kind, const char* feature, const char* name, con
         c->paramNames.push_back(p.name);
         c->choiceStorage.push_back(p.choices ? p.choices : "");
     }
-    for (size_t i = 0; i < params.size(); ++i)
-        c->params.push_back({c->paramNames[i].c_str(), params[i].type, params[i].required, params[i].fromScope,
-                             params[i].choices ? c->choiceStorage[i].c_str() : nullptr, params[i].reserved});
+    c->blocks.assign(params.size(), nullptr);
+    for (size_t i = 0; i < params.size(); ++i) {
+        ParamSpec p{c->paramNames[i].c_str(), params[i].type, params[i].required, params[i].fromScope,
+                    params[i].choices ? c->choiceStorage[i].c_str() : nullptr, params[i].reserved};
+        p.repeat = params[i].repeat;
+        if (params[i].type == ParamType::Block && params[i].block) {
+            // The sub-schema as its own (unregistered) command: the binding parses blocks with it.
+            c->blocks[i] = NewCommand(CommandKind::Effect, feature, (std::string(name) + "." + params[i].name).c_str(), help,
+                                      Form::Block, *params[i].block, 0);
+            p.block = &c->blocks[i]->params;
+        }
+        c->params.push_back(p);
+    }
     return c;
 }
 
@@ -170,6 +194,13 @@ std::string ScopeNames(uint32_t mask) {
 }
 
 std::string ParamUsage(const ParamSpec& p) {
+    if (p.type == ParamType::Block) {
+        std::string s = "{";
+        if (p.block)
+            for (const ParamSpec& k : *p.block)
+                if (!k.reserved) s += std::string(" ") + k.name + " = " + ParamUsage(k);
+        return s + " }";
+    }
     if (p.type == ParamType::Choice) {
         std::string c = p.choices;
         for (char& ch : c)
@@ -572,6 +603,14 @@ bool NativeFeatureComplete(const char* feature) {
 
 const std::vector<Command*>& NativeCommands() { return g_commands; }
 
+static std::string InternParams(Command& c, NativeBackend& backend) {
+    c.paramTokens.clear();
+    for (const ParamSpec& p : c.params) c.paramTokens.push_back(backend.Intern(p.name));
+    for (size_t i = 0; i < c.paramTokens.size(); ++i)
+        if (!c.paramTokens[i]) return std::string("cannot create a token for parameter '") + c.params[i].name + "'";
+    return "";
+}
+
 int NativeScriptFinalize(NativeBackend& backend, const std::wstring& docsPath) {
     g_backend = &backend;
     int registered = 0;
@@ -584,10 +623,9 @@ int NativeScriptFinalize(NativeBackend& backend, const std::wstring& docsPath) {
         } else if (backend.EngineHas(c->kind, c->token)) {
             reason = std::string("the game already has ") + AKind(c->kind) + " with this name";
         } else {
-            c->paramTokens.clear();
-            for (const ParamSpec& p : c->params) c->paramTokens.push_back(backend.Intern(p.name));
-            for (size_t i = 0; i < c->paramTokens.size() && reason.empty(); ++i)
-                if (!c->paramTokens[i]) reason = std::string("cannot create a token for parameter '") + c->params[i].name + "'";
+            reason = InternParams(*c, backend);
+            for (Command* b : c->blocks)
+                if (b && reason.empty()) reason = InternParams(*b, backend);
             if (reason.empty() && c->numeric && !c->compareKey.empty() && !(c->compareToken = backend.Intern(c->compareKey.c_str())))
                 reason = "cannot create a token for the compare key";
             c->childTokens.clear();
@@ -620,6 +658,21 @@ int NativeScriptFinalize(NativeBackend& backend, const std::wstring& docsPath) {
         Log(ok ? "Native script docs written to %ls" : "WARNING: cannot write native script docs to %ls", docsPath.c_str());
     }
     return registered;
+}
+
+static std::string ParamDoc(const ParamSpec& p, const char* indent) {
+    std::string s = std::string(indent) + "- `" + p.name + "`: " + TypeName(p.type);
+    if (p.type == ParamType::Choice) s += " (" + ParamUsage(p) + ")";
+    if (p.type == ParamType::Int && p.choices) s += " (a number or " + ParamUsage(p).substr(6) + ")";
+    if (p.type == ParamType::Country)
+        s += p.choices ? " (tag, THIS, ROOT, FROM, PREV or any)" : " (tag, THIS, ROOT, FROM or PREV)";
+    if (p.type == ParamType::Number) s += " (a decimal such as 0.5)";
+    if (p.type == ParamType::Block) s += " " + ParamUsage(p);
+    if (p.reserved) s += ", reserved: not supported yet (a parse error)";
+    else if (p.fromScope != ScopeDefault::None) s += std::string(", optional: from ") + DefaultName(p.fromScope);
+    else s += p.required ? ", required" : ", optional";
+    if (p.repeat) s += ", may be written several times";
+    return s + "\n";
 }
 
 std::string NativeScriptDocs() {
@@ -664,15 +717,9 @@ std::string NativeScriptDocs() {
             if (!c->params.empty()) {
                 s += "- Parameters:\n";
                 for (const ParamSpec& p : c->params) {
-                    s += std::string("  - `") + p.name + "`: " + TypeName(p.type);
-                    if (p.type == ParamType::Choice) s += " (" + ParamUsage(p) + ")";
-                    if (p.type == ParamType::Int && p.choices) s += " (a number or " + ParamUsage(p).substr(6) + ")";
-                    if (p.type == ParamType::Country)
-                        s += p.choices ? " (tag, THIS, ROOT, FROM, PREV or any)" : " (tag, THIS, ROOT, FROM or PREV)";
-                    if (p.reserved) s += ", reserved: not supported yet (a parse error)";
-                    else if (p.fromScope != ScopeDefault::None) s += std::string(", optional: from ") + DefaultName(p.fromScope);
-                    else s += p.required ? ", required" : ", optional";
-                    s += "\n";
+                    s += ParamDoc(p, "  ");
+                    if (p.type == ParamType::Block && p.block)
+                        for (const ParamSpec& k : *p.block) s += ParamDoc(k, "    ");
                 }
             }
             if (c->numeric) {
@@ -715,8 +762,37 @@ ParsedCommand* NativeNewParsed(const Command& cmd) {
     pc->cmd = &cmd;
     pc->args.resize(cmd.params.size());
     pc->storage.resize(cmd.params.size());
+    pc->lists.resize(cmd.params.size());
+    pc->children.resize(cmd.params.size());
     return pc;
 }
+
+bool NativeAddBlock(ParsedCommand& pc, size_t index, ParsedCommand* child, std::string* error) {
+    if (index >= pc.args.size() || pc.cmd->params[index].type != ParamType::Block) {
+        *error = "not a block parameter";
+        return false;
+    }
+    const ParamSpec& spec = pc.cmd->params[index];
+    if (!child || !NativeValidate(*child)) {
+        *error = std::string("the '") + spec.name + "' block is invalid (see the line above)";
+        return false;
+    }
+    std::vector<ParsedCommand*>& list = pc.children[index];
+    if (!spec.repeat) list.clear();
+    list.push_back(child);
+    ArgValue& v = pc.args[index];
+    v.blocks = &list;
+    v.present = true;
+    return true;
+}
+
+Args Args::block(size_t i, size_t k) const {
+    if (i >= n_ || !v_[i].blocks || k >= v_[i].blocks->size()) return Args(nullptr, 0);
+    const ParsedCommand* c = (*v_[i].blocks)[k];
+    return Args(c->args.data(), c->args.size());
+}
+
+int native_country(int code, const Scope& s) { return code == kCountryAny ? code : CountryFromKeyword(code, s); }
 
 bool NativeSetArg(ParsedCommand& pc, size_t index, const char* text, std::string* error) {
     if (index >= pc.args.size()) {
@@ -748,8 +824,26 @@ bool NativeSetArg(ParsedCommand& pc, size_t index, const char* text, std::string
                 return false;
             }
             v.i = (int)n;
+            if (spec.repeat) {
+                pc.lists[index].push_back(v.i);
+                v.ints = &pc.lists[index];
+            }
             break;
         }
+        case ParamType::Number: {
+            char* end = nullptr;
+            errno = 0;
+            double x = strtod(text, &end);
+            if (!*text || *end || errno == ERANGE || !(x >= -1000000.0 && x <= 1000000.0)) {
+                *error = std::string("'") + spec.name + "' expects a number such as 0.5, got '" + text + "'";
+                return false;
+            }
+            v.i = (int)(x * 1000.0 + (x < 0 ? -0.5 : 0.5));
+            break;
+        }
+        case ParamType::Block:
+            *error = std::string("'") + spec.name + "' expects a block: " + spec.name + " = { ... }";
+            return false;
         case ParamType::Bool:
             if (strcmp(text, "yes") == 0) v.b = true;
             else if (strcmp(text, "no") == 0) v.b = false;
@@ -1084,10 +1178,22 @@ std::string NativeTooltip(const ParsedCommand* pc, const void* engineScope, bool
         s += std::string(" ") + c.params[i].name + "=";
         switch (c.params[i].type) {
             case ParamType::Int:
+                if (pc->args[i].ints) {
+                    for (size_t k = 0; k < pc->args[i].ints->size(); ++k)
+                        s += (k ? "," : "") + std::to_string((*pc->args[i].ints)[k]);
+                    break;
+                }
                 s += IntWordIndex(pc->args[i].i) >= 0 ? ChoiceText(c.params[i].choices, IntWordIndex(pc->args[i].i))
                                                       : std::to_string(pc->args[i].i);
                 break;
             case ParamType::Bool: s += pc->args[i].b ? "yes" : "no"; break;
+            case ParamType::Number: {
+                char buf[32];
+                sprintf_s(buf, "%g", pc->args[i].i / 1000.0);
+                s += buf;
+                break;
+            }
+            case ParamType::Block: s += "{...}"; break;
             default: s += pc->args[i].s; break;
         }
     }

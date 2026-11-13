@@ -36,6 +36,7 @@ static Feature g_features[] = {
     {"province_building_removal", Tier::Engine, &ProvinceBuildingRemovalInit, "lifecycle", false, 0},
     {"air_scenarios", Tier::Engine, &AirScenariosInit, nullptr, false, 0},
     {"equipment_conversion", Tier::Engine, &EquipmentConversionInit, "lifecycle", false, 0},
+    {"attention_area", Tier::Engine, &AttentionAreaInit, "lifecycle", false, 0},
 };
 static int g_presentToken = 0;
 
