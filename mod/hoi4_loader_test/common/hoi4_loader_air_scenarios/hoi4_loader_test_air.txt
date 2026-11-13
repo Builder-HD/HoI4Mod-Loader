@@ -17,12 +17,14 @@
 # block or key matches anything. A matching entry plays instead of vanilla. An entry of the
 # same name in a later mod replaces this one.
 
-# Gunship orbit: CAS (one plane) for small_plane_cas_airframe_1 only.
+# Gunship orbit: CAS (one plane) for every small plane (archetype small_plane_airframe: designer CAS
+# planes are small_plane_airframe_N types). A mod would name its own type here instead, e.g.
+# equipment = { CAS_gunship_unique_1 }.
 hlt_air_gunship_orbit = {
 	entity = hlt_air_gunship_orbit_entity
 	slot = bomber_1_CAS
 	attacker = {
-		equipment = { small_plane_cas_airframe_1 }
+		equipment = { small_plane_airframe }
 	}
 }
 
