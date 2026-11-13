@@ -51,6 +51,7 @@ Addresses below are for orientation in the named build only. Code uses the signa
 | 1.19.3 | checksum-patched (game folder until 22:54) | `2d939e60d31aa15aeb70a9f6d4abd88b568b2f657990f0eeb9020e04f55221f8` |
 | **1.19.3** | **vanilla, from Steam "Verify integrity" at 23:01** | `7dc947be34970da1e1c787bcddbe7f62b610ff258aebf8f06aa8b348f3a031d5` |
 | **1.19.4.2** | **vanilla (`v1.19.4.2.2da5`), Steam update of 2026-11-05** | `bccc62909b6a1ec2c1d5a46ef18608e4d0c7cdc89ad341b7402a23c40f7a8037` |
+| **1.19.5** | **vanilla (`v1.19.5.0.7c6c`), Steam update of 2026-11-12** | `709f916afbebcfe64a26678702691aeb40945d206074c2a80de8e9d601fce148` |
 
 **Vanilla 1.19.3 verified (2026-10-12 23:01):**
 - After Steam's "Verify integrity", `hoi4.exe` is `v1.19.3.0.c01a`, the same size as the
