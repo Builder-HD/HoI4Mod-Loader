@@ -147,4 +147,5 @@ bool RailwaysInit();          // plugin_railways.cpp
 bool RailwayQueueInit();      // plugin_railways.cpp
 bool TimeControlInit();       // plugin_time_control.cpp
 bool ProvinceBuildingRemovalInit();  // plugin_province_buildings.cpp
+bool AirScenariosInit();      // plugin_air_scenarios.cpp
 bool EquipmentConversionInit();  // plugin_equipment_conversion.cpp

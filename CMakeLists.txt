@@ -54,6 +54,10 @@ add_library(hoi4_loader SHARED
     src/gui_patch.cpp
     src/plugin_province_buildings.cpp
     src/engine_conversion.cpp
+    src/engine_air.cpp
+    src/air_scenarios.cpp
+    src/air_scenarios.h
+    src/plugin_air_scenarios.cpp
     src/engine.h
     src/lifecycle.cpp
     src/lifecycle.h
@@ -116,4 +120,10 @@ if(HOI4_LOADER_BUILD_TESTS)
     target_compile_features(gui_patch_test PRIVATE cxx_std_17)
     target_compile_definitions(gui_patch_test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
     set_target_properties(gui_patch_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/$<0:>)
+
+    # air_scenarios without engine access: definition parser, mod list, matching (NOTES.md Part L).
+    add_executable(air_scenarios_test tests/air_scenarios_test.cpp src/air_scenarios.cpp)
+    target_compile_features(air_scenarios_test PRIVATE cxx_std_17)
+    target_compile_definitions(air_scenarios_test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    set_target_properties(air_scenarios_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/$<0:>)
 endif()
