@@ -4796,9 +4796,10 @@ Test mod decisions in the category "hoi4_loader test", guarded by
   the next entry; the fault path doesn't restore the previous speed; speed 10 can't be saved;
   two mode-1 pause callers unexamined; `ResolvePanel`'s memcmp without SEH.
 
-# Part L: air scenario variants (investigation)
+# Part L: air scenarios (investigation)
 
 Branch `feature/air-scenario-variants` (from `main`). Investigation only, nothing implemented.
+Revised on 2026-11-13 after GloomyJZ named what is needed (L2): new scenarios per mission and equipment.
 Feature request from GloomyJZ (Discord, 2026-11-11): air scenarios, the 3D animations on the map
 for air missions (patrols, dogfights, bombing runs, CAS), can't be extended: their list is in
 the exe. Addresses are from vanilla **1.19.4.2** and only for orientation.
@@ -4856,77 +4857,125 @@ the exe. Addresses are from vanilla **1.19.4.2** and only for orientation.
 - **Graphics only.** Scenarios read the game state but never write it. A different animation on
   each machine changes nothing in the game.
 
-## L2 What is possible
+### L1.3 Which scenario a mission plays, and the planes' equipment
 
-- **More animations per scenario: yes ("variants").**
-  - The loader can load extra templates for the same index from other entities, with the
-    game's own template loader: give it the index and, for that one call, the variant's name in
-    the name table.
-  - It keeps them for the session; when a scenario plays, it puts a random one of them in the
-    instance (the vanilla template or a variant).
-  - A variant uses the same node layout as its scenario (the switch above), so its mesh needs
-    the same attachment nodes and the same states (`pass` / `success` / `fail` or `default`).
-  - Everything else is free: the flight paths, the timing, the events and the particles.
-- **New scenario types: no, not as a general feature.** Which scenario a mission plays, the
-  plane counts per side and the node layout are all hardcoded per index. A new type would
-  need a new mission mapping in the engine. Variants cover the request: "you just can't add new
-  air scenarios/animations".
+- **The slot comes from the call site.** The game starts a scenario through
+  `FUN_1412dc9a0(manager, index, ...)` from 24 call sites in the mission handlers
+  (`0x1412cf5e5` ... `0x1412d82eb`) and once through `FUN_1412dcc20` (the console command,
+  `0x1402a2d99`). Each site passes its own index, mostly a constant:
+  - CAS: `bomber_1_CAS` (4);
+  - scouting: `scout_1_patrol`;
+  - V2: `missile_1_bombing`;
+  - kamikaze: 16 / 17;
+  - interception: `fighter_1_vs_bomber_1`;
+  - dogfights: 13 / 14;
+  - air supply: 19 / 20;
+  - transport interception: 18.
 
-## L3 Proposal
+  The `_3_` slots follow from the plane count. So "a scenario for CAS missions" means "a
+  scenario for the slot `bomber_1_CAS` (or `bomber_3_CAS`)".
+- **The equipment is known when the scenario starts.** `FUN_1412db6c0(instance, ..., attackers,
+  defenders, ...)` gets one list per side. For each attachment node it takes an element of its
+  side's list and passes it to `FUN_1412d1820` → `FUN_1412d8640` ("Failed to load entity of
+  internal airplane scene, no equipment type"). That function picks the plane model by the
+  `<tag>_<equipment>_entity` naming rule. So the elements are the planes' equipment. Still to
+  confirm in code: whether an element is the equipment type or the design, and how to read its
+  name (the loader already reads type names for equipment_conversion).
+- **The mission handlers pick the planes with their own random numbers** (`param_1[1]`,
+  graphics state, not the game's synced random). Nothing here writes game state.
+- **No free-form data in entities:** `game_data` in vanilla `.asset` files only holds known keys
+  (`hitmiss_effect`). A definition therefore needs its own file.
+- **The mod list:** the launcher writes `Documents\Paradox Interactive\Hearts of Iron IV\
+  dlc_load.json` (`"enabled_mods": ["mod/<name>.mod", ...]`, in load order). Each `.mod` file
+  names the mod's folder (`path=`). That is what the game itself loads, so the loader can read
+  the mods' definition files with plain file reads, without new engine signatures.
 
-**Feature `air_scenario_variants`** (engine tier, needs `lifecycle`; no script commands). It does
-nothing until a mod defines variant entities.
+## L2 What is possible (after GloomyJZ's requirements, 2026-11-13)
 
-**For modders:**
+GloomyJZ (who animates planes for a submod) needs:
+1. **new air scenarios** (their own entity, mesh and animation);
+2. **assigned to a mission type:** e.g. only for CAS missions;
+3. **limited to equipment:** e.g. only for `CAS_gunship_unique_1`, so a gunship's orbiting
+   animation never plays for ordinary CAS planes, and ordinary CAS planes don't use it.
+
+All three are possible:
+- **Mission type = the game's slot.** A new scenario names the slot it may play in, e.g.
+  `bomber_1_CAS`. It needs that slot's attachment nodes, because the game decides the plane
+  count and sides per slot (the template's node layout is hardcoded per index, L1.2).
+- **Equipment:** the start of a scenario sees the attacking planes' equipment (L1.3), so the
+  loader can choose a scenario whose equipment list matches.
+- **New scenario:** the loader builds a template for the new entity with the game's own
+  template loader (the slot's index, with the entity's name in the name table for that one call)
+  and puts it into the scenario instance instead of the vanilla template.
+
+Still not possible: new slots, i.e. scenarios for missions the game has no scenario for
+(e.g. naval strike, port strike), or other plane counts than the slot's.
+
+## L3 Proposal (revised; replaces the first variants-only idea)
+
+**Feature `air_scenarios`** (engine tier, needs `lifecycle`; no script commands). It does nothing
+until a mod defines scenarios.
+
+**Definition** (in a mod, one or more files):
 ```
-# gfx/entities/my_planes.asset
-entity = {
-    name = "fighter_1_vs_fighter_1_variant_1_entity"     # <scenario>_variant_<N>_entity, N = 1..16
-    pdxmesh = "my_dogfight_loop_mesh"                     # same nodes as the vanilla scenario
-    state = { name = "pass"    animation = "pass"    event = { time = 1.0 id = a_fire } ... }
-    state = { name = "success" animation = "success" ... }
-    state = { name = "fail"    animation = "fail"    ... }
+# common/hoi4_loader_air_scenarios/my_gunship.txt
+gunship_orbit = {
+    entity = gunship_orbit_entity          # the scenario's entity (the mod's gfx/entities/*.asset)
+    slot = bomber_1_CAS                    # where it may play: the game's scenario (mission + plane count)
+    equipment = { CAS_gunship_unique_1 }   # optional: only for these equipment types (or archetypes)
+    weight = 10                            # optional: chance against other matching scenarios (default 1)
 }
 ```
 
+The entity is written like vanilla's (e.g. `bomber_1_CAS_entity` in `units_planes.asset`): a
+pdxmesh with the slot's attachment nodes and the slot's states (`default` for CAS, patrol and
+bombing; `pass` / `success` / `fail` for fights).
+
 **Behaviour:**
-- **When variants are loaded:** at the manager's construction, right after the game's 21
-  templates.
-  - For each scenario, the loader looks for `<scenario>_variant_1_entity` …
-    `_variant_16_entity` with the entity lookup, which logs nothing.
-  - For each one found, it builds a template with the game's loader (the name table entry is
-    swapped for that call only, then restored).
-- **A variant is kept only if** its entity loads and its node counts (attackers, defenders)
-  equal the vanilla template's. Otherwise it is skipped with one `loader.log` line naming it.
-- **Picking:** each time a scenario plays, one of {vanilla, its variants} at equal chance, with
-  the loader's own random numbers (not the game's synced ones: graphics only).
-  - To get only the variants, a mod also replaces the vanilla entity.
-  - **Open:** weights.
+- **At startup:** the loader reads `dlc_load.json` and the enabled mods' `.mod` files, then every
+  `common/hoi4_loader_air_scenarios/*.txt` of each mod in load order. A file of the same name in a
+  later mod replaces an earlier one, as the game does.
+- **When the game builds its templates:** the loader builds one per definition with the game's
+  own loader. Kept only if its entity loads and its node counts equal the slot's; otherwise it
+  is skipped with a `loader.log` line naming the definition and the reason.
+- **When a scenario starts** (slot X, attacking equipment E):
+  - candidates are the definitions for slot X whose `equipment` includes every attacking plane's
+    type (or its archetype), or that have no `equipment`;
+  - with candidates, one is picked by `weight`; without any, vanilla plays.
+- **Picking uses the loader's own random numbers.** It's graphics only, so in multiplayer
+  different machines may pick different scenarios with no effect on the game.
 - **Fail-safe:**
-  - every piece is found by signature or code shape, cross-checked (the table count 21 from
-    the console helper's bound; the loader's `lea` to the same table; the instance's template
-    field at `+8` from the constructor);
-  - SEH around both hooks;
-  - any fault logs once and returns to vanilla (no swap).
-  - Variant templates are kept for the whole session and never freed, so no instance can point
-    at a freed one.
-- **Multiplayer:** graphics only. Different machines may show different variants; nothing in the
-  game state differs.
+  - signatures and code shapes, cross-checked (the table count 21 from the console helper's
+    bound; the loader's `lea` to the same table; the instance's template field at `+8` from the
+    instance constructor);
+  - SEH around both hooks; any fault logs once and returns to vanilla;
+  - templates are kept for the session and never freed;
+  - bad definition files are logged (file and line) and skipped.
 - **Saves:** nothing is saved.
 
-**Hooks:** the manager constructor (after it: load the variants) and the instance constructor
-(after it: swap `instance+8`). The second runs on the map's update path; to check: its thread
-(log it once).
+**Hooks:**
+- the manager constructor (after it: build the templates);
+- the scenario start `FUN_1412db6c0` (before it: swap `instance+8`).
 
-**Effort:** about 1-2 days. **Risk:** low (graphics only, the game's own loader, one field swapped).
+**Testing:** the console command `airc <slot> <result> <province> <state> <state> <equipment>
+<equipment> <tags>` plays a slot with chosen equipment, so a definition can be checked on demand.
+The test mod gets a CAS definition limited to one equipment type, using a copy of vanilla's CAS
+mesh with a different event timing.
+
+**Effort:** about 3 days. **Risk:** low (graphics only; the game's own template loader; one field swapped).
 
 ## L4 Open
 
-- **Approval** of L3: the name `air_scenario_variants`, the naming convention
-  `<scenario>_variant_<N>_entity` (N 1..16), equal chance, no weights for now.
-- Whether the manager is built once per session or per game (the variants follow it either way).
-- **In game:**
-  - the test mod gets one variant (e.g. a copy of `fighter_1_vs_fighter_1` with another
-    animation, or vanilla's own mesh with different events), shown through the console command
-    `airc fighter_1_vs_fighter_1 pass <province> ...`;
-  - GloomyJZ can test with real animations.
+- **Approval** of L3:
+  - the name `air_scenarios`;
+  - the folder `common/hoi4_loader_air_scenarios/`;
+  - the keys `entity`, `slot`, `equipment`, `weight`;
+  - **matching definitions replace vanilla**; vanilla plays only if none match. Alternative: vanilla
+    takes part with weight 1.
+- **Equipment matching:** "every attacking plane's type is listed" (archetype names allowed),
+  or "at least one".
+- **To confirm while implementing:** the element type of the equipment lists (L1.3); whether
+  the manager is built once per session or per game; the thread of the scenario start.
+- **Later, if wanted:** a script effect `play_air_scenario` to play a scenario (vanilla or a
+  mod's) at a province from events or decisions (the console command's path).
+- **Older builds:** unchecked, as for the other 1.19.4.2 features.
