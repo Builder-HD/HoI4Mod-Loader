@@ -4,7 +4,7 @@ Release versions name the DLL package. The script version is the number script r
 `global.hoi4_loader_version` (MODDING.md "Versions and compatibility"). Development went in parts
 A–F; NOTES.md has the findings and test results behind each.
 
-## Unreleased
+## 0.6.0-beta (2026-11-13), script version 3
 
 - **New feature `air_scenarios`** (engine tier; guard `hoi4_loader_feature_air_scenarios`; no
   script commands; script version unchanged). NOTES.md Part L.
@@ -20,8 +20,8 @@ A–F; NOTES.md has the findings and test results behind each.
   - Test mod: four entries built from vanilla's meshes (a CAS orbit, two dogfights, an
     interception).
 - **Game 1.19.5** (`v1.19.5.0.7c6c`, Steam update of 2026-11-12) is supported: its hash is in
-  `loader_config.ini`. All 109 signatures and anchors and all 59 code shapes match (checked
-  offline on a copy); no code changes were needed.
+  `loader_config.ini`. Every signature, anchor and code shape of this release matches (checked
+  offline on a copy, as on 1.19.4.2); no code changes were needed.
 - **Game 1.19.2** (vanilla and checksum-patched) is now listed in `loader_config.ini`, from the
   hashes recorded in October. Features added since were not re-checked there; any whose
   signatures don't match stay off.

@@ -314,7 +314,7 @@ There are two version numbers:
 
 | Number | Where | Changes when |
 |---|---|---|
-| **Release** (`0.5.0-beta`) | zip name, `CHANGELOG.md`, first line of `loader.log` | every published build |
+| **Release** (`0.6.0-beta`) | zip name, `CHANGELOG.md`, first line of `loader.log` | every published build |
 | **Script version** (`global.hoi4_loader_version`, now **3**) | script, `loader.log` | something script-visible that already existed changes or goes away |
 
 **What raises the script version:** removing or renaming a command, a parameter, a guard
@@ -344,7 +344,7 @@ e.g. `check_variable = { global.hoi4_loader_version > 2 }`.
 - **Deprecation before removal.** A command or parameter that is to go away first keeps working
   for at least one more release.
   - While it is deprecated, `loader.log` says so once per session and names the replacement,
-    and MODDING.md and `CHANGELOG.md` mark it. Nothing is deprecated in 0.5.
+    and MODDING.md and `CHANGELOG.md` mark it. Nothing is deprecated in 0.6.
   - It is removed in a later release, and that release raises the script version.
   - During 0.x the window is one release; from 1.0 on it is one major version.
 - **Saves.** The loader stores nothing outside vanilla flags and variables (e.g. `hoi4_srn_*`),
