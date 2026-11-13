@@ -867,6 +867,52 @@ static const size_t kCodeConvVariantNameCall = 7;
 CODE(kCodeConvListTypeName, "48 8D 15 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8D 55 ?? 48 8B C8 E8")
 static const size_t kCodeConvListTypeNameDisp = 0xf;
 
+// --- Air scenarios (air_scenarios, NOTES.md Part L) ------------------------------------------
+// Checked on 1.19.4.2 (v1.19.4.2.2da5) and 1.19.5 (v1.19.5.0.7c6c); addresses are 1.19.4.2.
+// The scenario manager's constructor: one template per scenario slot, manager+[disp8 +3] + 8*i,
+// i = 0 .. imm8 +0x35 (0x15 = 21 slots): template = alloc(imm32 +5, 0x40) (call at +9), then
+// load(template, i) (call at +0x20). (0x1412d0eff)
+SIG(kSigAirTemplates, "48 8D ?? ?? B9 ?? 00 00 00 E8 ?? ?? ?? ?? 48 89 84 24 ?? ?? ?? ?? 48 85 C0 74 ?? 8B D3 48 8B C8 E8 ?? ?? ?? ?? EB ?? 49 8B C4 48 89 07 FF C3 48 83 C7 08 83 FB ?? 7C")
+static const size_t kSigAirTemplatesDisp = 3, kSigAirTemplateSizeImm = 5, kSigAirAllocCall = 9, kSigAirLoaderCall = 0x20,
+                    kSigAirSlotCountImm = 0x35;
+// Playing a scenario (the mission handlers' common path): instance = new_instance(manager, ...,
+// slot, ...) (call at +0xa), then start(instance, ..., attacker designs, defender designs, ...)
+// (call at +0x3c). (0x1412dcbb6)
+SIG(kSigAirSpawn, "44 89 74 24 28 48 89 44 24 20 E8 ?? ?? ?? ?? 48 8B 8C 24 ?? ?? ?? ?? 4C 8B 8C 24 ?? ?? ?? ?? 4C 8B 84 24 ?? ?? ?? ?? 48 8B 94 24 ?? ?? ?? ?? 4C 89 64 24 28 48 89 4C 24 20 48 8B C8 E8")
+static const size_t kSigAirSpawnInstanceCall = 0xa, kSigAirSpawnStartCall = 0x3c;
+// In the template loader (SigFindIn): template+0 = slot, the entity at template+[disp8 +6], the
+// attacker nodes at +[disp8 +0xa] and the defender nodes at +[disp8 +0x14] (CPdxArrays, count at
+// +0xc); the entity database (call at +0x1b); the slot's name = [image base (lea at +0x23) +
+// slot*8 + disp32 +0x2e] (the name table; "_entity" is appended). (0x1412cfcf7)
+CODE(kCodeAirLoaderHead, "44 89 31 48 89 59 ?? 48 83 C1 ?? E8 ?? ?? ?? ?? 90 49 8D 4F ?? E8 ?? ?? ?? ?? 90 E8 ?? ?? ?? ?? 4C 8B E0 48 8D 05 ?? ?? ?? ?? 4A 8B 94 F0 ?? ?? ?? ??")
+static const size_t kCodeAirEntityDisp = 6, kCodeAirAttackersDisp = 0xa, kCodeAirDefendersDisp = 0x14,
+                    kCodeAirDatabaseCall = 0x1b, kCodeAirImageBaseLea = 0x23, kCodeAirNameTableDisp = 0x2e;
+// ... then (SigFindIn) entity = lookup(database, name + "_entity") (call at +0xb), stored at
+// template+[disp8 +0x13]. (0x1412cfe2b)
+CODE(kCodeAirLoaderLookup, "48 0F 47 95 ?? ?? ?? ?? 49 8B CC E8 ?? ?? ?? ?? 49 89 47 ?? 48 85 C0")
+static const size_t kCodeAirLookupCall = 0xb, kCodeAirLookupEntityDisp = 0x13;
+// The instance constructor (SigFindIn): instance+[disp8 +0x24] = manager+[disp8 +0xd] + 8*slot,
+// the slot's template. (0x1412d1e76)
+CODE(kCodeAirInstance, "48 63 44 24 ?? 48 8D 4B ?? 4C 8B 54 C6 ?? 48 8B 44 24 ?? 48 89 43 ?? 8B 44 24 ?? 89 43 ?? 48 89 33 4C 89 53 ??")
+static const size_t kCodeAirInstanceTemplatesDisp = 0xd, kCodeAirInstanceTemplateDisp = 0x24;
+// The start function itself (hooked): instance->[disp8 +0x39] (the template) ->[disp8 +0x4b]
+// (its entity) is instantiated first. (0x1412db6c0)
+CODE(kCodeAirStart, "48 8B C4 48 89 58 10 4C 89 40 18 55 56 57 41 54 41 55 41 56 41 57 48 8D A8 ?? ?? ?? ?? 48 81 EC ?? ?? ?? ?? 0F 29 70 ?? 4D 8B E1 4D 8B F8 4C 8B EA 48 8B F9 33 F6 48 8B 49 ?? 45 33 C9 BA 07 00 00 00 41 B8 06 00 00 00 48 8B 49 ??")
+static const size_t kCodeAirStartTemplateDisp = 0x39, kCodeAirStartEntityDisp = 0x4b;
+// A function the start calls per attachment node (found among its calls): the plane's model
+// from its design: creator(design) (call at +0x20), then model(scene, design, creator) (call at
+// +0x2f). (0x1412d1820)
+CODE(kCodeAirAttach, "40 55 53 56 57 41 54 48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? 48 8B F1 49 8B F9 48 8B 4D ?? 4C 8B E2 E8 ?? ?? ?? ?? 48 8B 55 ?? 4C 8B C0 48 8B CE E8")
+static const size_t kCodeAirAttachCreatorCall = 0x20, kCodeAirAttachModelCall = 0x2f;
+// creator(design): &design->creator tag (disp8 +6, again at +0xb), the tag that picks the plane
+// model (<tag>_<equipment>_entity). Function start. (0x140c323c0)
+CODE(kCodeAirCreator, "48 83 EC 28 83 79 ?? 00 48 8D 41 ?? 7F")
+static const size_t kCodeAirCreatorTagDisp = 6, kCodeAirCreatorTagDisp2 = 0xb;
+// In model() (SigFindIn), its error message: design->[disp32 +3] (the equipment type) + disp8
+// +0xa (the type's name, std::string). (0x1412d8739)
+CODE(kCodeAirModelType, "48 8B 8F ?? ?? ?? ?? 48 83 C1 ?? 48 8D 54 24")
+static const size_t kCodeAirDesignTypeDisp = 3, kCodeAirTypeNameDisp = 0xa;
+
 #undef CODE
 #undef SIG
 #undef ANCHOR
