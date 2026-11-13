@@ -74,19 +74,32 @@ static bool GetDocumentsDir(wchar_t* out, DWORD cch) {
     return n && n < cch && wcscat_s(out, cch, L"\\Documents") == 0;
 }
 
+// The game's user folder, <Documents>\Paradox Interactive\Hearts of Iron IV (created if missing),
+// where the log and the generated docs go and dlc_load.json is read. HOI4_LOADER_USER_DIR replaces
+// it: for the smoke test's stand-in executables, so they never overwrite the game's loader.log.
+static bool GetUserDir(wchar_t* out, DWORD cch) {
+    DWORD n = GetEnvironmentVariableW(L"HOI4_LOADER_USER_DIR", out, cch);
+    if (n && n < cch) {
+        CreateDirectoryW(out, nullptr);
+        return true;
+    }
+    if (!GetDocumentsDir(out, cch)) return false;
+    if (wcscat_s(out, cch, L"\\Paradox Interactive") != 0) return false;
+    CreateDirectoryW(out, nullptr);
+    if (wcscat_s(out, cch, L"\\Hearts of Iron IV") != 0) return false;
+    CreateDirectoryW(out, nullptr);
+    return true;
+}
+
 std::wstring LoaderOutputPath(const wchar_t* fileName) {
     wchar_t dir[MAX_PATH * 2];
-    if (!GetDocumentsDir(dir, MAX_PATH)) return L"";
-    return std::wstring(dir) + L"\\Paradox Interactive\\Hearts of Iron IV\\" + fileName;
+    if (!GetUserDir(dir, ARRAYSIZE(dir))) return L"";
+    return std::wstring(dir) + L"\\" + fileName;
 }
 
 static void OpenLog() {
     wchar_t path[MAX_PATH * 2];
-    if (!GetDocumentsDir(path, MAX_PATH)) return;
-    wcscat_s(path, L"\\Paradox Interactive");
-    CreateDirectoryW(path, nullptr);
-    wcscat_s(path, L"\\Hearts of Iron IV");
-    CreateDirectoryW(path, nullptr);
+    if (!GetUserDir(path, MAX_PATH)) return;
     size_t dirLen = wcslen(path);
     wcscat_s(path, L"\\loader.log");
     g_log = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);

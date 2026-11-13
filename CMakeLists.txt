@@ -52,6 +52,9 @@ add_library(hoi4_loader SHARED
     src/engine_time.cpp
     src/engine_province_buildings.cpp
     src/gui_patch.cpp
+    src/shader_patterns.cpp
+    src/shader_patterns_collect.cpp
+    src/shader_builtins.cpp
     src/plugin_province_buildings.cpp
     src/engine_conversion.cpp
     src/engine_air.cpp
@@ -128,4 +131,10 @@ if(HOI4_LOADER_BUILD_TESTS)
     target_compile_features(air_scenarios_test PRIVATE cxx_std_17)
     target_compile_definitions(air_scenarios_test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
     set_target_properties(air_scenarios_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/$<0:>)
+
+    # Shader patterns (attention_area fill/outline patterns), pure text, against vanilla-shaped shader files.
+    add_executable(shader_patterns_test tests/shader_patterns_test.cpp src/shader_patterns.cpp src/shader_builtins.cpp)
+    target_compile_features(shader_patterns_test PRIVATE cxx_std_17)
+    target_compile_definitions(shader_patterns_test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    set_target_properties(shader_patterns_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/$<0:>)
 endif()

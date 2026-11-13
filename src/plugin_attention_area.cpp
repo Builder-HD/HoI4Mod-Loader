@@ -1,14 +1,13 @@
-// attention_area feature (NOTES.md Part M): mark provinces on the map with an outline in a chosen
-// colour, width and effect, and move the camera to them.
+// attention_area feature (NOTES.md Part M): mark provinces on the map, every look a shader, and
+// move the camera to them.
 //
-//   add_attention_area = { id = <name> style = outline|band|stripes color = <name> red/green/blue/alpha = <0..1>
-//                          width = <number> pulse = yes/no glow = yes/no area = { ... } area = { ... } }
+//   add_attention_area = { id = <name> line = <shader> fill = <shader> color = <name>
+//                          red/green/blue/alpha = <0..1> area = { ... } area = { ... } }
 //
-// style = outline (the default): the game's thin province group outline (as construction mode marks
-// build targets), in every map mode. style = band: the gradient border band (width, pulse and glow
-// apply to it), drawn in the political map's border layer; special map modes (supply) draw it badly.
-// style = stripes: the diagonal stripes of occupation and battle-plan orders (the map's secondary
-// colour texture, NOTES.md M9), in every map mode; alpha is the stripe strength.
+// line: the shader for the area's outline (the game's thin province group outline, drawn by
+// border.shader); fill: the shader for its provinces (through the map's stripe texture, drawn by
+// secondary_color_mask). Built-ins: lines solid, pulse, dashed; fills stripes, solid, band, glow;
+// mods add or replace shaders (shader_patterns.h, NOTES.md M12). Neither given: line = solid.
 //   remove_attention_area = <name> | all
 //   focus_attention_area = { id = <name> zoom = <camera height> }     (the player's country only)
 //   has_attention_area = <name>                                        (trigger)
@@ -20,7 +19,7 @@
 //
 // Areas are display state of this session: not saved, dropped when another game is entered (mods
 // add them again from on_startup / on_game_loaded). The drawing happens on the main thread at the
-// next frame (Engine::SetAttentionDraw).
+// next frame.
 #include <math.h>
 #include <string.h>
 
@@ -32,6 +31,7 @@
 #include "lifecycle.h"
 #include "loader.h"
 #include "native_script.h"
+#include "shader_patterns.h"
 
 namespace {
 
@@ -41,8 +41,10 @@ const float kFitFactor = 1.6f;  // camera height per pixel of the box's larger s
 struct Area {
     int token = 0;          // id (engine token)
     std::string name;
-    int style = 0;          // 0 outline (group outline), 1 band (gradient borders), 2 stripes
-    Engine::AttentionLook look;
+    int lineId = 0;         // line shader id (0: no outline)
+    int fillId = 0;         // fill shader id (0: no fill)
+    float r = 1, g = 0.9f, b = 0.1f, a = 1;  // the area's colour
+    std::vector<std::pair<std::string, float>> vars;  // shader_variables given in script
     std::vector<int> provinces;
     int box[4] = {};        // bounding box in map pixels {x, y, w, h}
     int ref = 0, ref2 = 0;  // camera calibration provinces
@@ -50,9 +52,9 @@ struct Area {
 };
 
 std::vector<Area> g_areas;  // written by effects (main thread), read by the trigger
-std::vector<Engine::OutlineRef> g_outlines;  // the outlines shown for style = outline areas
+std::vector<Engine::OutlineRef> g_outlines;  // the outlines shown for areas with a line
 const int kAreaPriority = 90;                // below the railway hover mark (100)
-volatile long g_noColourLogged = 0, g_noOutlineLogged = 0, g_noStripesLogged = 0;
+volatile long g_noColourLogged = 0, g_noOutlineLogged = 0, g_noStripesLogged = 0, g_unpatchedLogged = 0;
 bool g_dirty = false;
 int g_focusToken = 0;
 float g_focusHeight = 0;
@@ -139,8 +141,8 @@ const float kRgb[][3] = {{1, 0.9f, 0.1f}, {1, 1, 1},  {0, 0, 0},       {0.9f, 0.
                          {0, 0.9f, 0.9f}, {0.9f, 0, 0.9f}, {1, 0.55f, 0}, {0.55f, 0.2f, 0.85f}, {0.6f, 0.6f, 0.6f}, {1, 0.5f, 0.7f}};
 
 // --- Parameters -------------------------------------------------------------------------------------
-enum AddParam { kId, kStyle, kColor, kRed, kGreen, kBlue, kAlpha, kWidth, kPulse, kGlow, kArea };
-enum AreaKey { kProvince, kState, kRegion, kOwner, kController, kCoastal };
+enum AddParam { kId, kLine, kFill, kColor, kRed, kGreen, kBlue, kAlpha, kVars, kArea };
+enum AreaKey { kProvince, kState, kRegion, kOwner, kController, kCoastal, kRandomProvinces };
 
 ParamSpec Repeat(const char* name) {
     ParamSpec p{name, ParamType::Int, false};
@@ -148,14 +150,68 @@ ParamSpec Repeat(const char* name) {
     return p;
 }
 
+ParamSpec RepeatState() {
+    ParamSpec p = Repeat("state");
+    p.choices = "this";  // the state in scope (random_owned_state = { add_attention_area = { ... state = this } })
+    return p;
+}
+
 const std::vector<ParamSpec> kAreaKeys = {
     Repeat("province"),
-    Repeat("state"),
+    RepeatState(),
     Repeat("strategic_region"),
     {"owner", ParamType::Country, false},
     {"controller", ParamType::Country, false},
     {"coastal", ParamType::Bool, false},
+    {"random_provinces", ParamType::Int, false},  // keep this many of the block's provinces, picked at random
 };
+
+// The random picks of random_provinces must come out the same on every machine in multiplayer, so
+// they come from a counter of add_attention_area runs (every machine runs the same effects in the
+// same order), not from the clock. Areas are not saved, so a fresh start needs no stored state.
+uint64_t g_addCount = 0;
+uint64_t Mix(uint64_t x) {  // splitmix64
+    x += 0x9E3779B97F4A7C15ull;
+    x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
+    x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
+    return x ^ (x >> 31);
+}
+
+// shader_variables = { <name> = <number> ... color = <name> }: the keys are every variable the
+// collected shaders declare (known before the effect is registered, so the game's own parser checks
+// them), plus color. Built once in AttentionAreaInit; the names must outlive the registration.
+std::vector<std::string> g_varNames;   // index i + 1 in g_varKeys
+std::vector<ParamSpec> g_varKeys;      // [0] color, then one Number per name
+
+void BuildVarKeys() {
+    for (ShaderPatterns::Kind k : {ShaderPatterns::Kind::Line, ShaderPatterns::Kind::Fill})
+        for (const ShaderPatterns::Pattern& p : ShaderPatterns::Patterns(k))
+            for (const ShaderPatterns::Var& v : p.vars)
+                if (v.name != "color" && std::find(g_varNames.begin(), g_varNames.end(), v.name) == g_varNames.end())
+                    g_varNames.push_back(v.name);
+    std::sort(g_varNames.begin(), g_varNames.end());
+    g_varKeys.push_back({"color", ParamType::Choice, false, ScopeDefault::None, kColors});
+    for (const std::string& n : g_varNames) g_varKeys.push_back({n.c_str(), ParamType::Number, false});
+}
+
+ParamSpec VarsParam() {
+    ParamSpec p{"shader_variables", ParamType::Block, false};
+    p.block = &g_varKeys;
+    return p;
+}
+
+// A declared variable's value for an area: shader_variables, else the area's colour for
+// red/green/blue/alpha, else the declared default.
+float VarValue(const Area& a, const ShaderPatterns::Var& v) {
+    for (const auto& kv : a.vars)
+        if (kv.first == v.name) return kv.second < v.min ? v.min : kv.second > v.max ? v.max : kv.second;
+    if (v.name == "red") return a.r;
+    if (v.name == "green") return a.g;
+    if (v.name == "blue") return a.b;
+    if (v.name == "alpha") return a.a;
+    return v.def;
+}
+float VarNorm(const Area& a, const ShaderPatterns::Var& v) { return (VarValue(a, v) - v.min) / (v.max - v.min); }
 
 ParamSpec AreaParam() {
     ParamSpec p{"area", ParamType::Block, true};
@@ -200,19 +256,34 @@ void SelectArea(const Args& a, const Scope& scope, const std::vector<int>& state
             int p = a.at(kProvince, k);
             if (p > 0 && p < (int)n) in[p] = 1;
         }
-        for (size_t k = 0; k < a.count(kState); ++k) AddIds(Engine::AreaKind::State, a.at(kState, k), &in);
+        for (size_t k = 0; k < a.count(kState); ++k) {
+            int st = a.at(kState, k);
+            if (IntWordIndex(st) == 0) st = scope.stateId();  // `this`: 0 outside a state scope, which selects nothing
+            if (st > 0) AddIds(Engine::AreaKind::State, st, &in);
+        }
         for (size_t k = 0; k < a.count(kRegion); ++k) AddIds(Engine::AreaKind::StrategicRegion, a.at(kRegion, k), &in);
     }
     int owner = a.has(kOwner) ? native_country(a.i(kOwner), scope) : 0;
     int controller = a.has(kController) ? native_country(a.i(kController), scope) : 0;
     if ((a.has(kOwner) && owner <= 0) || (a.has(kController) && controller <= 0)) return;  // names no country here
+    std::vector<int> kept;
     for (size_t p = 1; p < n; ++p) {
         if (!in[p]) continue;
         if (owner && !Engine::IsSameCountry(Engine::StateOwner(stateOf[p]), owner)) continue;
         if (controller && !Engine::IsSameCountry(Engine::ProvinceController((int)p), controller)) continue;
         if (a.has(kCoastal) && Engine::ProvinceIsCoastal((int)p) != a.b(kCoastal)) continue;
-        (*out)[p] = 1;
+        kept.push_back((int)p);
     }
+    if (a.has(kRandomProvinces)) {  // a partial Fisher-Yates shuffle: the first `want` are the picks
+        size_t want = (size_t)std::max(0, a.i(kRandomProvinces));
+        uint64_t r = Mix(g_addCount * 0x100000001B3ull + kept.size());
+        for (size_t i = 0; i < want && i + 1 < kept.size(); ++i) {
+            r = Mix(r);
+            std::swap(kept[i], kept[i + (size_t)(r % (kept.size() - i))]);
+        }
+        if (want < kept.size()) kept.resize(want);
+    }
+    for (int p : kept) (*out)[p] = 1;
 }
 
 // Bounding box and the two calibration provinces: the one nearest the box centre, and the one
@@ -252,20 +323,47 @@ Area* FindArea(int token) {
 float Clamp01(double v) { return v < 0 ? 0.0f : v > 1 ? 1.0f : (float)v; }
 
 // --- Effects and trigger ----------------------------------------------------------------------------
+// A line / fill shader name -> its id (0 when not given). An unknown name falls back to the built-in
+// solid line or stripes fill, so the area still shows; logged once per name.
+int PatternId(ShaderPatterns::Kind kind, const Args& a, int param) {
+    if (!a.has(param)) return 0;
+    std::string name = a.key(param);
+    int id = ShaderPatterns::Id(kind, name);
+    if (id) return id;
+    bool line = kind == ShaderPatterns::Kind::Line;
+    static std::vector<std::string> logged;
+    if (std::find(logged.begin(), logged.end(), name) == logged.end()) {
+        logged.push_back(name);
+        Log("attention_area: no %s shader named '%s'; using '%s' (shaders: the built-ins and the enabled mods' "
+            "gfx/FX/hoi4_loader_patterns folders; see the shader_patterns lines at startup)",
+            line ? "line" : "fill", name.c_str(), line ? "solid" : "stripes");
+    }
+    return ShaderPatterns::Id(kind, line ? "solid" : "stripes");
+}
+
 void ExecAdd(const Args& a, const Scope& s) {
     Area area;
     area.token = a.i(kId);
     area.name = a.key(kId);
-    area.style = a.has(kStyle) ? a.i(kStyle) : 0;
+    area.lineId = PatternId(ShaderPatterns::Kind::Line, a, kLine);
+    area.fillId = PatternId(ShaderPatterns::Kind::Fill, a, kFill);
+    if (!a.has(kLine) && !a.has(kFill)) area.lineId = ShaderPatterns::Id(ShaderPatterns::Kind::Line, "solid");
     int c = a.has(kColor) ? a.i(kColor) : 0;
-    area.look.r = kRgb[c][0], area.look.g = kRgb[c][1], area.look.b = kRgb[c][2];
-    if (a.has(kRed)) area.look.r = Clamp01(a.num(kRed));
-    if (a.has(kGreen)) area.look.g = Clamp01(a.num(kGreen));
-    if (a.has(kBlue)) area.look.b = Clamp01(a.num(kBlue));
-    area.look.a = a.has(kAlpha) ? Clamp01(a.num(kAlpha)) : 1.0f;
-    area.look.width = a.has(kWidth) ? (float)std::max(0.0, std::min(a.num(kWidth), 100.0)) : 1.0f;
-    area.look.pulse = a.has(kPulse) && a.b(kPulse);
-    area.look.glow = !a.has(kGlow) || a.b(kGlow);
+    area.r = kRgb[c][0], area.g = kRgb[c][1], area.b = kRgb[c][2];
+    if (a.has(kRed)) area.r = Clamp01(a.num(kRed));
+    if (a.has(kGreen)) area.g = Clamp01(a.num(kGreen));
+    if (a.has(kBlue)) area.b = Clamp01(a.num(kBlue));
+    area.a = a.has(kAlpha) ? Clamp01(a.num(kAlpha)) : 1.0f;
+    if (a.has(kVars)) {
+        Args v = a.block(kVars, 0);
+        if (v.has(0)) {  // color inside the block
+            int vc = v.i(0);
+            area.r = kRgb[vc][0], area.g = kRgb[vc][1], area.b = kRgb[vc][2];
+        }
+        for (size_t i = 0; i < g_varNames.size(); ++i)
+            if (v.has((int)i + 1)) area.vars.push_back({g_varNames[i], (float)v.num((int)i + 1)});
+    }
+    ++g_addCount;
     std::vector<int> stateOf = ProvinceStates();
     std::vector<char> pick(stateOf.size(), 0);
     for (size_t k = 0; k < a.count(kArea); ++k) SelectArea(a.block(kArea, k), s, stateOf, &pick);
@@ -320,30 +418,55 @@ void ReleaseOutlines() {
 void Redraw() {
     ReleaseOutlines();
     Engine::ResetOutlineColours();
-    std::vector<Engine::AttentionDraw> draw;
     std::vector<Engine::StripeArea> stripes;
+    auto byte = [](float v) { return (uint32_t)(v * 255.0f + 0.5f); };
+    bool fillPatched = ShaderPatterns::Patched(ShaderPatterns::Kind::Fill);
+    bool linePatched = ShaderPatterns::Patched(ShaderPatterns::Kind::Line);
     for (size_t i = 0; i < g_areas.size(); ++i) {
         const Area& a = g_areas[i];
         if (a.provinces.empty()) continue;
-        if (a.style == 2 && Engine::HaveStripes()) {
-            auto byte = [](float v) { return (uint32_t)(v * 255.0f + 0.5f); };
+        if ((a.fillId && !fillPatched) || (a.lineId && !linePatched)) {
+            if (InterlockedExchange(&g_unpatchedLogged, 1) == 0)
+                Log("attention_area: a shader file was not patched (fill %d, line %d): such areas show plain stripes and a plain "
+                    "outline (logged once)", fillPatched, linePatched);
+        }
+        // Fill: the area's colour in the stripe texture, the fill shader's id in the alpha byte
+        // (unpatched: full-strength vanilla stripes). The texture is BGRA (byte 0 blue, byte 2 red).
+        if (a.fillId && Engine::HaveStripes()) {
             Engine::StripeArea s;
-            // The texture is BGRA: byte 0 blue, byte 2 red (first in-game test: red came out blue).
-            s.rgba = byte(a.look.b) | byte(a.look.g) << 8 | byte(a.look.r) << 16 | byte(a.look.a) << 24;
+            // Patched: the fill id in the alpha byte, the area's alpha in the colour's low bits
+            // (ShaderPatterns::FillTexel). Unpatched: the plain colour at full vanilla strength.
+            // Patched: the fill id in the alpha byte, the shader's four values in the colour bytes
+            // (its declared variables normalised, else the colour and alpha; FillTexelN).
+            const ShaderPatterns::Pattern& fp = ShaderPatterns::Patterns(ShaderPatterns::Kind::Fill)[(size_t)a.fillId - 1];
+            float n[4] = {a.r, a.g, a.b, a.a};
+            if (!fp.vars.empty())
+                for (int k = 0; k < 4; ++k) n[k] = k < (int)fp.vars.size() ? VarNorm(a, fp.vars[(size_t)k]) : 0.0f;
+            s.rgba = fillPatched ? ShaderPatterns::FillTexelN(a.fillId, n)
+                                 : byte(a.b) | byte(a.g) << 8 | byte(a.r) << 16 | 255u << 24;
             s.provinces = a.provinces;
             stripes.push_back(std::move(s));
+        } else if (a.fillId && InterlockedExchange(&g_noStripesLogged, 1) == 0) {
+            Log("attention_area: the stripe hook is not there: fills are not drawn");
+        }
+        // Line: one game outline in the area's colour, the line shader's id in the colour's alpha
+        // (unpatched: the plain outline in the area's colour).
+        if (!a.lineId) continue;
+        if (!Engine::HaveHighlight()) {
+            if (InterlockedExchange(&g_noOutlineLogged, 1) == 0)
+                Log("attention_area: the game's outline functions are not there: lines are not drawn");
             continue;
         }
-        if (a.style == 2 && InterlockedExchange(&g_noStripesLogged, 1) == 0)
-            Log("attention_area: the stripe hook is not there: style = stripes areas are drawn as outlines");
-        bool band = a.style == 1;
-        if (band || !Engine::HaveHighlight()) {
-            if (!band && InterlockedExchange(&g_noOutlineLogged, 1) == 0)
-                Log("attention_area: the game's outline functions are not there: style = outline areas are drawn as bands");
-            draw.push_back({a.look, a.provinces});
-            continue;
+        // Patched: the line id and the 4th value in the slot alpha; the first three values in rgb as
+        // they are (the declared variables, else the colour).
+        const ShaderPatterns::Pattern& lp = ShaderPatterns::Patterns(ShaderPatterns::Kind::Line)[(size_t)a.lineId - 1];
+        float lv[3] = {a.r, a.g, a.b}, l4 = a.a;
+        if (linePatched && !lp.vars.empty()) {
+            for (int k = 0; k < 3; ++k) lv[k] = k < (int)lp.vars.size() ? VarValue(a, lp.vars[(size_t)k]) : 0.0f;
+            l4 = lp.vars.size() > 3 ? VarNorm(a, lp.vars[3]) : 1.0f;
         }
-        int colour = Engine::OutlineColourId(a.look.r, a.look.g, a.look.b, a.look.a);
+        float alpha = linePatched ? ShaderPatterns::LineAlpha(a.lineId, l4) : a.a;
+        int colour = Engine::OutlineColourId(lv[0], lv[1], lv[2], alpha);
         if (colour < 0) {
             colour = Engine::OutlineWhiteId();
             if (colour < 0) colour = 10;  // palette colour 0
@@ -356,7 +479,6 @@ void Redraw() {
         if (Engine::CreateOutline(a.provinces, colour, priority, &ref)) g_outlines.push_back(ref);
         else Log("attention_area: the outline of '%s' could not be created", a.name.c_str());
     }
-    Engine::SetAttentionDraw(draw);
     if (Engine::HaveStripes()) Engine::SetStripes(stripes);
 }
 
@@ -378,7 +500,6 @@ void Frame() {
         g_dirty = false;
         Redraw();
     }
-    Engine::AttentionTick();
     if (g_focusPending) {
         g_focusPending = false;
         const Area* a = FindArea(g_focusToken);
@@ -404,6 +525,7 @@ void Frame() {
 
 void OnEntering() {
     g_areas.clear();
+    g_addCount = 0;  // every machine of a multiplayer game enters it fresh
     g_dirty = false;
     g_focusPending = false;
     g_hoverPath.clear();
@@ -411,47 +533,68 @@ void OnEntering() {
     Engine::HideHighlight();
     ReleaseOutlines();
     Engine::ResetOutlineColours();
-    Engine::ForgetAttentionDraw();
     Engine::ForgetStripes();
 }
 
-void OnFault(const char* where) { FeatureDeactivate(kFeature, where); }
-
 }  // namespace
 
+// The game's shader files as they are read (NOTES.md M10-M12): the line and fill shaders stitched in.
+static std::string PatchFillFile(const std::string& original) {
+    std::string out = ShaderPatterns::PatchFillShader(original, ShaderPatterns::Patterns(ShaderPatterns::Kind::Fill));
+    ShaderPatterns::SetPatched(ShaderPatterns::Kind::Fill, !out.empty());
+    Log("shader_patterns: standardfuncsgfx.fxh %s", out.empty() ? "NOT patched (secondary_color_mask not found as expected): fills show as plain stripes"
+                                                                 : "patched with the fill shaders");
+    g_dirty = true;  // areas drawn before this (none in practice: the map shaders load first) are redone
+    return out;
+}
+static std::string PatchLineFile(const std::string& original) {
+    std::string out = ShaderPatterns::PatchLineShader(original, ShaderPatterns::Patterns(ShaderPatterns::Kind::Line));
+    ShaderPatterns::SetPatched(ShaderPatterns::Kind::Line, !out.empty());
+    Log("shader_patterns: border.shader %s", out.empty() ? "NOT patched (its pixel shader main not found as expected): lines show as plain outlines"
+                                                         : "patched with the line shaders");
+    g_dirty = true;
+    return out;
+}
+
 bool AttentionAreaInit() {
-    if (!Engine::HaveAttentionBorders() || !Engine::HaveAttentionCamera() || !Engine::HaveProvinceData() ||
-        !Engine::HaveRegionData() || !Engine::HaveCountries()) {
-        Log("attention_area: engine pieces missing (borders %d, camera %d, provinces %d, regions %d)", Engine::HaveAttentionBorders(),
-            Engine::HaveAttentionCamera(), Engine::HaveProvinceData(), Engine::HaveRegionData());
+    if (!Engine::HaveAttentionCamera() || !Engine::HaveProvinceData() || !Engine::HaveRegionData() || !Engine::HaveCountries()) {
+        Log("attention_area: engine pieces missing (camera %d, provinces %d, regions %d)", Engine::HaveAttentionCamera(),
+            Engine::HaveProvinceData(), Engine::HaveRegionData());
         return false;
     }
     if (!MainThreadQueueAvailable()) {
         Log("attention_area: needs the main-thread frame hook; off");
         return false;
-    }    std::vector<ParamSpec> add = {
+    }
+    ShaderPatterns::Collect();  // the built-ins at least, so both patches always apply
+    BuildVarKeys();
+    if (!register_file_patch(L"gfx/FX/standardfuncsgfx.fxh", &PatchFillFile))
+        Log("shader_patterns: the standardfuncsgfx.fxh patch could not be registered: fills show as plain stripes");
+    if (!register_file_patch(L"gfx/FX/border.shader", &PatchLineFile))
+        Log("shader_patterns: the border.shader patch could not be registered: lines show as plain outlines");
+    std::vector<ParamSpec> add = {
         {"id", ParamType::Token, true},
-        {"style", ParamType::Choice, false, ScopeDefault::None, "outline|band|stripes"},
+        {"line", ParamType::Token, false},
+        {"fill", ParamType::Token, false},
         {"color", ParamType::Choice, false, ScopeDefault::None, kColors},
         {"red", ParamType::Number, false},
         {"green", ParamType::Number, false},
         {"blue", ParamType::Number, false},
         {"alpha", ParamType::Number, false},
-        {"width", ParamType::Number, false},
-        {"pulse", ParamType::Bool, false},
-        {"glow", ParamType::Bool, false},
+        VarsParam(),
         AreaParam(),
     };
     bool ok = register_native_effect(
         {"add_attention_area",
-         "Marks provinces on the map. id names the area (adding it again replaces it). style = outline (default): the "
-         "game's thin province outline, in every map mode. style = band: a gradient border band in the political map "
-         "(width: its thickness, pulse: it pulses, glow = no: a sharp edge). style = stripes: diagonal stripes like "
-         "occupation, in every map mode (alpha: stripe strength). color: a named colour, or red/green/blue/alpha "
-         "from 0 to 1. Each area = { } block "
-         "selects provinces: province, state and strategic_region ids (any number, added up; none: every land province), "
-         "then owner, controller and coastal keep those that match. Several area blocks add up. Not saved: add areas again "
-         "after loading (on_game_loaded).",
+         "Marks provinces on the map; every look is a shader. id names the area (adding it again replaces it). line: the "
+         "shader of its outline (built-ins solid, pulse, dashed); fill: the shader of its provinces (built-ins stripes, "
+         "solid, band, glow); mods add more (gfx/FX/hoi4_loader_patterns). Neither given: line = solid. color: a named "
+         "colour, or red/green/blue/alpha from 0 to 1, passed to the shaders. shader_variables = { <name> = <number> ... }: "
+         "values for the variables the shaders declare (up to 4 per shader; see the shader_patterns lines at startup). "
+         "Each area = { } block selects provinces: "
+         "province, state (or state = this) and strategic_region ids (any number, added up; none: every land province), "
+         "then owner, controller and coastal keep those that match, and random_provinces = n keeps n of them. Several "
+         "area blocks add up. Not saved: add areas again after loading (on_game_loaded).",
          Form::Block, add, ScopeMask::Any, &ExecAdd, nullptr},
         kFeature);
     ok = register_native_effect({"remove_attention_area", "Removes the attention area with this id, or every area with `all`.",
@@ -473,19 +616,16 @@ bool AttentionAreaInit() {
                                  kFeature) &&
          ok;
     if (!ok) return false;
-    if (!Engine::HookAttention(&OnFault)) {
-        Log("attention_area: the gradient border hooks could not be queued; off");
-        return false;
-    }
-    if (!Engine::HookStripes()) Log("attention_area: style = stripes is drawn as an outline (no stripe hook)");
+    if (!Engine::HookStripes()) Log("attention_area: the stripe paint hook is not there: fills are not drawn");
+    if (!Engine::HaveHighlight()) Log("attention_area: the game's outline functions are not there: lines are not drawn");
     OnMainThreadFrame(&Frame);
     OnGameEntering(&OnEntering);
     // Optional: the hovered railway queue entry is marked (railway_queue's tooltip hook).
     bool hover = Engine::HaveHighlight() && FeatureActive("railway_queue") && Engine::SetRailwayHoverHandler(&OnRailwayHover);
-    // The outline colours: white (colour 14) and the extra colours of style = outline areas, written into
+    // The outline colours: white (colour 14) and the extra colours of the areas' lines, written into
     // the renderer's outline colour table when it is built.
     if (Engine::HaveHighlight() && !Engine::HookHighlightWhite())
-        Log("attention_area: the outline colour hook is not there; outlines use the game's palette colours");
+        Log("attention_area: the outline colour hook is not there; lines use the game's palette colours");
     bool rightClick = hover && Engine::HookCentreOnProvince(&OnCentre);
     if (hover && !Engine::HookHoveredProvince(&IsHoveredLineEnd))
         Log("attention_area: the hovered-item hook is not there; the game's start-province mark may cover the outline");

@@ -45,7 +45,7 @@ Current features:
 | `province_building_removal` | engine (needs `lifecycle`) | `hoi4_loader_plugin_province_building_removal` | a removal cross on the state view's province buildings (supply hub, naval base, bunkers); no script commands, see below |
 | `equipment_conversion` | engine (needs `lifecycle`) | `hoi4_loader_plugin_equipment_conversion` | tools a mod switches on with global flags: "Convert from Stockpile" from every earlier generation, a cost factor, "same role only"; off until a mod sets them, see below |
 | `air_scenarios` | engine | `hoi4_loader_plugin_air_scenarios` | new air scenarios (the 3D air animations on the map) for chosen missions, planes and countries, defined in `common/hoi4_loader_air_scenarios/`; no script commands, see below |
-| `attention_area` | engine (needs `lifecycle`) | `hoi4_loader_plugin_attention_area` | `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area`: outline any set of provinces on the map (thin outline or gradient band; colour, width, pulse, glow) and move the camera to it; display only, not saved, see below |
+| `attention_area` | engine (needs `lifecycle`) | `hoi4_loader_plugin_attention_area` | `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area`: mark any set of provinces on the map (a line and a fill shader each, built-in or a mod's own) and move the camera to it; display only, not saved, see below |
 
 On an unknown build the file tier stays on, the engine tier is off, and `loader.log` lists the
 disabled features and prints the exact line to add to `loader_config.ini`. A feature whose init
@@ -1419,20 +1419,20 @@ scenarios; nothing in the game state changes.
 scenarios play. The mod's extra entities are unused. Guard: `hoi4_loader_feature_air_scenarios`.
 ## Attention areas (`attention_area`)
 
-Outline any set of provinces on the map, in a colour (and for bands a width and edge) a mod
-chooses, and move the camera there. Display only: nothing in the game state changes, and nothing
-is saved.
+Mark any set of provinces on the map and move the camera there. Every look is a shader: an area
+has a **line** shader for its outline and a **fill** shader for its provinces, chosen by name.
+The loader ships a few, and mods add their own. Display only: nothing in the game state changes,
+and nothing is saved.
 
 ```
 add_attention_area = {
     id = chi_coast          # the area's name; adding it again replaces it
-    style = outline         # outline (default): thin outline; band: gradient border band; stripes: diagonal stripes
+    line = solid            # the outline's shader (neither line nor fill given: line = solid)
+    fill = band             # the provinces' shader (leave out for no fill)
     color = cyan            # yellow (default) white black red green blue cyan magenta orange purple grey pink
-    # red = 0 green = 1 blue = 1 alpha = 0.8   # or the colour as numbers from 0 to 1 (override color)
-    # band only:
-    width = 3               # band thickness (default 1)
-    pulse = no              # yes: the band pulses (the game's "highlighted")
-    glow = yes              # yes (default): soft fading edge; no: sharp edge
+    # red = 0 green = 1 blue = 1               # or the colour as numbers from 0 to 1 (override color)
+    # alpha = 0.6                              # 0 to 1 (default 1), passed to the shaders; the built-ins fade with it
+    # shader_variables = { speed = 8 }         # values for variables the shaders declare (see below)
     area = { owner = CHI coastal = yes }
     area = { state = 124 }  # several area blocks add up
 }
@@ -1445,26 +1445,80 @@ has_attention_area = chi_coast                         # trigger
 **Selecting provinces** (each `area = { }` block):
 - `province = <id>`, `state = <id>`, `strategic_region = <id>`: any number of each, added up.
   Without any of them the block starts from every land province (every province in a state).
+  `state = this` is the state in scope, e.g. inside `random_owned_state = { ... }` (outside a
+  state scope it selects nothing).
 - `owner = <country>` (the state's owner), `controller = <country>` (the province's controller),
   `coastal = yes/no`: keep the provinces that match all of them.
+- `random_provinces = <n>`: of the provinces the block selects, keep n picked at random
+  (`area = { owner = THIS random_provinces = 12 }`: twelve scattered provinces of the scope
+  country). The picks are the same on every machine of a multiplayer game, but a player who joins
+  a running game may see other picks.
 - The selection is made when the effect runs, from the game state then. To follow later changes
   (a front line), run the effect again (for example from `on_daily`/`on_weekly`): the area is
   replaced.
 
-**How it looks.** One outline goes around the whole area, not around each province.
-- `style = outline` (default): the game's thin province group outline, the one construction mode
-  draws around build targets, in the area's colour. Up to 32 different colours at a time (more fall
-  back to white); `width`, `pulse` and `glow` do nothing. Where two areas share an edge, the earlier
-  added area's colour shows.
-- `style = band`: the game's gradient borders, the coloured bands scripted map modes use. Inside the
-  band the area's colour takes the place of the map's own colouring (the country colour in the
-  political map); `width = 100` fills small areas. A province is in at most one band: when bands
-  overlap, the later one wins. Bands are drawn in the political map's border layer; special map
-  modes (supply, for example) draw them badly.
-- `style = stripes`: the diagonal stripes the game draws for occupation and battle-plan orders
-  (area defense), in the area's colour, in every map mode. `alpha` sets how strong the stripes
-  are. Marked provinces lose the game's own stripes (occupation, supply) while marked; they come
-  back when the area is removed.
+**Built-in shaders.**
+
+| line | | fill | |
+|---|---|---|---|
+| `solid` | the area's colour | `stripes` | the game's diagonal occupation stripes |
+| `pulse` | solid, breathing | `solid` | a translucent wash |
+| `dashed` | dashes marching along the line | `band` | a band inside the area's edge |
+| | | `glow` | a wider, softer band that breathes |
+
+One outline goes around the whole area, not around each province. Lines are the game's thin
+province group outline (the one construction mode draws around build targets), so they show in
+every map mode; up to 32 colours at a time, and where two areas share an edge the earlier area's
+line shows. Fills go through the map's stripe texture, also in every map mode; a filled province
+shows the area's fill instead of the game's own stripes (occupation, supply) while marked.
+
+**Your own shaders.** A mod adds shaders as small HLSL files, or replaces a built-in with a file of
+the same name. The loader adds them to the game's shaders as the game reads them at startup, so no
+mod replaces a game shader file and shaders from several mods work side by side.
+
+```
+<your mod>/gfx/FX/hoi4_loader_patterns/line/<name>.hlsl
+    float4 HL_Line_<name>( float4 vColor, float3 vAreaColor, float2 vUV, float3 vPos )
+        // vColor: the game's border colour there (its alpha fades with zoom); vAreaColor: the area's
+        // colour (its alpha: the global HL_LineAlpha, 0..1); vUV.x across the line (0..1), vUV.y along it (border texture units, see
+        // BORDER_TILE); vPos: world position. Returns colour and alpha.
+<your mod>/gfx/FX/hoi4_loader_patterns/fill/<name>.hlsl
+    float3 HL_Fill_<name>( float3 vColor, float2 vUV, float4 vMask, in sampler2D Mask )
+        // vColor: the map colour there; vUV: map position, 0..1 over the whole map (v grows
+        // southwards); vMask.rgb: the area's colour, vMask.a its alpha (64 steps); Mask: for HL_EdgeDistance( Mask, vUV, max ),
+        // map pixels to the area's edge (up to max). Returns the new map colour.
+```
+
+- The name is the file name: letters, digits and `_`. Use it in script: `line = <name>`,
+  `fill = <name>`. Prefix your helper functions and constants with something of your own.
+- **Variables.** A shader can declare up to 4 variables on a line of its own:
+  `// hoi4_loader_variables: twist 1 12 3.8, speed 0 12 4, radius 0.1 0.45 0.3` (name, min, max,
+  default; the default is optional and is the min when left out). In the shader each is a float of
+  that name. Script sets them per area: `shader_variables = { twist = 6 speed = 8 }`; the block
+  accepts every name any loaded shader declares (plus `color`), values are clamped to the range.
+  Variables named `red`, `green`, `blue`, `alpha` default to the area's colour, so a shader can
+  keep the colour and add one more value. A shader that declares none gets the colour and alpha as
+  before. Precision: fills 64 steps across min..max; lines the first three exactly (any value), the
+  fourth in about a million steps. The variables replace the colour channels, so a line shader with
+  variables gets no `vAreaColor` colour, and a fill shader's `vMask` holds the variables normalised.
+  Names: lowercase letters, digits and `_`, not a shader word (`min`, `max`, `float`, ...).
+- Shaders can use the game's shader globals and helpers, such as `vGlobalTime` for animation.
+- `border.shader` includes `standardfuncsgfx.fxh`, so the border's pixel shader holds the fill
+  shaders as well as the line shaders: helper names must be unique across both kinds.
+- A line colours inside the game's border strip; it cannot make the strip wider. Wide effects
+  along the edge (a glow, a scorched zone) belong to the fill, with `HL_EdgeDistance`.
+- The files must not contain `[[` or `]]` (they would end the game's code block); such files are
+  left out with a log line. Up to 32 line and 32 fill shaders, built-ins included; ids follow the
+  name order, so every player with the same mods agrees.
+- The loader finds shaders in the mods enabled in the launcher (`dlc_load.json`). The startup log
+  lists them (`shader_patterns: fill pattern 1 = ...`). An unknown name falls back to `solid`
+  (line) or `stripes` (fill), with a log line.
+- A shader with an HLSL error breaks the map's shaders (error.log names the line). Check it in
+  game, or with the DirectX compiler as the loader's test tool does (`DEVELOPING.md`).
+- The first start after adding or changing a shader is slower: the game recompiles its map shaders.
+- Examples: the Attention Areas example mod's `matrix_rain`, `inferno` and `fire_edge` (fills),
+  `marching_ants`, `fire_line` and `dna_helix` (lines; `dna_helix` uses `vUV` as along/across coordinates for a turning double helix). `fire_edge` with `fire_line` on top is a fire line: the fill
+  scorches and lights the land along the edge with `HL_EdgeDistance`, the line is the burning core.
 
 **The camera.** `focus_attention_area` moves only the camera of the player whose country is the
 scope (as vanilla `goto_state`), so it is safe in multiplayer. It centres the area and sets the

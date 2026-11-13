@@ -1,20 +1,11 @@
-// Engine access for attention areas (NOTES.md Part M): the game's gradient borders (the coloured,
-// inward-fading borders of map modes), the camera, and the province data the area selector reads.
-//
-// Drawing: the map draws two gradient border layers at a time (manager +0x64 / +0x68, set by every
-// map mode). The loader adds its own border objects (one per area) to the layer that is drawn on
-// top (the second, else the first), so they show in every map mode. A province belongs to one
-// border per layer, so inside an area the area's border replaces the layer's own one. The game
-// rebuilds layers (map mode changes, daily refreshes); the loader takes its borders out before
-// each rebuild of that layer and puts them back after it (hooks on RebuildAll / RebuildOne), and
-// moves them when a map mode picks other layers (hook on SetActiveLayers).
-//
-// Hooks (global, DEVELOPING.md "Global hooks"):
-//   SetActiveLayers(manager, pair)  map mode setup, main thread: records the manager, moves borders;
-//   RebuildAll(manager, bool)       every layer: borders out before, back in after;
-//   Rebuild(manager, type, bool)    one layer: the same when it is the layer holding them.
-// A fault inside the loader's part is contained (SEH), logged once; then the loader's borders are
-// forgotten (never freed again) and the hooks only pass through.
+// Engine access for attention areas (NOTES.md Part M): the camera, the province data the area
+// selector reads, and the two drawing surfaces areas use, both shaded by shaders (M11):
+//   - lines: the game's province group outlines (CProvinceGroupHighlight), drawn by border.shader
+//     with the area's colour table entry as vSelectionColor;
+//   - fills: the map's stripe texture (CMapSecondaryMask), read by secondary_color_mask.
+// (Until the line/fill rework the loader also injected gradient borders for a `band` style; that
+// code and its eleven signatures are gone: a band is now a fill shader, NOTES.md M12.)
+// A fault inside a hook's loader part is contained (SEH), logged once; then the hook only passes through.
 #include <math.h>
 #include <string.h>
 
@@ -41,263 +32,10 @@ void Wr(void* base, size_t offset, T v) {
     memcpy((uint8_t*)base + offset, &v, sizeof v);
 }
 
-// --- Gradient borders -----------------------------------------------------------------------------
-using AddProvince_t = void(__fastcall*)(void* border, int id);
-using SetColor_t = void(__fastcall*)(void* border, const void* color);
-using SetMode_t = void(__fastcall*)(void* border, short mode);
-using SetThickness_t = void(__fastcall*)(void* border, float thickness);
-using Clear_t = void(__fastcall*)(void* border);
-using Reset_t = void(__fastcall*)(void* border);
-using New_t = void*(__fastcall*)(size_t bytes);
-using Delete_t = void(__fastcall*)(void* p, size_t bytes);
-using Ctor_t = void*(__fastcall*)(void* mem, void* layer);
-using SetPair_t = void(__fastcall*)(void* manager, int* pair);
-using RebuildAll_t = void(__fastcall*)(void* manager, char force);
-using RebuildOne_t = void(__fastcall*)(void* manager, int type, char force);
-using Alloc_t = void*(__fastcall*)(void* allocator, size_t bytes, size_t align);
-using Free_t = void(__fastcall*)(void* allocator, void* p);
-using WaitFill_t = void(__fastcall*)();
-
-WaitFill_t g_waitFill = nullptr;  // waits for the layers' fill job (every border setter calls it first)
-const size_t kLayerFillJob = 0x78;  // part of the setters' patterns
-
-AddProvince_t g_addProvince = nullptr;
-SetColor_t g_setColor = nullptr;
-SetMode_t g_setMode = nullptr;
-SetThickness_t g_setThickness = nullptr;
-Clear_t g_clear = nullptr;
-Reset_t g_reset = nullptr;
-New_t g_new = nullptr;
-Delete_t g_delete = nullptr;
-Ctor_t g_ctor = nullptr;
-SetPair_t g_setPair = nullptr, g_setPairOrig = nullptr;
-RebuildAll_t g_rebuildAll = nullptr, g_rebuildAllOrig = nullptr;
-RebuildOne_t g_rebuildOne = nullptr, g_rebuildOneOrig = nullptr;
-uint32_t g_pairLo = 0, g_pairHi = 0;  // manager -> the two drawn layer types
-uint32_t g_layers = 0;                // manager -> layer pointers [type]
-int g_layerTypes = 0;                 // 23
-// Layer: CPdxArray of borders { data, int cap, int count, allocator* }; border fields.
-const size_t kArrData = 0, kArrCap = 8, kArrCount = 0xc, kArrAlloc = 0x10;
-const size_t kBorderBytes = 0x88, kBorderHighlight = 0x57, kBorderDirty = 0x48;
-// Border +0x4c (a short, read like the layer's outline cutoff define): -1 = the layer's own value
-// (the soft fade), 0xf4 = what scripted map modes set without `thickness = yes` (to verify in game
-// which edge each one gives; NOTES.md M5).
-const short kCutoffLayer = -1, kCutoffSharp = 0xf4;
-
-// State (main thread; the hooks run there, NOTES.md M2).
-void* g_mgr = nullptr;             // the manager the last hook call was about
-std::vector<void*> g_ours;         // borders the loader added
-void* g_oursMgr = nullptr;
-int g_oursHost = -1;               // the layer type holding them
-std::vector<AttentionDraw> g_want; // what should be drawn
 std::atomic<bool> g_faulted{false};
-void (*g_onFault)(const char*) = nullptr;
-volatile LONG g_threadLogged = 0;
-bool g_frameSeen = false;  // AttentionTick ran: the main thread is known
-
 void Fault(const char* where) {
     if (g_faulted.exchange(true)) return;
-    Log("ERROR: attention_area: fault in %s; the loader's borders are forgotten and drawing is off", where);
-    g_ours.clear();
-    if (g_onFault) g_onFault(where);
-}
-
-void LogThreadOnce() {
-    // Before the first frame the main thread is not known yet (IsMainThread() is false there, also
-    // on the main thread): log only from the first call after it.
-    if (MainThreadQueueAvailable() && !IsMainThread() && !g_frameSeen) return;
-    if (InterlockedExchange(&g_threadLogged, 1)) return;
-    Log("attention_area: gradient border hooks run on thread %lu (%s)", GetCurrentThreadId(),
-        !MainThreadQueueAvailable() ? "main thread unknown: no frame hook" : IsMainThread() ? "the main thread" : "NOT the main thread");
-}
-
-void* LayerOf(void* mgr, int type) {
-    if (!mgr || type < 0 || type >= g_layerTypes) return nullptr;
-    void* const* layers = Rd<void* const*>(mgr, g_layers);
-    return layers ? layers[type] : nullptr;
-}
-
-// The layer drawn on top: the second slot, else the first; -1 if the map draws none.
-int HostType(void* mgr) {
-    int hi = Rd<int>(mgr, g_pairHi), lo = Rd<int>(mgr, g_pairLo);
-    if (hi >= 0 && hi < g_layerTypes) return hi;
-    if (lo >= 0 && lo < g_layerTypes) return lo;
-    return -1;
-}
-
-// --- Raw parts (no C++ objects: SEH) ---------------------------------------------------------------
-// Takes our borders out of the host layer and frees them, as the game's own rebuild does. A border
-// no longer in that layer's list is not ours any more (the game freed it): only forgotten.
-bool RemoveRaw(void* layer, void* const* ours, int n, int* removed) {
-    __try {
-        *removed = 0;
-        if (Rd<void*>(layer, kLayerFillJob)) g_waitFill();  // the list may be read by a fill job
-        for (int k = 0; k < n; ++k) {
-            void** data = Rd<void**>(layer, kArrData);
-            int count = Rd<int>(layer, kArrCount);
-            int at = -1;
-            for (int i = 0; i < count && at < 0; ++i)
-                if (data[i] == ours[k]) at = i;
-            if (at < 0) continue;
-            memmove(data + at, data + at + 1, (size_t)(count - at - 1) * sizeof(void*));
-            Wr<int>(layer, kArrCount, count - 1);
-            g_clear(ours[k]);
-            g_delete(ours[k], kBorderBytes);
-            ++*removed;
-        }
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
-}
-
-struct RawColor {  // what the colour setter reads: CColor's floats at +0x10..+0x1c
-    void* vt;
-    void* pad;
-    float r, g, b, a;
-};
-
-// Appends one border with the given look and provinces to the layer's list (grown with the
-// list's own allocator, as the game grows it).
-void* AddRaw(void* layer, const AttentionLook* look, const int* provinces, int n) {
-    __try {
-        if (Rd<void*>(layer, kLayerFillJob)) g_waitFill();  // the list may be read by a fill job
-        void* b = g_new(kBorderBytes);
-        if (!b) return nullptr;
-        memset(b, 0, kBorderBytes);
-        g_ctor(b, layer);
-        int count = Rd<int>(layer, kArrCount), cap = Rd<int>(layer, kArrCap);
-        if (count >= cap) {
-            void* alloc = Rd<void*>(layer, kArrAlloc);
-            int ncap = cap < 8 ? 8 : cap * 2;
-            void** fresh = (void**)((Alloc_t)(*(void***)alloc)[1])(alloc, (size_t)ncap * sizeof(void*), 8);
-            void** old = Rd<void**>(layer, kArrData);
-            if (!fresh) {
-                g_clear(b);
-                g_delete(b, kBorderBytes);
-                return nullptr;
-            }
-            if (count) memcpy(fresh, old, (size_t)count * sizeof(void*));
-            Wr<void**>(layer, kArrData, fresh);
-            Wr<int>(layer, kArrCap, ncap);
-            if (old) ((Free_t)(*(void***)alloc)[2])(alloc, old);
-        }
-        Rd<void**>(layer, kArrData)[count] = b;
-        Wr<int>(layer, kArrCount, count + 1);
-        RawColor c = {nullptr, nullptr, look->r, look->g, look->b, look->a};
-        g_setColor(b, &c);
-        g_setMode(b, look->glow ? kCutoffLayer : kCutoffSharp);
-        g_setThickness(b, look->width);
-        ((uint8_t*)b)[kBorderHighlight] = look->pulse ? 1 : 0;
-        ((uint8_t*)b)[kBorderDirty] = 1;
-        for (int i = 0; i < n; ++i) g_addProvince(b, provinces[i]);
-        return b;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return nullptr;
-    }
-}
-
-// The layer's own borders forget their provinces, so the game's next rebuild of the layer adds
-// every province again. Needed after our borders leave: a province we took keeps no owner, and
-// the game's rebuild skips borders whose province list is unchanged (FUN_140fb82c0), which left
-// those provinces without their country colour (first in-game test, NOTES.md M6).
-bool ResetLayerRaw(void* layer) {
-    __try {
-        if (Rd<void*>(layer, kLayerFillJob)) g_waitFill();
-        void** data = Rd<void**>(layer, kArrData);
-        int count = Rd<int>(layer, kArrCount);
-        for (int i = 0; i < count; ++i)
-            if (data[i]) g_reset(data[i]);
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
-}
-
-bool RebuildOneRaw(void* mgr, int type) {
-    __try {
-        g_rebuildOneOrig(mgr, type, 0);
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
-}
-
-// --- Taking borders out and putting them back ------------------------------------------------------
-// restore: the provinces our borders took are not taken again right away (areas removed or the
-// layer changes), so the layer's own borders are reset for the rebuild that follows every call.
-void RemoveOurs(bool restore) {
-    if (g_ours.empty()) return;
-    void* layer = LayerOf(g_oursMgr, g_oursHost);
-    int removed = 0;
-    if (!layer || !RemoveRaw(layer, g_ours.data(), (int)g_ours.size(), &removed)) {
-        if (layer) Fault("removing borders");
-        g_ours.clear();
-        return;
-    }
-    if (restore && !ResetLayerRaw(layer)) {
-        Fault("resetting the layer");
-        return;
-    }
-    if (removed != (int)g_ours.size())
-        Log("attention_area: %d of %zu borders were no longer in layer %d (the game freed them)", (int)g_ours.size() - removed,
-            g_ours.size(), g_oursHost);
-    g_ours.clear();
-}
-
-void AddOurs(void* mgr) {
-    if (g_faulted.load() || g_want.empty() || !mgr) return;
-    int host = HostType(mgr);
-    void* layer = LayerOf(mgr, host);
-    if (!layer) return;
-    for (const AttentionDraw& a : g_want) {
-        void* b = AddRaw(layer, &a.look, a.provinces.data(), (int)a.provinces.size());
-        if (!b) {
-            Fault("adding a border");
-            return;
-        }
-        g_ours.push_back(b);
-    }
-    g_oursMgr = mgr;
-    g_oursHost = host;
-}
-
-// --- Detours ---------------------------------------------------------------------------------------
-void __fastcall SetPairDetour(void* mgr, int* pair) {
-    LogThreadOnce();
-    if (g_faulted.load()) return g_setPairOrig(mgr, pair);
-    g_mgr = mgr;
-    int oldHost = g_ours.empty() ? -1 : g_oursHost;
-    int newHi = pair ? pair[1] : -1, newLo = pair ? pair[0] : -1;
-    int newHost = newHi >= 0 && newHi < g_layerTypes ? newHi : newLo >= 0 && newLo < g_layerTypes ? newLo : -1;
-    bool move = !g_ours.empty() && (newHost != oldHost || g_oursMgr != mgr);
-    // The old layer is rebuilt below (it keeps no provinces of ours); same layer: re-added at once.
-    if (move) RemoveOurs(oldHost >= 0 && oldHost != newHost && g_oursMgr == mgr);
-    g_setPairOrig(mgr, pair);
-    if (move) {
-        // The old layer lost provinces to our borders: let the game redo it before it is drawn again.
-        if (oldHost >= 0 && oldHost != newHost && !RebuildOneRaw(mgr, oldHost)) Fault("rebuilding the old layer");
-        AddOurs(mgr);
-    }
-}
-
-void __fastcall RebuildAllDetour(void* mgr, char force) {
-    LogThreadOnce();
-    if (g_faulted.load()) return g_rebuildAllOrig(mgr, force);
-    g_mgr = mgr;
-    bool ours = !g_ours.empty() || !g_want.empty();
-    if (ours) RemoveOurs(false);  // the same areas go back right after
-    g_rebuildAllOrig(mgr, force);
-    if (ours) AddOurs(mgr);
-}
-
-void __fastcall RebuildOneDetour(void* mgr, int type, char force) {
-    if (g_faulted.load()) return g_rebuildOneOrig(mgr, type, force);
-    g_mgr = mgr;
-    bool host = (!g_ours.empty() && type == g_oursHost && mgr == g_oursMgr) || (g_ours.empty() && !g_want.empty() && type == HostType(mgr));
-    if (host) RemoveOurs(false);
-    g_rebuildOneOrig(mgr, type, force);
-    if (host) AddOurs(mgr);
+    Log("ERROR: attention_area: fault in %s (contained); the loader's hooks now only pass through", where);
 }
 
 // --- Camera ------------------------------------------------------------------------------------------
@@ -373,52 +111,6 @@ void* ProvinceObject(int id) {
 }
 
 // --- Resolution --------------------------------------------------------------------------------------
-void ResolveBorders() {
-    uint8_t* add = SigFindUnique("border_add_province", kSigBorderAddProvince);
-    uint8_t* color = SigFindUnique("border_set_color", kSigBorderSetColor);
-    uint8_t* mode = SigFindUnique("border_set_mode", kSigBorderSetMode);
-    uint8_t* thick = SigFindUnique("border_set_thickness", kSigBorderSetThickness);
-    uint8_t* clear = SigFindUnique("border_clear", kSigBorderClear);
-    uint8_t* reset = SigFindUnique("border_reset", kSigBorderReset);
-    uint8_t* alloc = SigFindUnique("border_alloc", kSigBorderAlloc);
-    uint8_t* fre = SigFindUnique("border_free", kSigBorderFree);
-    uint8_t* pair = SigFindUnique("border_set_pair", kSigBorderSetPair);
-    uint8_t* all = SigFindUnique("border_rebuild_all", kSigBorderRebuildAll);
-    uint8_t* one = SigFindUnique("border_rebuild_one", kSigBorderRebuildOne);
-    if (!add || !color || !mode || !thick || !clear || !reset || !alloc || !fre || !pair || !all || !one) return;
-    uint8_t* ctor = SigFollowRel32(alloc + kSigBorderAllocCtor);
-    bool ctorOk = SigMatchAt(ctor, kCodeBorderCtor) && SigFindIn(ctor, 0x98, kCodeBorderCtorLayer) != nullptr;
-    bool clearOk = SigFollowRel32(fre + kSigBorderFreeClear) == clear &&
-                   SigFollowRel32(color + kSigBorderColorWaitCall) == SigFollowRel32(mode + 0x24);  // the same fill wait
-    uint32_t layers = Rd<uint8_t>(all, kSigRebuildAllLayersDisp);
-    int last = Rd<uint8_t>(all, kSigRebuildAllLastImm);
-    bool agree = ctorOk && clearOk && layers == Rd<uint8_t>(one, kSigRebuildOneLayersDisp) &&
-                 last == Rd<uint8_t>(one, kSigRebuildOneLastImm) && last > 0 && last < 64;
-    if (!agree) {
-        Log("ERROR: attention_area: the gradient border call sites disagree (constructor %d, clear %d); drawing off", ctorOk, clearOk);
-        return;
-    }
-    g_addProvince = (AddProvince_t)add;
-    g_setColor = (SetColor_t)color;
-    g_setMode = (SetMode_t)mode;
-    g_setThickness = (SetThickness_t)thick;
-    g_clear = (Clear_t)clear;
-    g_reset = (Reset_t)reset;
-    g_new = (New_t)SigFollowRel32(alloc + kSigBorderAllocNew);
-    g_delete = (Delete_t)SigFollowRel32(fre + kSigBorderFreeDelete);
-    g_ctor = (Ctor_t)ctor;
-    g_waitFill = (WaitFill_t)SigFollowRel32(color + kSigBorderColorWaitCall);
-    g_setPair = (SetPair_t)pair;
-    g_rebuildAll = (RebuildAll_t)all;
-    g_rebuildOne = (RebuildOne_t)one;
-    g_pairLo = Rd<uint8_t>(pair, kSigBorderPairLoDisp);
-    g_pairHi = Rd<uint8_t>(pair, kSigBorderPairHiDisp);
-    g_layers = layers;
-    g_layerTypes = last + 1;
-    Log("Attention areas: %d border layers at manager +0x%x, drawn pair +0x%x/+0x%x, new %s, delete %s", g_layerTypes, g_layers,
-        g_pairLo, g_pairHi, SigDescribe((void*)g_new).c_str(), SigDescribe((void*)g_delete).c_str());
-}
-
 void ResolveCamera() {
     uint8_t* go = SigFindUnique("goto_state_tail", kSigGotoStateTail);
     uint8_t* zoom = SigFindUnique("debug_zoom", kSigDebugZoom);
@@ -651,7 +343,7 @@ volatile long g_stripeFaultLogged = 0, g_stripeFirstLogged = 0;
 
 void ResolveStripes() {
     g_stripeFn = SigFindUnique("stripe_paint", kSigStripePaint);
-    if (!g_stripeFn) Log("attention_area: the stripe paint function was not found: style = stripes is drawn as an outline");
+    if (!g_stripeFn) Log("attention_area: the stripe paint function was not found: fills are not drawn");
 }
 
 // The mask's colour array, checked readable and writable at both ends.
@@ -752,7 +444,6 @@ void ForgetStripes() {
 }
 
 void ResolveAttention() {
-    ResolveBorders();
     ResolveCamera();  // before ResolveProvinces: the province id offset comes from goto_state
     ResolveProvinces();
     ResolveHighlight();  // after ResolveCamera: cross-checks the UI global
@@ -899,10 +590,6 @@ bool ShowHighlight(const std::vector<int>& provinces, int paletteIndex) {
     return CreateOutline(provinces, g_tableFixed + paletteIndex, kOutlinePriority, &g_hover);
 }
 
-bool HaveAttentionBorders() {
-    return g_addProvince && g_setColor && g_setMode && g_setThickness && g_clear && g_reset && g_new && g_delete && g_ctor && g_waitFill && g_setPair &&
-           g_rebuildAll && g_rebuildOne && g_layers && g_layerTypes > 0;
-}
 bool HaveAttentionCamera() { return g_ppUi && g_centreSlot && g_cameraSlot && g_setHeight && g_lookAt && g_heightMin; }
 bool HaveProvinceData() {
     return g_ppMapData && g_mapCount && g_mapArray && g_mapFlags && g_coastalBit && g_provGfx && g_provRect && g_provContainer &&
@@ -941,40 +628,6 @@ bool ProvinceRect(int id, int rect[4]) {
     if (!gfx) return false;
     memcpy(rect, gfx + g_provRect, 4 * sizeof(int));
     return rect[2] >= 0 && rect[3] >= 0;
-}
-
-bool HookAttention(void (*onFault)(const char*)) {
-    if (!HaveAttentionBorders()) return false;
-    g_onFault = onFault;
-    return HookQueue((void*)g_setPair, (void*)&SetPairDetour, (void**)&g_setPairOrig, "border_set_pair") &&
-           HookQueue((void*)g_rebuildAll, (void*)&RebuildAllDetour, (void**)&g_rebuildAllOrig, "border_rebuild_all") &&
-           HookQueue((void*)g_rebuildOne, (void*)&RebuildOneDetour, (void**)&g_rebuildOneOrig, "border_rebuild_one");
-}
-
-void SetAttentionDraw(const std::vector<AttentionDraw>& areas) {
-    if (g_faulted.load() || !g_rebuildOneOrig) return;
-    int oldHost = g_ours.empty() ? -1 : g_oursHost;
-    void* oldMgr = g_oursMgr;
-    RemoveOurs(oldHost >= 0 && oldMgr == g_mgr && g_mgr);  // rebuilt just below
-    g_want = areas;
-    // The layer gets its provinces back from the game's own rebuild, then ours go on top.
-    void* mgr = g_mgr;
-    if (oldHost >= 0 && oldMgr == mgr && mgr && !RebuildOneRaw(mgr, oldHost)) return Fault("rebuilding the layer");
-    AttentionTick();
-}
-
-void AttentionTick() {
-    g_frameSeen = true;
-    // Areas wanted but not drawn yet (added before the map's first layer setup this game).
-    if (!g_faulted.load() && g_ours.empty() && !g_want.empty() && g_mgr) AddOurs(g_mgr);
-}
-
-void ForgetAttentionDraw() {
-    g_ours.clear();
-    g_oursMgr = nullptr;
-    g_oursHost = -1;
-    g_want.clear();
-    g_mgr = nullptr;
 }
 
 // --- The UI's centre-on-province (right-click on a queue entry, goto_state, ...) -------------------
