@@ -259,6 +259,23 @@ void ReadSide(const void* list, std::vector<Air::Plane>* out) {
     }
 }
 
+// "small_plane_airframe_2 (small_plane_airframe, GER), ..." for the no-match log line.
+std::string PlanesText(const std::vector<Air::Plane>& planes) {
+    if (planes.empty()) return "none";
+    std::vector<std::string> seen;
+    for (const Air::Plane& p : planes) {
+        std::string t = p.equipment + " (" + (p.archetype.empty() ? "?" : p.archetype) + ", " + (p.country.empty() ? "?" : p.country) + ")";
+        if (std::find(seen.begin(), seen.end(), t) == seen.end()) seen.push_back(t);
+    }
+    std::string out;
+    for (const std::string& s : seen) out += (out.empty() ? "" : ", ") + s;
+    return out;
+}
+
+// Once per slot: a scenario started where the slot has entries but none matched, with what the
+// planes were, so a modder sees why their entry didn't play.
+std::atomic<bool> g_noMatchLogged[64];
+
 // When a scenario starts: a candidate's template, or null for the game's own.
 void* OnPick(int slot, const void* attackers, const void* defenders) {
     const std::vector<Built*>& entries = g_bySlot[slot & 63];
@@ -274,7 +291,13 @@ void* OnPick(int slot, const void* attackers, const void* defenders) {
             weights.push_back(b->def.weight);
         }
     int i = Air::PickByWeight(weights, NextRandom());
-    if (i < 0) return nullptr;
+    if (i < 0) {
+        if (!g_noMatchLogged[slot & 63].exchange(true))
+            Log("air_scenarios: %s started without a matching entry (attackers: %s; defenders: %s); the game's own scenario "
+                "plays (logged once per slot)",
+                Engine::AirSlotName(slot), PlanesText(a).c_str(), PlanesText(d).c_str());
+        return nullptr;
+    }
     Built* b = candidates[(size_t)i];
     if (!b->played.exchange(true))
         Log("air_scenarios: %s plays for the first time (%s, %zu candidate(s))", b->def.name.c_str(), Engine::AirSlotName(slot),
