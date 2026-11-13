@@ -1376,10 +1376,16 @@ generation. A new scenario needs the slot's **joints** (the mesh's attachment po
 - **The first time an entry plays:** `air_scenarios: my_gunship_orbit plays for the first time
   (bomber_1_CAS, 2 candidate(s))`.
 
-**Testing:** the game's console command `airc` plays a slot on demand, with chosen equipment and
-countries: `airc <slot> <result> <province> <state> <state> <attacker equipment> <defender
-equipment> <attacker tag> <defender tag>`, e.g.
-`airc fighter_1_vs_fighter_1 pass 11471 126 29 fighter_equipment_1 fighter_equipment_1 GER FRA`.
+**Testing:** play the mission in a game (e.g. fighters on air superiority where the enemy flies,
+CAS where your divisions fight) and watch `loader.log`:
+- `air_scenarios: my_gunship_orbit plays for the first time (...)`: your entry played;
+- `air_scenarios: bomber_1_CAS started without a matching entry (attackers: small_plane_airframe_2
+  (small_plane_airframe, GER); defenders: none)`: a scenario of that slot started, but no entry
+  matched these planes. The line names their equipment type, archetype and country, so you can
+  compare them with your entry. Once per slot.
+
+The game's console command `airc` (vanilla's own scenario test, listed in `units_planes.asset`)
+is for Paradox's developers only and doesn't run in the Steam game, not even with `-debug`.
 The test mod has four entries (`common/hoi4_loader_air_scenarios/hoi4_loader_test_air.txt`) built
 from vanilla's meshes and animations.
 

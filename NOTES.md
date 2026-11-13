@@ -5066,3 +5066,19 @@ Single player, test mod enabled, 1.19.5. Start any game and use the console:
    are `small_plane_airframe` types.
 6. **Without the loader** (`version.dll` renamed): vanilla scenarios, no new error.log lines from
    the test mod's air files beyond unused entities.
+
+### L6 results (2026-11-13, 1.19.5, single player, Germany 1936 at war)
+
+- **Step 1 passed:** 4 definitions read and built while the game loaded; no error.log lines.
+- **`airc` doesn't work in the Steam build.** The console allows a command only if the command
+  carries an "allowed in release" flag (`+0x88` bit 0) or a release-build check says no; `airc` has
+  no flag, and the retail exe always reports a release build, `-debug` or not ("Command available
+  only for developers."). Steps 2-4 were done in normal play instead.
+- **Real dogfight:** "a scenario starts on thread 7032" (the main thread), then
+  `hlt_air_long_chase plays for the first time (fighter_1_vs_fighter_1, 1 candidate(s))`: a mod
+  scenario replaced vanilla's in a real air war. Head-on didn't match (not German
+  `fighter_equipment_1`), as expected.
+- **CAS:** the owner saw vanilla's CAS loop. The test entry matched only `small_plane_cas_airframe_1`;
+  designer CAS planes (By Blood Alone) are `small_plane_airframe_N`. Changed the test entry to the
+  archetype `small_plane_airframe`. New: when a slot with entries starts a scenario no entry matches,
+  `loader.log` names the planes' equipment, archetype and country (once per slot).
