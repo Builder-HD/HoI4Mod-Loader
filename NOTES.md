@@ -5468,3 +5468,29 @@ Install the DLL and the "HoI4Mod Loader: Attention Areas" mod; start a game as a
 7. Save, load: no marks (not saved), no crash; mark again works.
 8. Main menu and back into another game: no crash, no stale borders.
 9. Without the loader: decisions hidden, no crash; `error.log` has the unknown-effect lines only.
+
+## M6: first in-game test (2026-11-13, 1.19.5.0, owner)
+
+- **Works:** "Mark China's Coast" drew one cyan outline around China's whole coast, in the
+  political map mode (the injection into the drawn layer works). `loader.log`: 31 provinces, box
+  4630,1032 86x230; the camera centred on it (z sign +1, look-at 4671/1146).
+- The "NOT the main thread" line at 06:43:44 was thread 24552, which *is* the main thread: the
+  hook first ran while the game loaded, before the first frame, when `IsMainThread()` is still
+  false. The line is now written only from the first hook call after the first frame.
+- **Too close:** fit height 230 for a 230-pixel box cut the coast at the bottom. Fit factor now 1.6
+  (`kFitFactor`): height = 1.6 x max(box height, box width / 1.78).
+- **Scattered areas** (Gotland and Hainan): the box centre lies in empty map. Owner: then don't
+  move the camera. Now: if the province nearest the box centre is farther than a quarter of the
+  box's larger side (at least 40 px), `focus_attention_area` logs it and leaves the camera.
+- **Clearing left provinces without the country colour:** the borders the loader freed had taken
+  those provinces in the country layer; the game's rebuild of that layer (`FUN_140fb82c0`) skips a
+  border whose province list is unchanged and `AddProvince` does nothing for a province already in
+  the list, so nobody owned them again. Now, when the loader's borders leave and are not put back
+  at once (areas removed or replaced, the drawn layer changes), every border of that layer is
+  reset first (`kSigBorderReset`, `FUN_141635df0`, the scripted fill's own reset), so the rebuild
+  adds every province again. Around the game's own rebuilds of that layer (same areas going back)
+  nothing is reset.
+- **Re-test passed (2026-11-13, owner):** the coast fits on screen with the 1.6 factor; the
+  scattered Gotland/Hainan area leaves the camera alone; "Clear All Marks" brings the country
+  colour back at once.
+- Still to check: glow/width looks; map mode switches; save/load; main menu and another game.

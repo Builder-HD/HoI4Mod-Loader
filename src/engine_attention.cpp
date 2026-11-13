@@ -47,6 +47,7 @@ using SetColor_t = void(__fastcall*)(void* border, const void* color);
 using SetMode_t = void(__fastcall*)(void* border, short mode);
 using SetThickness_t = void(__fastcall*)(void* border, float thickness);
 using Clear_t = void(__fastcall*)(void* border);
+using Reset_t = void(__fastcall*)(void* border);
 using New_t = void*(__fastcall*)(size_t bytes);
 using Delete_t = void(__fastcall*)(void* p, size_t bytes);
 using Ctor_t = void*(__fastcall*)(void* mem, void* layer);
@@ -65,6 +66,7 @@ SetColor_t g_setColor = nullptr;
 SetMode_t g_setMode = nullptr;
 SetThickness_t g_setThickness = nullptr;
 Clear_t g_clear = nullptr;
+Reset_t g_reset = nullptr;
 New_t g_new = nullptr;
 Delete_t g_delete = nullptr;
 Ctor_t g_ctor = nullptr;
@@ -91,6 +93,7 @@ std::vector<AttentionDraw> g_want; // what should be drawn
 std::atomic<bool> g_faulted{false};
 void (*g_onFault)(const char*) = nullptr;
 volatile LONG g_threadLogged = 0;
+bool g_frameSeen = false;  // AttentionTick ran: the main thread is known
 
 void Fault(const char* where) {
     if (g_faulted.exchange(true)) return;
@@ -100,6 +103,9 @@ void Fault(const char* where) {
 }
 
 void LogThreadOnce() {
+    // Before the first frame the main thread is not known yet (IsMainThread() is false there, also
+    // on the main thread): log only from the first call after it.
+    if (MainThreadQueueAvailable() && !IsMainThread() && !g_frameSeen) return;
     if (InterlockedExchange(&g_threadLogged, 1)) return;
     Log("attention_area: gradient border hooks run on thread %lu (%s)", GetCurrentThreadId(),
         !MainThreadQueueAvailable() ? "main thread unknown: no frame hook" : IsMainThread() ? "the main thread" : "NOT the main thread");
@@ -191,6 +197,23 @@ void* AddRaw(void* layer, const AttentionLook* look, const int* provinces, int n
     }
 }
 
+// The layer's own borders forget their provinces, so the game's next rebuild of the layer adds
+// every province again. Needed after our borders leave: a province we took keeps no owner, and
+// the game's rebuild skips borders whose province list is unchanged (FUN_140fb82c0), which left
+// those provinces without their country colour (first in-game test, NOTES.md M6).
+bool ResetLayerRaw(void* layer) {
+    __try {
+        if (Rd<void*>(layer, kLayerFillJob)) g_waitFill();
+        void** data = Rd<void**>(layer, kArrData);
+        int count = Rd<int>(layer, kArrCount);
+        for (int i = 0; i < count; ++i)
+            if (data[i]) g_reset(data[i]);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 bool RebuildOneRaw(void* mgr, int type) {
     __try {
         g_rebuildOneOrig(mgr, type, 0);
@@ -201,13 +224,19 @@ bool RebuildOneRaw(void* mgr, int type) {
 }
 
 // --- Taking borders out and putting them back ------------------------------------------------------
-void RemoveOurs() {
+// restore: the provinces our borders took are not taken again right away (areas removed or the
+// layer changes), so the layer's own borders are reset for the rebuild that follows every call.
+void RemoveOurs(bool restore) {
     if (g_ours.empty()) return;
     void* layer = LayerOf(g_oursMgr, g_oursHost);
     int removed = 0;
     if (!layer || !RemoveRaw(layer, g_ours.data(), (int)g_ours.size(), &removed)) {
         if (layer) Fault("removing borders");
         g_ours.clear();
+        return;
+    }
+    if (restore && !ResetLayerRaw(layer)) {
+        Fault("resetting the layer");
         return;
     }
     if (removed != (int)g_ours.size())
@@ -242,7 +271,8 @@ void __fastcall SetPairDetour(void* mgr, int* pair) {
     int newHi = pair ? pair[1] : -1, newLo = pair ? pair[0] : -1;
     int newHost = newHi >= 0 && newHi < g_layerTypes ? newHi : newLo >= 0 && newLo < g_layerTypes ? newLo : -1;
     bool move = !g_ours.empty() && (newHost != oldHost || g_oursMgr != mgr);
-    if (move) RemoveOurs();
+    // The old layer is rebuilt below (it keeps no provinces of ours); same layer: re-added at once.
+    if (move) RemoveOurs(oldHost >= 0 && oldHost != newHost && g_oursMgr == mgr);
     g_setPairOrig(mgr, pair);
     if (move) {
         // The old layer lost provinces to our borders: let the game redo it before it is drawn again.
@@ -256,7 +286,7 @@ void __fastcall RebuildAllDetour(void* mgr, char force) {
     if (g_faulted.load()) return g_rebuildAllOrig(mgr, force);
     g_mgr = mgr;
     bool ours = !g_ours.empty() || !g_want.empty();
-    if (ours) RemoveOurs();
+    if (ours) RemoveOurs(false);  // the same areas go back right after
     g_rebuildAllOrig(mgr, force);
     if (ours) AddOurs(mgr);
 }
@@ -265,7 +295,7 @@ void __fastcall RebuildOneDetour(void* mgr, int type, char force) {
     if (g_faulted.load()) return g_rebuildOneOrig(mgr, type, force);
     g_mgr = mgr;
     bool host = (!g_ours.empty() && type == g_oursHost && mgr == g_oursMgr) || (g_ours.empty() && !g_want.empty() && type == HostType(mgr));
-    if (host) RemoveOurs();
+    if (host) RemoveOurs(false);
     g_rebuildOneOrig(mgr, type, force);
     if (host) AddOurs(mgr);
 }
@@ -349,12 +379,13 @@ void ResolveBorders() {
     uint8_t* mode = SigFindUnique("border_set_mode", kSigBorderSetMode);
     uint8_t* thick = SigFindUnique("border_set_thickness", kSigBorderSetThickness);
     uint8_t* clear = SigFindUnique("border_clear", kSigBorderClear);
+    uint8_t* reset = SigFindUnique("border_reset", kSigBorderReset);
     uint8_t* alloc = SigFindUnique("border_alloc", kSigBorderAlloc);
     uint8_t* fre = SigFindUnique("border_free", kSigBorderFree);
     uint8_t* pair = SigFindUnique("border_set_pair", kSigBorderSetPair);
     uint8_t* all = SigFindUnique("border_rebuild_all", kSigBorderRebuildAll);
     uint8_t* one = SigFindUnique("border_rebuild_one", kSigBorderRebuildOne);
-    if (!add || !color || !mode || !thick || !clear || !alloc || !fre || !pair || !all || !one) return;
+    if (!add || !color || !mode || !thick || !clear || !reset || !alloc || !fre || !pair || !all || !one) return;
     uint8_t* ctor = SigFollowRel32(alloc + kSigBorderAllocCtor);
     bool ctorOk = SigMatchAt(ctor, kCodeBorderCtor) && SigFindIn(ctor, 0x98, kCodeBorderCtorLayer) != nullptr;
     bool clearOk = SigFollowRel32(fre + kSigBorderFreeClear) == clear &&
@@ -372,6 +403,7 @@ void ResolveBorders() {
     g_setMode = (SetMode_t)mode;
     g_setThickness = (SetThickness_t)thick;
     g_clear = (Clear_t)clear;
+    g_reset = (Reset_t)reset;
     g_new = (New_t)SigFollowRel32(alloc + kSigBorderAllocNew);
     g_delete = (Delete_t)SigFollowRel32(fre + kSigBorderFreeDelete);
     g_ctor = (Ctor_t)ctor;
@@ -449,7 +481,7 @@ void ResolveAttention() {
 }
 
 bool HaveAttentionBorders() {
-    return g_addProvince && g_setColor && g_setMode && g_setThickness && g_clear && g_new && g_delete && g_ctor && g_waitFill && g_setPair &&
+    return g_addProvince && g_setColor && g_setMode && g_setThickness && g_clear && g_reset && g_new && g_delete && g_ctor && g_waitFill && g_setPair &&
            g_rebuildAll && g_rebuildOne && g_layers && g_layerTypes > 0;
 }
 bool HaveAttentionCamera() { return g_ppUi && g_centreSlot && g_cameraSlot && g_setHeight && g_lookAt && g_heightMin; }
@@ -504,7 +536,7 @@ void SetAttentionDraw(const std::vector<AttentionDraw>& areas) {
     if (g_faulted.load() || !g_rebuildOneOrig) return;
     int oldHost = g_ours.empty() ? -1 : g_oursHost;
     void* oldMgr = g_oursMgr;
-    RemoveOurs();
+    RemoveOurs(oldHost >= 0 && oldMgr == g_mgr && g_mgr);  // rebuilt just below
     g_want = areas;
     // The layer gets its provinces back from the game's own rebuild, then ours go on top.
     void* mgr = g_mgr;
@@ -513,6 +545,7 @@ void SetAttentionDraw(const std::vector<AttentionDraw>& areas) {
 }
 
 void AttentionTick() {
+    g_frameSeen = true;
     // Areas wanted but not drawn yet (added before the map's first layer setup this game).
     if (!g_faulted.load() && g_ours.empty() && !g_want.empty() && g_mgr) AddOurs(g_mgr);
 }

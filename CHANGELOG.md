@@ -26,7 +26,8 @@ A–F; NOTES.md has the findings and test results behind each.
   showing its current level in red, until it is gone; vanilla made no badge for it. Hooks the badge
   tooltip and right click; four new signatures.
 - **New feature `attention_area`** (engine tier; guard `hoi4_loader_feature_attention_area`; script
-  version unchanged). NOTES.md Part M. **Not tested in game yet.**
+  version unchanged). NOTES.md Part M. First in-game test on 1.19.5.0: outlines work; fixed
+  then: zoom too close, camera moved for scattered areas, cleared provinces lost their country colour.
   - `add_attention_area = { id color red green blue alpha width pulse glow area = { ... } }`
     outlines provinces with the game's gradient borders, in every map mode. Each `area` block
     selects provinces by `province`, `state`, `strategic_region` ids, then `owner`, `controller`,
@@ -34,7 +35,7 @@ A–F; NOTES.md has the findings and test results behind each.
   - `remove_attention_area = <id>|all`, `focus_attention_area = { id zoom }` (centre and zoom the
     player's camera), trigger `has_attention_area = <id>`.
   - Display only, not saved: mods add areas again after loading.
-  - Hooks three engine functions (DEVELOPING.md "Global hooks"); 15 new signatures (133 in all),
+  - Hooks three engine functions (DEVELOPING.md "Global hooks"); 16 new signatures (134 in all),
     checked on 1.19.4.2 only.
 - **Native script API:** parameters of type `Number` (decimals) and `Block` (a nested
   `key = { ... }` read by the game's own clause reader), `ParamSpec::repeat` (a key written several

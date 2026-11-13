@@ -30,6 +30,7 @@
 namespace {
 
 const char kFeature[] = "attention_area";
+const float kFitFactor = 1.6f;  // camera height per pixel of the box's larger side (see Frame)
 
 struct Area {
     int token = 0;          // id (engine token)
@@ -38,6 +39,7 @@ struct Area {
     std::vector<int> provinces;
     int box[4] = {};        // bounding box in map pixels {x, y, w, h}
     int ref = 0, ref2 = 0;  // camera calibration provinces
+    float refDist = 0;      // map pixels from the box centre to the nearest province centre
 };
 
 std::vector<Area> g_areas;  // written by effects (main thread), read by the trigger
@@ -149,6 +151,7 @@ void Measure(Area* area) {
         float d = (c.second.first - cx) * (c.second.first - cx) + (c.second.second - cy) * (c.second.second - cy);
         if (d < best) best = d, area->ref = c.first;
     }
+    area->refDist = centres.empty() ? 0 : sqrtf(best);
     float refY = cy;
     for (const auto& c : centres)
         if (c.first == area->ref) refY = c.second.second;
@@ -238,7 +241,18 @@ void Frame() {
                 Log("attention_area: focus_attention_area names no area with provinces (logged once)");
             return;
         }
-        Engine::FocusCamera(a->box, a->ref, a->ref2 == a->ref ? 0 : a->ref2, g_focusHeight, 1.0f);
+        // Fit factor: at camera height h the tilted view shows clearly less than h of map vertically
+        // (1.0 cut China's coast at the bottom in the first test, NOTES.md M6); 1.6 leaves a margin.
+        // Scattered areas (Gotland and Hainan): the box centre is far from every marked province, so
+        // centring would show empty map. Then the camera stays where it is (owner's call, M6).
+        float side = (float)std::max(a->box[2], a->box[3]);
+        if (a->refDist > std::max(40.0f, side * 0.25f)) {
+            Log("attention_area: '%s' not focused: its provinces are scattered (box %dx%d, nearest province %.0f px from the "
+                "centre); the camera stays",
+                a->name.c_str(), a->box[2], a->box[3], a->refDist);
+            return;
+        }
+        Engine::FocusCamera(a->box, a->ref, a->ref2 == a->ref ? 0 : a->ref2, g_focusHeight, kFitFactor);
     }
 }
 

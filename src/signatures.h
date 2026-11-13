@@ -630,6 +630,9 @@ SIG(kSigBorderSetMode, "48 89 5C 24 08 57 48 83 EC 20 0F B7 FA 48 8B D9 66 39 51
 SIG(kSigBorderSetThickness, "40 53 48 83 EC 30 F3 0F 10 41 50 48 8B D9 0F 29 74 24 20 0F 28 F1 0F 2E C6 7A 02 74 ?? 48 8B 81 80 00 00 00 48 83 78 78 00 74 05 E8 ?? ?? ?? ?? F3 0F 11 73 50")
 // border->Clear(): releases its provinces in the layer and frees its arrays (before delete). (0x141633330)
 SIG(kSigBorderClear, "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 41 56 41 57 48 83 EC 20 48 8B D9 48 8B 81 80 00 00 00 48 83 78 78 00 74 05 E8 ?? ?? ?? ?? 45 33 FF 44 89 7B 0C 48 8B AB 80 00 00 00")
+// border->Reset(): releases its provinces in the layer, empties its list and resets the look
+// (the scripted layer fill calls it when a border's provinces changed). (0x141635df0)
+SIG(kSigBorderReset, "40 53 55 41 57 48 83 EC 20 48 8B 81 80 00 00 00 48 8B D9 48 83 78 78 00 74 05 E8 ?? ?? ?? ?? 48 8B AB 80 00 00 00 45 33 FF 44 89 7B 0C 48 85 ED 0F 84")
 // The scripted layer rebuild creating a border: operator new(0x88) (E8 at +5), then
 // CGradientBorder(mem, layer) (E8 at +0x19). (0x140affd60)
 SIG(kSigBorderAlloc, "B9 88 00 00 00 E8 ?? ?? ?? ?? 48 89 45 A8 48 85 C0 74 ?? 49 8B D6 48 8B C8 E8 ?? ?? ?? ??")

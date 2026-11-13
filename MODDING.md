@@ -1457,7 +1457,8 @@ looks, is still to be checked in game (NOTES.md M5).
 
 **The camera.** `focus_attention_area` moves only the camera of the player whose country is the
 scope (as vanilla `goto_state`), so it is safe in multiplayer. It centres the area and sets the
-camera height to fit it; the game's height limits apply.
+camera height to fit it; the game's height limits apply. When the area is scattered (its centre
+is far from all of its provinces, like Gotland plus Hainan) the camera stays where it is.
 
 **Not saved.** Areas belong to the session: they are gone after loading a save or starting another
 game. Add them again from `on_startup` and from `on_game_loaded` (feature `game_loaded`). In
