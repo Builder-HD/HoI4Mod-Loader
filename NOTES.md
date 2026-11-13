@@ -5078,7 +5078,9 @@ Single player, test mod enabled, 1.19.5. Start any game and use the console:
   `hlt_air_long_chase plays for the first time (fighter_1_vs_fighter_1, 1 candidate(s))`: a mod
   scenario replaced vanilla's in a real air war. Head-on didn't match (not German
   `fighter_equipment_1`), as expected.
-- **CAS:** the owner saw vanilla's CAS loop. The test entry matched only `small_plane_cas_airframe_1`;
-  designer CAS planes (By Blood Alone) are `small_plane_airframe_N`. Changed the test entry to the
-  archetype `small_plane_airframe`. New: when a slot with entries starts a scenario no entry matches,
-  `loader.log` names the planes' equipment, archetype and country (once per slot).
+- **CAS, first try:** the owner saw a CAS loop, but `loader.log` showed no entry playing: the test
+  entry matched only `small_plane_cas_airframe_1`. A second try with the archetype
+  `small_plane_airframe` (a wrong guess) didn't match either. The new log line (once per slot, when
+  a slot with entries starts a scenario no entry matches) named the planes:
+  `small_plane_cas_airframe_0 (small_plane_cas_airframe, GER)`. Both CAS animations seen so far
+  were vanilla's. The test entry now uses the archetype `small_plane_cas_airframe`.
