@@ -39,8 +39,8 @@ A–F; NOTES.md has the findings and test results behind each.
     checked on 1.19.4.2 only.
 - **Railway queue hover mark** (needs `railway_queue` and `attention_area`): hovering a railway
   entry in the construction queue outlines its provinces with the game's thin province outline in white
-  (a white colour is appended to `NGraphics.BORDER_COLOR_CUSTOM_HIGHLIGHTS` by a defines file patch). UI only.
-  Three new signatures (137 in all). NOTES.md M7.
+  (outline colour 14 is made white in the map renderer's colour table); a right-click on the entry
+  shows the whole line. UI only. Five new signatures (139 in all). NOTES.md M7.
 - **Native script API:** parameters of type `Number` (decimals) and `Block` (a nested
   `key = { ... }` read by the game's own clause reader), `ParamSpec::repeat` (a key written several
   times keeps every value), and up to 16 parameters per command (was 8).

@@ -476,10 +476,19 @@ void ResolveProvinces() {
 using CreateHighlight_t = void(__fastcall*)(void* owner, void** sharedOut, const void* provinces, const int* style);
 CreateHighlight_t g_createHighlight = nullptr;
 uint32_t g_hlOwner = 0;            // ui -> highlight owner (list of weak references at +0x430)
-int g_hlKind = 0;                  // the style's first number, as construction mode passes it (meaning not traced)
+int g_hlSecond = 0;                // construction mode's priority (logged for comparison)
+const int kOutlinePriority = 100;  // the loader's outline: above the game's own outlines
 const int* g_paletteCount = nullptr;   // float count of BORDER_COLOR_CUSTOM_HIGHLIGHTS
-const float* const* g_paletteData = nullptr;
 void* g_hlShared[2] = {nullptr, nullptr};  // our shared_ptr { object, control block }
+// The renderer's colour table: palette colour kWhiteSlot is made white there (vanilla colour 14,
+// FACTION_THEATER_HIGHLIGHT_COLOR_INDEX, the faction theatre map icon hover: that outline turns
+// white too). A colour past the vanilla 15 is drawn as colour 14 (second in-game test).
+const int kWhiteSlot = 14;
+uint8_t* g_tableFn = nullptr;
+void(__fastcall* g_tableOrig)(void*) = nullptr;
+int g_tableFixed = 0;        // fixed colours before the palette in the table (10)
+uint32_t g_tableCount = 0;   // renderer -> the table's count field
+bool g_tableWhite = false;   // the slot was made white (the table was built after the hook)
 
 struct IntArray {  // CPdxArray<int> as the highlight constructor reads it: data, count at +0xc
     const int* data;
@@ -528,11 +537,45 @@ void ResolveHighlight() {
     }
     g_createHighlight = (CreateHighlight_t)create;
     g_hlOwner = owner;
-    g_hlKind = style[0];
+    g_hlSecond = style[1];
     g_paletteCount = (const int*)SigRipTarget(pal, kSigPaletteCountRel, kSigPaletteCountRel + 4);
-    g_paletteData = (const float* const*)((const uint8_t*)g_paletteCount - 0xc);
-    Log("Attention areas: province outlines: owner ui+0x%x, construction style {%d, colour %d}, palette %s", g_hlOwner, style[0],
+    Log("Attention areas: province outlines: owner ui+0x%x, construction style {colour id %d, %d}, palette %s", g_hlOwner, style[0],
         style[1], SigDescribe(g_paletteCount).c_str());
+    uint8_t* table = SigFindUnique("highlight_colour_table", kSigHighlightColourTable);
+    int fixed = table ? Rd<uint8_t>(table, kSigTableFixedImm) : 0;
+    uint32_t count = table ? Rd<uint32_t>(table, kSigTableCountDisp) : 0;
+    if (!table || (const int*)SigRipTarget(table, kSigTablePaletteRel, kSigTablePaletteRel + 4) != g_paletteCount || fixed <= 0 ||
+        fixed > 32 || count < 0x10 || count > 0x10000) {
+        Log("attention_area: the outline colour table was not found where expected; outlines keep vanilla colours");
+        return;
+    }
+    g_tableFn = table;
+    g_tableFixed = fixed;
+    g_tableCount = count;
+}
+
+// The renderer's colour table (renderer + count field - 0xc: float4 data; count at the field):
+// right after the game builds it, the loader's slot becomes white. The game builds it once, in
+// the map graphics setup, from the built-in palette (the defines are read later), so a defines
+// change never reaches it (third in-game test, NOTES.md M7).
+bool WhiteRaw(void* renderer) {
+    __try {
+        int count = Rd<int>(renderer, g_tableCount);
+        float* data = Rd<float*>(renderer, g_tableCount - 0xc);
+        int slot = g_tableFixed + kWhiteSlot;
+        if (!data || slot >= count) return false;
+        for (int k = 0; k < 4; ++k) data[slot * 4 + k] = 1.0f;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+void __fastcall TableDetour(void* renderer) {
+    g_tableOrig(renderer);
+    bool ok = WhiteRaw(renderer);
+    g_tableWhite = ok;
+    Log("attention_area: outline colour %d %s", kWhiteSlot, ok ? "made white in the renderer's colour table" : "NOT changed (table not as expected)");
 }
 
 }  // namespace
@@ -544,19 +587,88 @@ void ResolveAttention() {
     ResolveHighlight();  // after ResolveCamera: cross-checks the UI global
 }
 
-bool HaveHighlight() { return g_createHighlight && g_hlOwner && g_paletteCount && g_ppUi; }
+bool HaveHighlight() { return g_createHighlight && g_hlOwner && g_paletteCount && g_ppUi && g_tableFixed; }
 
 int HighlightPaletteSize() {
     int n = g_paletteCount ? *g_paletteCount : 0;
     return n > 0 && n < 4096 ? n / 4 : 0;
 }
 
-int HighlightWhiteIndex() {
-    int n = HighlightPaletteSize();
-    const float* d = n && g_paletteData ? *g_paletteData : nullptr;
-    if (!d) return -1;
-    const float* c = d + (n - 1) * 4;
-    return c[0] == 1.0f && c[1] == 1.0f && c[2] == 1.0f && c[3] == 1.0f ? n - 1 : -1;
+int HighlightWhiteIndex() { return g_tableWhite ? kWhiteSlot : -1; }
+
+// --- The owner's hovered item (drawn before every outline, colour id 5) ----------------------------
+namespace {
+using SetHovered_t = void(__fastcall*)(void* owner, void* province);
+uint8_t* g_setHovered = nullptr;
+SetHovered_t g_setHoveredOrig = nullptr;
+uint32_t g_hoverType = 0, g_hoverItem = 0;  // owner -> type (0 province, 1 state), item
+HoverFilter_t g_hoverFilter = nullptr;
+
+bool HoverFilterRaw(void* province, bool* drop) {
+    __try {
+        *drop = g_hoverFilter(ProvinceIdOf(province));
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+void __fastcall SetHoveredDetour(void* owner, void* province) {
+    if (g_hoverFilter && province && !g_faulted.load()) {
+        bool drop = false;
+        if (!HoverFilterRaw(province, &drop)) Fault("the hovered-province hook");
+        else if (drop) province = nullptr;  // nothing hovered: the loader's outline shows instead
+    }
+    g_setHoveredOrig(owner, province);
+}
+
+void* HoverOwner() {
+    void* ui = g_ppUi ? *g_ppUi : nullptr;
+    return ui && g_hlOwner ? Rd<void*>(ui, g_hlOwner) : nullptr;
+}
+
+bool ClearHoveredRaw(void* owner, int (*idOf)(const void*), HoverFilter_t filter, bool* cleared) {
+    __try {
+        *cleared = false;
+        if (Rd<int>(owner, g_hoverType) != 0) return true;  // a state, not a province
+        void* p = Rd<void*>(owner, g_hoverItem);
+        if (p && filter(idOf(p))) {
+            g_setHoveredOrig(owner, nullptr);
+            *cleared = true;
+        }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+}  // namespace
+
+bool HookHoveredProvince(HoverFilter_t filter) {
+    uint8_t* p = SigFindUnique("hover_setters", kSigHoverSetters);
+    if (!p || !g_provId) return false;
+    uint32_t type = Rd<uint32_t>(p, kSigHoverTypeDisp), item = Rd<uint32_t>(p, kSigHoverItemDisp);
+    if (type != Rd<uint32_t>(p, kSigHoverStateTypeDisp) || item != Rd<uint32_t>(p, kSigHoverStateItemDisp) || item != type + 8 ||
+        type > 0x2000) {
+        Log("attention_area: the hovered-item setters disagree; the game's start-province mark stays");
+        return false;
+    }
+    g_setHovered = p;
+    g_hoverType = type;
+    g_hoverItem = item;
+    g_hoverFilter = filter;
+    Log("Attention areas: hovered item at owner +0x%x/+0x%x", type, item);
+    return HookQueue(p, (void*)&SetHoveredDetour, (void**)&g_setHoveredOrig, "set_hovered_province");
+}
+
+bool ClearHoveredProvinceIf(HoverFilter_t filter) {
+    void* owner = g_setHoveredOrig ? HoverOwner() : nullptr;
+    bool cleared = false;
+    if (owner && !ClearHoveredRaw(owner, &ProvinceIdOf, filter, &cleared)) Fault("clearing the hovered province");
+    return cleared;
+}
+
+bool HookHighlightWhite() {
+    return g_tableFn && HookQueue(g_tableFn, (void*)&TableDetour, (void**)&g_tableOrig, "highlight_colour_table");
 }
 
 void HideHighlight() {
@@ -572,9 +684,14 @@ bool ShowHighlight(const std::vector<int>& provinces, int paletteIndex) {
     void* owner = ui ? Rd<void*>(ui, g_hlOwner) : nullptr;
     if (!owner) return false;
     IntArray arr = {provinces.data(), (int)provinces.size(), (int)provinces.size(), nullptr};
-    // The colour is the style's second number: construction mode's {10, 2} draws palette colour 2
-    // (green); {15, 2} drew our outline green too in the first test (NOTES.md M7).
-    int style[2] = {g_hlKind, paletteIndex};
+    // The style's first byte is the colour id in the renderer's table (FUN_14130f0e0 reads it): ids
+    // 0-9 are the fixed border colours, 10 + i palette colour i. Construction mode's {10, 2} is
+    // palette 0 (teal); the earlier tests drew {15, 2} as palette 5 (green) and {10, x} as teal.
+    // The second number is the priority: the owner's list is sorted by it, highest first, and an edge
+    // shared by several outlines gets the first one's colour (FUN_140bb2cd0 / FUN_14130f0e0). The game's
+    // own start-province outline of a hovered railway entry ranks above construction mode's 2 and took
+    // the start province's edges (sixth test), so the loader's outline ranks high.
+    int style[2] = {g_tableFixed + paletteIndex, kOutlinePriority};
     void* out[2] = {nullptr, nullptr};
     if (!CreateRaw(owner, &arr, style, out)) {
         Log("ERROR: attention_area: creating a province outline faulted (contained)");
@@ -663,6 +780,48 @@ void ForgetAttentionDraw() {
     g_mgr = nullptr;
 }
 
+// --- The UI's centre-on-province (right-click on a queue entry, goto_state, ...) -------------------
+namespace {
+using CentreObj_t = void(__fastcall*)(void* ui, void* province);
+CentreObj_t g_centreObj = nullptr, g_centreObjOrig = nullptr;
+CentreFilter_t g_centreFilter = nullptr;
+bool g_inOwnFocus = false;  // FocusCamera calibrates with the same function: no filter then
+
+bool FilterRaw(void* province, bool* take) {
+    __try {
+        *take = g_centreFilter(ProvinceIdOf(province));
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+void __fastcall CentreObjDetour(void* ui, void* province) {
+    if (g_centreFilter && province && !g_inOwnFocus && !g_faulted.load()) {
+        bool take = false;
+        if (!FilterRaw(province, &take)) Fault("the centre-on-province hook");
+        else if (take) return;  // the filter moves the camera itself
+    }
+    g_centreObjOrig(ui, province);
+}
+}  // namespace
+
+bool HookCentreOnProvince(CentreFilter_t filter) {
+    if (!HaveAttentionCamera() || !g_provId) return false;
+    size_t n = 0;
+    void** vt = FindVtableByRtti(".?AVCInGameIdler@@", &n);
+    uint8_t* tail = vt && n > g_centreSlot ? SigFindIn((uint8_t*)vt[g_centreSlot], 0x200, kCodeIdlerCentreTail) : nullptr;
+    uint32_t disp = tail ? Rd<uint32_t>(tail, kCodeCentreTailDisp) : 0;
+    if (!tail || disp % 8 || disp / 8 >= n) {
+        Log("attention_area: the UI's centre-on-province has another shape; right-click focus off");
+        return false;
+    }
+    g_centreObj = (CentreObj_t)vt[disp / 8];
+    g_centreFilter = filter;
+    Log("Attention areas: centre on province object = idler slot %u (%s)", disp / 8, SigDescribe((void*)g_centreObj).c_str());
+    return HookQueue((void*)g_centreObj, (void*)&CentreObjDetour, (void**)&g_centreObjOrig, "idler_centre_province");
+}
+
 bool FocusCamera(const int box[4], int ref, int ref2, float height, float fitFactor) {
     if (!HaveAttentionCamera() || !GameState() || ref <= 0) return false;
     FocusIn in{};
@@ -674,7 +833,10 @@ bool FocusCamera(const int box[4], int ref, int ref2, float height, float fitFac
     if (!ProvinceRect(ref, in.rect1)) return false;
     if (ref2 > 0 && !ProvinceRect(ref2, in.rect2)) in.ref2 = 0;
     float out[6] = {};
-    if (!FocusRaw(&in, out)) {
+    g_inOwnFocus = true;
+    bool ok = FocusRaw(&in, out);
+    g_inOwnFocus = false;
+    if (!ok) {
         Log("ERROR: attention_area: the camera focus faulted (contained)");
         return false;
     }

@@ -5553,3 +5553,53 @@ thin white outline.
   is the style's **second** number: construction mode's `{10, 2}` is palette colour 2 (green,
   "good, while active"), and the loader's `{15, 2}` drew colour 2 as well. Now the loader passes
   `{10 (as construction mode), palette index}`. The first number's meaning is still not traced.
+- **Third test:** the outline came out teal, not white, although the palette check found white at
+  index 15. The renderer's own colour table is built dynamically (`FUN_14130b730`: 10 fixed
+  colours, then the palette), so the limit is elsewhere; the teal matches colour 14 (or 0), so an
+  index past the vanilla 15 is most likely clamped. Now the defines patch **replaces colour 14**
+  (vanilla: FACTION_THEATER_HIGHLIGHT_COLOR_INDEX, the faction theatre map icon hover, which then
+  outlines in white too) instead of appending, and the loader takes the last white colour among
+  the first 15.
+- **Right-click** on a railway queue entry: the game centres on the line's start province
+  through the idler's centre-on-province (slot 55 -> tail jump to slot 56,
+  `kCodeIdlerCentreTail`). The loader hooks slot 56 (`HookCentreOnProvince`); while a railway
+  entry is hovered and the call is for one of its end provinces, the call is skipped and the next
+  frame fits the whole line (`FocusCamera`, fit factor 1.6); a line too long to fit ends up
+  centred at the camera's highest zoom (the height is clamped). FocusCamera's own calibration
+  bypasses the hook. The first three intercepts are logged. Not yet known whether the right-click
+  really goes through that function.
+- **Fourth test: still teal**, although the defines now held white at colour 14 (no warning in
+  the log). The renderer copies the palette into its own colour table once, in the map graphics
+  setup (`FUN_14130c570` -> `FUN_14130b730`: 10 fixed colours, then the palette; table at
+  `renderer+0x4b20`, count `+0x4b2c`), apparently before the defines file is read, i.e. from the
+  built-in vanilla values. That also explains the teal of colour 15 (clamped to 14). So the defines
+  patch is removed again; instead the loader hooks the table build (`kSigHighlightColourTable`)
+  and writes white into slot 10 + 14 right after it. `HighlightWhiteIndex` is 14 once that ran
+  (logged: "outline colour 14 made white in the renderer's colour table").
+- Right-click: no intercept was logged in the fourth test; to check whether a right-click was
+  made and whether it reaches the idler's centre-on-province.
+- **Fifth test: teal again**, with the table slot white (logged). The draw code (`FUN_14130f0e0`)
+  settles the style: for an edge in a group highlight it takes the style's **first byte** as the
+  edge's colour id (`cVar15 = *state`), and colour ids index the renderer's table directly: 0-9
+  the fixed border colours (country, state, ... borders use ids 1, 2, 4, 5, 7, 8, 9), `10 + i`
+  palette colour i (the decision highlights use `(char)i + 10`). So construction's `{10, 2}` is
+  palette 0 (teal), `{15, 2}` was palette 5 (green), and `{10, 15}` / `{10, 14}` were both
+  palette 0 (teal): every test fits. Now the loader passes `{10 + 14, 2}`: the white slot.
+- **Sixth test: white, works** ("Look great!"). Bug: while hovering, the start province's edges
+  were missing from the loader's outline; for the ~2 frames after leaving the entry it showed
+  complete. Frames of the owner's recording show the game's own start-province outline taking
+  those edges. The owner's outline list is sorted every frame by the style's **second number,
+  highest first** (`FUN_140bb2cd0`: insertion sort on `highlight+4`), and an edge shared by several
+  outlines takes the first one's colour. Construction mode uses 2; the start outline ranks higher.
+  The loader's outline now uses priority 100.
+- **Seventh test: the start province still had gaps** with priority 100. The draw code checks
+  three objects of the owner **before** the outline list: `owner+0x418` (colour id 4) and the
+  hovered item (`owner+0x458` type 0 province / 1 state, `+0x460` the object; colour id 5). The
+  construction queue (`FUN_141de6d80`, `FUN_141de8c20`) sets the hovered entry's start province
+  there through `SetHoveredProvince` (`0x140bbff00`, `kSigHoverSetters`), so no priority beats it.
+  Now the loader hooks that setter: while the railway line's tooltip came within the hold time and
+  the province is one of the line's ends, nothing is set instead; and when the loader's outline
+  appears, a start province already set is cleared (the original setter with null).
+- **Eighth test: works** ("Perfect!", Ganzhou - Wenzhou): one complete white outline around the
+  whole line, the start province included.
+- Right-click verified in the same test: the idler's centre-on-province hook caught it (`right-click on a railway entry: fitting the whole line (11 provinces, box 94x50)`) and the camera framed the whole line.

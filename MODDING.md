@@ -1473,8 +1473,9 @@ An example mod with decisions (China's coast, Sweden's controlled coast, Gotland
 provinces, clear all) is its own repository: "HoI4Mod Loader: Attention Areas".
 
 **Hovering a railway queue entry** (with `attention_area` on as well) outlines the line's provinces
-on the map with the game's thin province outline in white (the loader adds white to the outline
-colours in `NGraphics.BORDER_COLOR_CUSTOM_HIGHLIGHTS`; a mod that replaces that table gets the
-first colour instead), for building, upgrading and dismantle entries alike. It is drawn on this
+on the map with the game's thin province outline in white (the loader makes outline colour 14
+white in the map renderer's colour table; vanilla uses colour 14 only for the faction theatre map icon
+hover, which then outlines in white too), for building, upgrading and dismantle entries alike. It is drawn on this
 machine only, from the UI; nothing in the game state changes. It goes away a moment after the
-pointer leaves the entry.
+pointer leaves the entry. A right-click on the entry moves the camera to show the whole line (a line
+too long to fit is centred at the highest zoom) instead of the game's centring on its start.

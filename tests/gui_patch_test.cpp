@@ -117,56 +117,7 @@ static void Snippets() {
     Check(Engine::PatchCountryStateViewGui(broken).empty(), "an unterminated entry is left alone");
 }
 
-// 00_graphics.lua: the white highlight colour (attention_area).
-static void Defines() {
-    const std::string base =
-        "NGraphics = {\n"
-        "\tSUPPLY_HOVERED_STATE_COLOR_INDEX = 0, -- Refers to the colors in BORDER_COLOR_CUSTOM_HIGHLIGHTS.\n"
-        "\tBORDER_COLOR_CUSTOM_HIGHLIGHTS = {\n"
-        "\t\t--[[ Groups of 4 numbers are RGBA. { braces in a comment } ]]\n"
-        "\t\t0.0, 0.61, 0.75, 1.0, -- 0: mouse hover\n"
-        "\t\t0.2, 0.61, 0.75, 1.0, -- 14: FACTION_THEATER_HIGHLIGHT_COLOR_INDEX\n"
-        "\t},\n"
-        "\tOTHER = 1,\n"
-        "}\n";
-    std::string out = Engine::PatchGraphicsDefines(base);
-    Check(out.find("1.0, -- 14: FACTION_THEATER_HIGHLIGHT_COLOR_INDEX\n\t\t1.0, 1.0, 1.0, 1.0, -- hoi4_loader: white") !=
-              std::string::npos &&
-              out.find("hoi4_loader: white (attention_area hover outline)\n\t},\n\tOTHER = 1,") != std::string::npos,
-          "white appended as the table's last entry, on its own line");
-    Check(Engine::PatchGraphicsDefines(out).empty(), "an already patched file is left alone");
-    std::string noComma = base;
-    noComma.replace(noComma.find("1.0, -- 14"), 4, "1.0 ");
-    std::string out2 = Engine::PatchGraphicsDefines(noComma);
-    Check(out2.find("0.75, 1.0,  -- 14") != std::string::npos && out2.find("1.0, 1.0, 1.0, 1.0, -- hoi4_loader") != std::string::npos,
-          "a missing separator before the new entry is added");
-    Check(Engine::PatchGraphicsDefines("NGraphics = { OTHER = 1 }\n").empty(), "a file without the table is left alone");
-    Check(Engine::PatchGraphicsDefines("BORDER_COLOR_CUSTOM_HIGHLIGHTS = {\n\t1.0, 1.0,\n").empty(), "an unterminated table is left alone");
-    std::string crlf;
-    for (char c : base) {
-        if (c == '\n') crlf += '\r';
-        crlf += c;
-    }
-    std::string outCrlf = Engine::PatchGraphicsDefines(crlf);
-    Check(!outCrlf.empty() && Count(outCrlf, "\n") == Count(outCrlf, "\r\n"), "defines: CRLF files stay CRLF");
-}
-
-static void RealDefines(const char* path) {
-    std::ifstream f(path, std::ios::binary);
-    std::stringstream ss;
-    ss << f.rdbuf();
-    std::string in = ss.str(), out = Engine::PatchGraphicsDefines(in);
-    printf("%s: %zu bytes, %s\n", path, in.size(), out.empty() ? "left alone" : "patched");
-    if (in.find("BORDER_COLOR_CUSTOM_HIGHLIGHTS") == std::string::npos) return;
-    size_t at = out.find("-- hoi4_loader: white");
-    if (at != std::string::npos) printf("---\n%s\n---\n", out.substr(at > 160 ? at - 160 : 0, 240).c_str());
-    Check(!out.empty() && Count(out, "1.0, 1.0, 1.0, 1.0, -- hoi4_loader: white") == 1 && Count(out, "{") == Count(in, "{") &&
-              out.size() > in.size(),
-          "the real 00_graphics.lua gets the white entry");
-}
-
 static void RealFile(const char* path) {
-    if (strstr(path, ".lua")) return RealDefines(path);
     std::ifstream f(path, std::ios::binary);
     if (!f) {
         printf("SKIP: cannot read %s\n", path);
@@ -187,7 +138,6 @@ static void RealFile(const char* path) {
 
 int main(int argc, char** argv) {
     Snippets();
-    Defines();
     for (int i = 1; i < argc; ++i) RealFile(argv[i]);
     printf("gui_patch_test: %d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;
