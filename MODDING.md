@@ -1417,7 +1417,13 @@ scenarios; nothing in the game state changes.
 
 **Without the loader:** the entries are ignored (a folder the game doesn't read); the game's own
 scenarios play. The mod's extra entities are unused. Guard: `hoi4_loader_feature_air_scenarios`.
+
 ## Attention areas (`attention_area`)
+
+> **Experimental.** The script syntax, the shader interface (function signatures, variables,
+> helpers) and the built-in shaders' look may still change in later versions. Parts are tested in
+> game (outlines, stripes, mod fill and line shaders); `shader_variables` and alpha in shaders are
+> not yet. Don't build a released mod on it yet.
 
 Mark any set of provinces on the map and move the camera there. Every look is a shader: an area
 has a **line** shader for its outline and a **fill** shader for its provinces, chosen by name.
@@ -1516,7 +1522,7 @@ mod replaces a game shader file and shaders from several mods work side by side.
 - A shader with an HLSL error breaks the map's shaders (error.log names the line). Check it in
   game, or with the DirectX compiler as the loader's test tool does (`DEVELOPING.md`).
 - The first start after adding or changing a shader is slower: the game recompiles its map shaders.
-- Examples: the Attention Areas example mod's `matrix_rain`, `inferno` and `fire_edge` (fills),
+- Examples: the test mod's (`mod/hoi4_loader_test/gfx/FX/hoi4_loader_patterns/`) `matrix_rain`, `inferno` and `fire_edge` (fills),
   `marching_ants`, `fire_line` and `dna_helix` (lines; `dna_helix` uses `vUV` as along/across coordinates for a turning double helix). `fire_edge` with `fire_line` on top is a fire line: the fill
   scorches and lights the land along the edge with `HL_EdgeDistance`, the line is the burning core.
 
@@ -1534,8 +1540,11 @@ multiplayer every machine runs the same effects, so every player sees the same a
 effects are dropped (nothing is marked) and `has_attention_area` is dropped too, so keep it next
 to the guard.
 
-An example mod with decisions (China's coast, Sweden's controlled coast, Gotland plus two
-provinces, clear all) is its own repository: "HoI4Mod Loader: Attention Areas".
+Examples: the test mod's "Attention Areas" decisions
+(`mod/hoi4_loader_test/common/decisions/hoi4_loader_test_attention_decisions.txt`): China's coast,
+Sweden's controlled coast, Gotland plus two provinces, each built-in fill, matrix rain (a state, all
+of China, a random state, a random country), inferno, a fire line and a DNA helix border (both with
+`shader_variables`), clear all.
 
 **Hovering a railway queue entry** (with `attention_area` on as well) outlines the line's provinces
 on the map with the game's thin province outline in white (the loader makes outline colour 14

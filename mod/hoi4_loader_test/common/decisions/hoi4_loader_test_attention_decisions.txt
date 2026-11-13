@@ -1,0 +1,318 @@
+# Example decisions for hoi4_loader's attention_area feature (experimental: syntax and shaders may
+# still change). Each one needs the loader (hoi4_loader_feature_attention_area = yes); without it
+# they stay hidden. Every look is a shader: line = <shader> for the outline, fill = <shader> for the
+# provinces. Built-ins: lines solid, pulse, dashed; fills stripes, solid, band, glow. The test mod
+# adds matrix_rain, inferno and fire_edge (fills) and marching_ants, fire_line and dna_helix (lines)
+# in gfx/FX/hoi4_loader_patterns.
+hoi4_loader_attention_category = {
+
+	# The coastal provinces China owns: a cyan outline (line = solid, the default when neither line
+	# nor fill is given). Shows in every map mode.
+	hoi4_loader_attention_chi_coast = {
+		icon = generic_naval
+		cost = 0
+		fire_only_once = no
+		visible = { hoi4_loader_feature_attention_area = yes }
+		available = { NOT = { has_attention_area = chi_coast } }
+		complete_effect = {
+			add_attention_area = {
+				id = chi_coast
+				color = cyan
+				area = { owner = CHI coastal = yes }
+			}
+			focus_attention_area = { id = chi_coast }
+		}
+		ai_will_do = { factor = 0 }
+	}
+
+	# Every coastal province Sweden controls (the area selector's example: where coastal forts
+	# could go): a pulsing orange outline over an orange band inside the edge.
+	hoi4_loader_attention_swe_coast = {
+		icon = generic_construction
+		cost = 0
+		fire_only_once = no
+		visible = { hoi4_loader_feature_attention_area = yes }
+		available = { NOT = { has_attention_area = swe_coast } }
+		complete_effect = {
+			add_attention_area = {
+				id = swe_coast
+				line = pulse
+				fill = band
+				color = orange
+				area = { controller = SWE coastal = yes }
+			}
+			focus_attention_area = { id = swe_coast }
+		}
+		ai_will_do = { factor = 0 }
+	}
+
+	# Explicit ids: the whole state of Gotland (124) plus two provinces of Hainan (994, 1038), a red outline.
+	# Scattered: the box centre is far from both, so focus_attention_area leaves the camera alone.
+	hoi4_loader_attention_ids = {
+		icon = generic_research
+		cost = 0
+		fire_only_once = no
+		visible = { hoi4_loader_feature_attention_area = yes }
+		available = { NOT = { has_attention_area = by_ids } }
+		complete_effect = {
+			add_attention_area = {
+				id = by_ids
+				red = 0.9 green = 0.1 blue = 0.1 alpha = 0.9
+				area = { state = 124 }
+				area = { province = 994 province = 1038 }
+			}
+			focus_attention_area = { id = by_ids zoom = 600 }
+		}
+		ai_will_do = { factor = 0 }
+	}
+
+	# Fill tests on the state of Shandong (597), the same id, so each replaces the other: a
+	# translucent red wash (fill = solid), and a breathing red glow inside the edge with a dashed line.
+	hoi4_loader_attention_fill_translucent = {
+		icon = generic_research
+		cost = 0
+		fire_only_once = no
+		visible = { hoi4_loader_feature_attention_area = yes }
+		complete_effect = {
+			add_attention_area = {
+				id = fill_test
+				fill = solid
+				color = red
+				area = { state = 597 }
+			}
+			focus_attention_area = { id = fill_test }
+		}
+		ai_will_do = { factor = 0 }
+	}
+
+	hoi4_loader_attention_fill_solid = {
+		icon = generic_research
+		cost = 0
+		fire_only_once = no
+		visible = { hoi4_loader_feature_attention_area = yes }
+		complete_effect = {
+			add_attention_area = {
+				id = fill_test
+				line = dashed
+				fill = glow
+				color = red
+				area = { state = 597 }
+			}
+			focus_attention_area = { id = fill_test }
+		}
+		ai_will_do = { factor = 0 }
+	}
+
+	# Stripes test (fill = stripes): the diagonal stripes of occupation and area defense, in red,
+	# on the state of Shandong (597). Should show in every map mode, supply included.
+	hoi4_loader_attention_stripes = {
+		icon = generic_research
+		cost = 0
+		fire_only_once = no
+		visible = { hoi4_loader_feature_attention_area = yes }
+		available = { NOT = { has_attention_area = stripes_test } }
+		complete_effect = {
+			add_attention_area = {
+				id = stripes_test
+				fill = stripes
+				color = red
+				area = { state = 597 }
+			}
+			focus_attention_area = { id = stripes_test }
+		}
+		ai_will_do = { factor = 0 }
+	}
+
+	# The test mod's own shaders (gfx/FX/hoi4_loader_patterns/fill/matrix_rain.hlsl and
+	# line/marching_ants.hlsl); the loader stitches them into the game's shaders at startup.
+	# Matrix rain over Shandong in green, framed by green marching ants.
+	hoi4_loader_attention_matrix = {
+		icon = generic_research
+		cost = 0
+		fire_only_once = no
+		visible = { hoi4_loader_feature_attention_area = yes }
+		available = { NOT = { has_attention_area = matrix_test } }
+		complete_effect = {
+			add_attention_area = {
+				id = matrix_test
+				fill = matrix_rain
+				line = marching_ants
+				color = green
+				area = { state = 597 }
+			}
+			focus_attention_area = { id = matrix_test }
+		}
+		ai_will_do = { factor = 0 }
+	}
+
+	# Wake up, Neo: all of China's provinces in matrix rain (no outline).
+	hoi4_loader_attention_matrix_china = {
+		icon = generic_research
+		cost = 0
+		fire_only_once = no
+		visible = { hoi4_loader_feature_attention_area = yes }
+		available = { NOT = { has_attention_area = matrix_china } }
+		complete_effect = {
+			add_attention_area = {
+				id = matrix_china
+				fill = matrix_rain
+				color = green
+				area = { owner = CHI }
+			}
+			focus_attention_area = { id = matrix_china }
+		}
+		ai_will_do = { factor = 0 }
+	}
+
+	# Glitch in the Matrix: a random state of a random country (any country that owns states)
+	# turns into matrix rain, and the camera flies there. Take it again and again: each time the
+	# rain jumps somewhere new (the same id, so the new state replaces the last one). The game's
+	# random scopes use the synchronized random numbers, so it is multiplayer-safe.
+	hoi4_loader_attention_matrix_random = {
+		icon = generic_research
+		cost = 0
+		fire_only_once = no
+		days_re_enable = 0
+		visible = { hoi4_loader_feature_attention_area = yes }
+		complete_effect = {
+			random_country = {
+				limit = { exists = yes any_owned_state = { always = yes } }
+				random_owned_state = {
+					add_attention_area = {
+						id = matrix_random
+							fill = matrix_rain
+						color = green
+						area = { state = this }
+					}
+				}
+			}
+			# ROOT is the player's country here, as focus_attention_area needs.
+			focus_attention_area = { id = matrix_random }
+		}
+		ai_will_do = { factor = 0 }
+	}
+
+	# There Is No Spoon: a whole random country in matrix rain, no outline, camera on it.
+	# Repeatable: each time another country (the same id replaces the last one).
+	hoi4_loader_attention_matrix_country = {
+		icon = generic_research
+		cost = 0
+		fire_only_once = no
+		days_re_enable = 0
+		visible = { hoi4_loader_feature_attention_area = yes }
+		complete_effect = {
+			random_country = {
+				limit = { exists = yes any_owned_state = { always = yes } }
+				add_attention_area = {
+					id = matrix_country
+					fill = matrix_rain
+					color = green
+					area = { owner = THIS }
+				}
+			}
+			focus_attention_area = { id = matrix_country }
+		}
+		ai_will_do = { factor = 0 }
+	}
+
+	# Scorched Earth: twelve random provinces of a random country go up in flames and smoke
+	# (fill = inferno), and the camera frames them. Repeatable: each time another country
+	# burns (the same id replaces the last fire). random_provinces picks single provinces, so the
+	# fires are scattered over the country instead of filling whole states.
+	hoi4_loader_attention_inferno = {
+		icon = generic_research
+		cost = 0
+		fire_only_once = no
+		days_re_enable = 0
+		visible = { hoi4_loader_feature_attention_area = yes }
+		complete_effect = {
+			random_country = {
+				limit = { exists = yes any_owned_state = { always = yes } }
+				add_attention_area = {
+					id = inferno
+					fill = inferno
+					color = orange
+					area = { owner = THIS random_provinces = 12 }
+				}
+			}
+			focus_attention_area = { id = inferno }
+		}
+		ai_will_do = { factor = 0 }
+	}
+
+	# Line of Fire: a random country's borders burn. Two of this mod's shaders together:
+	# fill = fire_edge scorches and lights the land along the inside of the edge (a ragged, moving
+	# fire front), line = fire_line is the flickering white-hot core on the border itself.
+	# Repeatable: each time another country (the same id replaces the last one).
+	hoi4_loader_attention_fire_line = {
+		icon = generic_research
+		cost = 0
+		fire_only_once = no
+		days_re_enable = 0
+		visible = { hoi4_loader_feature_attention_area = yes }
+		complete_effect = {
+			random_country = {
+				limit = { exists = yes any_owned_state = { always = yes } }
+				add_attention_area = {
+					id = fire_line
+					line = fire_line
+					fill = fire_edge
+					red = 1 green = 0.3 blue = 0.02
+					# fire_edge declares red, green, blue (the glow, from the colour above) and reach.
+					shader_variables = { reach = 28 }
+					area = { owner = THIS }
+				}
+			}
+			focus_attention_area = { id = fire_line }
+		}
+		ai_will_do = { factor = 0 }
+	}
+
+	# Double Helix: a random country's border becomes a turning DNA double helix (line = dna_helix,
+	# this mod's line shader): cyan and magenta strands with rungs, wound and spun through
+	# shader_variables.
+	# Zoom in to see it turn. Repeatable: each time another country.
+	hoi4_loader_attention_dna = {
+		icon = generic_research
+		cost = 0
+		fire_only_once = no
+		days_re_enable = 0
+		visible = { hoi4_loader_feature_attention_area = yes }
+		complete_effect = {
+			random_country = {
+				limit = { exists = yes any_owned_state = { always = yes } }
+				add_attention_area = {
+					id = dna
+					line = dna_helix
+					# dna_helix declares twist, speed and radius (see its file); these replace the defaults.
+					shader_variables = { twist = 6 speed = 8 radius = 0.35 }
+					area = { owner = THIS }
+				}
+			}
+			focus_attention_area = { id = dna }
+		}
+		ai_will_do = { factor = 0 }
+	}
+
+	# Back to China's coast (zoomed to fit), if it is marked.
+	hoi4_loader_attention_focus_chi = {
+		icon = generic_naval
+		cost = 0
+		fire_only_once = no
+		visible = { hoi4_loader_feature_attention_area = yes has_attention_area = chi_coast }
+		complete_effect = { focus_attention_area = { id = chi_coast } }
+		ai_will_do = { factor = 0 }
+	}
+
+	hoi4_loader_attention_clear = {
+		icon = generic_break_treaty
+		cost = 0
+		fire_only_once = no
+		visible = {
+			hoi4_loader_feature_attention_area = yes
+			OR = { has_attention_area = chi_coast has_attention_area = swe_coast has_attention_area = by_ids has_attention_area = fill_test has_attention_area = stripes_test has_attention_area = matrix_test has_attention_area = matrix_china has_attention_area = matrix_random has_attention_area = inferno has_attention_area = matrix_country has_attention_area = fire_line has_attention_area = dna }
+		}
+		complete_effect = { remove_attention_area = all }
+		ai_will_do = { factor = 0 }
+	}
+}
