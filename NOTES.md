@@ -5494,3 +5494,62 @@ Install the DLL and the "HoI4Mod Loader: Attention Areas" mod; start a game as a
   scattered Gotland/Hainan area leaves the camera alone; "Clear All Marks" brings the country
   colour back at once.
 - Still to check: glow/width looks; map mode switches; save/load; main menu and another game.
+
+## M7: railway queue hover mark (branch `railway-hover-mark`, 2026-11-13)
+
+Owner's request: hovering a railway line in the construction queue marks its provinces with a
+thin white outline.
+- **Hover signal:** railway_queue's tooltip hook (`TooltipDetour`, `kSigRailTooltip`) already looks
+  up the entry's line; for railway lines (`g_vtLine`) it now passes the line's province path
+  (`LinePath`) to a handler (`SetRailwayHoverHandler`). UI, main thread.
+- **Drawing:** a second draw list in engine_attention (`SetAttentionUiDraw`), drawn after the
+  script's areas, so the mark sits on top and the script's areas come back afterwards.
+- **Look:** white, alpha 1, width 1, `glow = no` (sharp edge); no pulse.
+- **Hover end:** unknown whether the game rebuilds the tooltip every frame while hovered or once.
+  The mark stays until no tooltip build for 250 ms; the first five hovers log how long the mark
+  showed and how many tooltip builds came meanwhile. If the tooltip is built only once, the mark
+  vanishes after 250 ms while the pointer is still there, and another hover-end signal is needed
+  (the GUI's hovered object or the tooltip window).
+- **To watch:** each hover start and end replaces the drawn set, which resets and rebuilds the
+  drawn layer (the country-colour fix, M6). If that causes a stutter on hover, only the provinces
+  that leave should be given back instead of the whole layer.
+- Out of the game: builds; smoke test passes. Not tested in game.
+- **In-game test:** queue a railway (build or upgrade, and a dismantle with the Railway
+  Dismantle mod); open Construction; hover the entry: thin white outline along the line's
+  provinces; move away: it goes; hover another entry: it moves. Check for stutter. Send
+  `loader.log` (the "railway hover mark ... the tooltip was built N time(s)" lines).
+- **In-game test (2026-11-13, owner):** hovering a railway entry marked its 31 provinces; the
+  tooltip is built every frame while hovered (481 builds in 7.1 s, about 66/s), and the mark goes
+  about two frames after the pointer leaves: hover detection works as designed. But the gradient
+  border looked like a **fill** with a soft white edge in the construction map mode (the layer's
+  own settings decide), not the thin line wanted (the owner pointed at the game's thin red
+  highlight outline). Next: the game's highlight outline renderer (`CProvinceGroupHighlight`,
+  `CHighlightStates`) for the hover mark.
+- **Switched to the game's province group outline (2026-11-13).** `CProvinceGroupHighlight`, the
+  thin lines construction mode draws around build targets:
+  - `CreateHighlight(owner, shared_ptr* out, CPdxArray<int>* provinces, const int style[2])`
+    (`FUN_140bb9490`, `kSigHighlightCreate`): the constructor (`FUN_141725730`) collects the edges
+    between a province in the set and a neighbour outside it (`province->+0xb8->+0x70`, 0x30 per
+    neighbour), i.e. the group's outer border lines. Owner: `ui+0x6b8`
+    (`kSigHighlightCreateSite`, construction mode's secondary targets, style `{10, 2}`).
+  - The owner's list at `+0x430` holds **weak** references; its per-frame pass (`FUN_140bb7ca0`)
+    drops entries whose last strong reference is gone. So the outline is shown while the loader
+    holds the shared_ptr and disappears when it releases it (the game's MSVC layout: uses `+8`,
+    weaks `+0xc`, vtable slot 0 destroys the object, slot 1 the control block).
+  - Style `{palette index, type}`: the index is into `NGraphics.BORDER_COLOR_CUSTOM_HIGHLIGHTS`
+    (15 colours in vanilla, no white; when two groups share a border the earlier colour wins).
+    The type (2) is passed as construction mode passes it; its meaning was not traced.
+  - **White:** a file patch on `common/defines/00_graphics.lua` appends `1, 1, 1, 1` to that table
+    (`PatchGraphicsDefines`, tested in `gui_patch_test` incl. the real file: vanilla's first
+    occurrence of the name is in a comment). At runtime the palette (`kSigHighlightPaletteCount`:
+    float count, data 0xc before) is checked: if its last colour is white that index is used,
+    else colour 0 (light blue) and a log line (another mod replaced the table).
+  - The gradient UI draw list is gone again (unused).
+- To verify in game: thin white line around the railway's provinces, in the construction map
+  mode and in others; it goes when the pointer leaves; script areas unaffected.
+- **Second in-game test:** the line's outline came out **green**, and a white line around the
+  start province only. Vanilla without the loader (owner's screenshot) shows that white line
+  around the start province too: it is the game's own, and the green one was ours. So the colour
+  is the style's **second** number: construction mode's `{10, 2}` is palette colour 2 (green,
+  "good, while active"), and the loader's `{15, 2}` drew colour 2 as well. Now the loader passes
+  `{10 (as construction mode), palette index}`. The first number's meaning is still not traced.

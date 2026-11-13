@@ -49,6 +49,60 @@ float g_focusHeight = 0;
 bool g_focusPending = false;
 volatile long g_missingFocusLogged = 0;
 
+// --- Hover mark: the railway queue entry the player points at (UI only, this machine) ------------
+// The game builds the entry's tooltip while it is hovered (railway_queue's tooltip hook reports the
+// line's path). The mark stays until no tooltip build came for kHoverHoldMs. How often the tooltip
+// is built during one hover is logged for the first hovers (NOTES.md M7: does the game rebuild it
+// every frame, or only once?).
+const ULONGLONG kHoverHoldMs = 250;
+std::vector<int> g_hoverPath;  // provinces of the hovered line, sorted, unique
+ULONGLONG g_hoverLast = 0, g_hoverStart = 0;
+int g_hoverCalls = 0, g_hoverLogs = 0;
+bool g_hoverShown = false, g_hoverChanged = false;
+volatile long g_whiteMissingLogged = 0;
+
+void OnRailwayHover(const int* path, int count) {
+    std::vector<int> p(path, path + count);
+    std::sort(p.begin(), p.end());
+    p.erase(std::unique(p.begin(), p.end()), p.end());
+    ULONGLONG now = GetTickCount64();
+    if (p != g_hoverPath || !g_hoverShown) {
+        g_hoverPath = std::move(p);
+        g_hoverChanged = true;
+        g_hoverStart = now;
+        g_hoverCalls = 0;
+    }
+    ++g_hoverCalls;
+    g_hoverLast = now;
+}
+
+void HoverFrame() {
+    ULONGLONG now = GetTickCount64();
+    if (g_hoverChanged) {
+        g_hoverChanged = false;
+        g_hoverShown = true;
+        // The game's thin province group outline (as construction mode draws build targets), in the
+        // palette's white (the loader's defines patch), else the palette's first colour.
+        int white = Engine::HighlightWhiteIndex();
+        if (!Engine::ShowHighlight(g_hoverPath, white >= 0 ? white : 0) && g_hoverLogs < 5)
+            Log("attention_area: the railway hover outline could not be created");
+        if (white < 0 && InterlockedExchange(&g_whiteMissingLogged, 1) == 0)
+            Log("attention_area: the outline palette has no white at its end (%d colours; another mod replaces "
+                "BORDER_COLOR_CUSTOM_HIGHLIGHTS?): hover outlines use colour 0",
+                Engine::HighlightPaletteSize());
+    } else if (g_hoverShown && now - g_hoverLast > kHoverHoldMs) {
+        g_hoverShown = false;
+        if (g_hoverLogs < 5) {
+            ++g_hoverLogs;
+            Log("attention_area: railway hover mark (%zu provinces) shown %llu ms; the tooltip was built %d time(s) meanwhile%s",
+                g_hoverPath.size(), g_hoverLast - g_hoverStart + kHoverHoldMs, g_hoverCalls,
+                g_hoverLogs == 5 ? " (last such line)" : "");
+        }
+        g_hoverPath.clear();
+        Engine::HideHighlight();
+    }
+}
+
 // --- Named colours ----------------------------------------------------------------------------------
 const char kColors[] = "yellow|white|black|red|green|blue|cyan|magenta|orange|purple|grey|pink";
 const float kRgb[][3] = {{1, 0.9f, 0.1f}, {1, 1, 1},  {0, 0, 0},       {0.9f, 0.1f, 0.1f}, {0.1f, 0.8f, 0.2f}, {0.15f, 0.35f, 1},
@@ -225,6 +279,7 @@ bool EvalHas(const Args& a, const Scope&) {
 
 // --- Frame, game entry ------------------------------------------------------------------------------
 void Frame() {
+    HoverFrame();
     if (g_dirty) {
         g_dirty = false;
         std::vector<Engine::AttentionDraw> draw;
@@ -260,6 +315,9 @@ void OnEntering() {
     g_areas.clear();
     g_dirty = false;
     g_focusPending = false;
+    g_hoverPath.clear();
+    g_hoverShown = g_hoverChanged = false;
+    Engine::HideHighlight();
     Engine::ForgetAttentionDraw();
 }
 
@@ -325,5 +383,11 @@ bool AttentionAreaInit() {
     }
     OnMainThreadFrame(&Frame);
     OnGameEntering(&OnEntering);
+    // Optional: the hovered railway queue entry is marked (railway_queue's tooltip hook).
+    bool hover = Engine::HaveHighlight() && FeatureActive("railway_queue") && Engine::SetRailwayHoverHandler(&OnRailwayHover);
+    // White for the outline: appended to the outline palette when the game reads its defines.
+    if (hover && !register_file_patch(L"common/defines/00_graphics.lua", &Engine::PatchGraphicsDefines))
+        Log("attention_area: the defines patch could not be registered; hover outlines use colour 0");
+    Log("attention_area: railway queue hover mark %s", hover ? "on" : "off (needs railway_queue's tooltip hook and the outline functions)");
     return true;
 }

@@ -676,6 +676,19 @@ static const size_t kSigCoastalMapRel = 0x1c, kSigCoastalCountDisp = 0x2d, kSigC
 // ->pixel rect {x, y, w, h} (disp32 +0x1d). (0x141636010)
 SIG(kSigProvinceRect, "49 8B 06 4C 8B 00 48 8B 46 18 8B 14 B8 49 8B CE 41 FF D0 48 8B 88 ?? ?? ?? ?? 0F 10 81 ?? ?? ?? ??")
 static const size_t kSigRectGfxDisp = 0x16, kSigRectDisp = 0x1d;
+// Province group outlines (the thin coloured lines the construction mode draws around build
+// targets): CreateHighlight(owner, shared_ptr* out, CPdxArray<int>* provinces, const int style[2]
+// {kind, palette index}) builds a CProvinceGroupHighlight (its outer edges) and registers a weak
+// reference in owner+0x430; it is drawn while the shared_ptr lives. Function start. (0x140bb9490)
+SIG(kSigHighlightCreate, "48 89 5C 24 08 48 89 6C 24 18 48 89 74 24 20 48 89 54 24 10 57 48 83 EC 30 49 8B F9 49 8B F0 48 8B DA 48 8B E9 B9 48 00 00 00 E8")
+// A caller (construction mode's secondary targets): ui = [rip] (rel32 +3); style = lea [rip]
+// (rel32 +0xa, insn ends +0xe); owner = ui->[disp32 +0x19]; E8 at +0x1d = CreateHighlight. (0x141dfae8c)
+SIG(kSigHighlightCreateSite, "48 8B 05 ?? ?? ?? ?? 4C 8D 0D ?? ?? ?? ?? 4D 8B C6 48 8D 54 24 ?? 48 8B 88 ?? ?? ?? ?? E8 ?? ?? ?? ??")
+static const size_t kSigHlUiRel = 3, kSigHlStyleRel = 0xa, kSigHlOwnerDisp = 0x19, kSigHlCreateCall = 0x1d;
+// Decision highlight colour validation: colours = [rip] (rel32 +2, the float count of
+// BORDER_COLOR_CUSTOM_HIGHLIGHTS, a CPdxArray<float> whose data pointer is 0xc before) / 4. (0x1407784ec)
+SIG(kSigHighlightPaletteCount, "8B 05 ?? ?? ?? ?? 99 83 E2 03 8D 3C 02 C1 FF 02 8B 8B ?? ?? ?? ??")
+static const size_t kSigPaletteCountRel = 2;
 
 // --- Code shapes at RTTI-found addresses (numeric triggers, NOTES.md E2) -------------------
 // CODE(name, "..."): checked with SigMatchAt at an address reached through an RTTI vtable, not

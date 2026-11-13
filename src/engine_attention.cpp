@@ -472,12 +472,117 @@ void ResolveProvinces() {
         g_provContainer, g_stateOwner);
 }
 
+// --- Province group outlines (CProvinceGroupHighlight) ---------------------------------------------
+using CreateHighlight_t = void(__fastcall*)(void* owner, void** sharedOut, const void* provinces, const int* style);
+CreateHighlight_t g_createHighlight = nullptr;
+uint32_t g_hlOwner = 0;            // ui -> highlight owner (list of weak references at +0x430)
+int g_hlKind = 0;                  // the style's first number, as construction mode passes it (meaning not traced)
+const int* g_paletteCount = nullptr;   // float count of BORDER_COLOR_CUSTOM_HIGHLIGHTS
+const float* const* g_paletteData = nullptr;
+void* g_hlShared[2] = {nullptr, nullptr};  // our shared_ptr { object, control block }
+
+struct IntArray {  // CPdxArray<int> as the highlight constructor reads it: data, count at +0xc
+    const int* data;
+    int cap;
+    int count;
+    void* allocator;
+};
+
+// std::shared_ptr release in the game's own MSVC layout: uses +8, weaks +0xc; vtable slot 0
+// destroys the object, slot 1 the control block.
+bool ReleaseRaw(void* ctrl) {
+    __try {
+        if (InterlockedDecrement((volatile LONG*)((uint8_t*)ctrl + 8)) == 0) {
+            ((void(__fastcall*)(void*))(*(void***)ctrl)[0])(ctrl);
+            if (InterlockedDecrement((volatile LONG*)((uint8_t*)ctrl + 0xc)) == 0)
+                ((void(__fastcall*)(void*))(*(void***)ctrl)[1])(ctrl);
+        }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool CreateRaw(void* owner, const IntArray* provinces, const int* style, void** out) {
+    __try {
+        g_createHighlight(owner, out, provinces, style);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+void ResolveHighlight() {
+    uint8_t* create = SigFindUnique("highlight_create", kSigHighlightCreate);
+    uint8_t* site = SigFindUnique("highlight_create_site", kSigHighlightCreateSite);
+    uint8_t* pal = SigFindUnique("highlight_palette_count", kSigHighlightPaletteCount);
+    if (!create || !site || !pal) return;
+    const int* style = (const int*)SigRipTarget(site, kSigHlStyleRel, kSigHlStyleRel + 4);
+    uint32_t owner = Rd<uint32_t>(site, kSigHlOwnerDisp);
+    bool agree = SigFollowRel32(site + kSigHlCreateCall) == create &&
+                 (void**)SigRipTarget(site, kSigHlUiRel, kSigHlUiRel + 4) == g_ppUi && g_ppUi && owner < 0x2000 && owner % 8 == 0 &&
+                 style[0] >= 0 && style[0] < 64 && style[1] >= 0 && style[1] < 64;
+    if (!agree) {
+        Log("ERROR: attention_area: the province outline call site disagrees; outlines off");
+        return;
+    }
+    g_createHighlight = (CreateHighlight_t)create;
+    g_hlOwner = owner;
+    g_hlKind = style[0];
+    g_paletteCount = (const int*)SigRipTarget(pal, kSigPaletteCountRel, kSigPaletteCountRel + 4);
+    g_paletteData = (const float* const*)((const uint8_t*)g_paletteCount - 0xc);
+    Log("Attention areas: province outlines: owner ui+0x%x, construction style {%d, colour %d}, palette %s", g_hlOwner, style[0],
+        style[1], SigDescribe(g_paletteCount).c_str());
+}
+
 }  // namespace
 
 void ResolveAttention() {
     ResolveBorders();
     ResolveCamera();  // before ResolveProvinces: the province id offset comes from goto_state
     ResolveProvinces();
+    ResolveHighlight();  // after ResolveCamera: cross-checks the UI global
+}
+
+bool HaveHighlight() { return g_createHighlight && g_hlOwner && g_paletteCount && g_ppUi; }
+
+int HighlightPaletteSize() {
+    int n = g_paletteCount ? *g_paletteCount : 0;
+    return n > 0 && n < 4096 ? n / 4 : 0;
+}
+
+int HighlightWhiteIndex() {
+    int n = HighlightPaletteSize();
+    const float* d = n && g_paletteData ? *g_paletteData : nullptr;
+    if (!d) return -1;
+    const float* c = d + (n - 1) * 4;
+    return c[0] == 1.0f && c[1] == 1.0f && c[2] == 1.0f && c[3] == 1.0f ? n - 1 : -1;
+}
+
+void HideHighlight() {
+    void* ctrl = g_hlShared[1];
+    g_hlShared[0] = g_hlShared[1] = nullptr;
+    if (ctrl && !ReleaseRaw(ctrl)) Log("ERROR: attention_area: releasing a province outline faulted (contained)");
+}
+
+bool ShowHighlight(const std::vector<int>& provinces, int paletteIndex) {
+    HideHighlight();
+    if (!HaveHighlight() || provinces.empty() || paletteIndex < 0 || paletteIndex >= HighlightPaletteSize()) return false;
+    void* ui = *g_ppUi;
+    void* owner = ui ? Rd<void*>(ui, g_hlOwner) : nullptr;
+    if (!owner) return false;
+    IntArray arr = {provinces.data(), (int)provinces.size(), (int)provinces.size(), nullptr};
+    // The colour is the style's second number: construction mode's {10, 2} draws palette colour 2
+    // (green); {15, 2} drew our outline green too in the first test (NOTES.md M7).
+    int style[2] = {g_hlKind, paletteIndex};
+    void* out[2] = {nullptr, nullptr};
+    if (!CreateRaw(owner, &arr, style, out)) {
+        Log("ERROR: attention_area: creating a province outline faulted (contained)");
+        return false;
+    }
+    g_hlShared[0] = out[0];
+    g_hlShared[1] = out[1];
+    return out[1] != nullptr;
 }
 
 bool HaveAttentionBorders() {

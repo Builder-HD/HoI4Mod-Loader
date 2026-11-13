@@ -312,11 +312,17 @@ struct AttentionDraw {
 bool HookAttention(void (*onFault)(const char* where));
 // Main thread, at a safe point: replaces what is drawn (empty: nothing). Borders go into the
 // layer the map currently draws (NOTES.md M5); they are re-added after the game rebuilds it.
-void SetAttentionDraw(const std::vector<AttentionDraw>& areas);
-// Main thread, every frame (cheap): draws wanted areas once the map's layers are known.
+void SetAttentionDraw(const std::vector<AttentionDraw>& areas);// Main thread, every frame (cheap): draws wanted areas once the map's layers are known.
 void AttentionTick();
 // The game entry: forget the borders of the previous game without touching them.
 void ForgetAttentionDraw();
+// Province group outlines (the thin lines construction mode draws around build targets): one
+// outline at a time for the UI. Main thread. Palette index: BORDER_COLOR_CUSTOM_HIGHLIGHTS.
+bool HaveHighlight();
+int HighlightPaletteSize();          // colours in the palette (0 if unknown)
+int HighlightWhiteIndex();           // the last colour if it is white (the loader's patch), else -1
+bool ShowHighlight(const std::vector<int>& provinces, int paletteIndex);  // replaces the previous one
+void HideHighlight();
 // Main thread, at a safe point: centre the camera on the box (map pixels) and set the target
 // height (height <= 0: fit the box, times fitFactor). `ref` and `ref2` are provinces of the area
 // used to calibrate the map -> camera mapping through the game's own centre-on-province. False if
@@ -365,6 +371,10 @@ bool QueueRailwayDismantle(int tag, const std::vector<int>& path, int from, int 
 // localisation defines it. Queues the tooltip and Localize hooks; false if not found.
 const char kRailwayDismantleTooltipKey[] = "HOI4_LOADER_RAILWAY_DISMANTLE_TOOLTIP";
 bool HookRailwayTooltip();
+// Called with a railway queue entry's province path each time the game builds its tooltip (the
+// player points at the entry; UI, main thread). Needs HookRailwayTooltip first; false otherwise.
+using RailwayHover_t = void (*)(const int* path, int count);
+bool SetRailwayHoverHandler(RailwayHover_t handler);
 // Railway entries' titles in the queue start with a marker: vanilla's red down triangle text icon
 // for dismantling, its green up triangle for building and upgrading, or the localisation of these
 // keys if a mod defines them. Queues the entry-update and SetText hooks; needs HookRailwayTooltip
@@ -442,6 +452,10 @@ int RemoveProvinceBuildingLevel(void* province, void* type, void* state, std::st
 // if the file has no such entry or already has the button. Pure text; tests call it directly.
 std::string PatchCountryStateViewGui(const std::string& original);
 const char kProvinceBuildingRemoveTooltipKey[] = "BUILDING_SLOT_REMOVE_BUILDING_LEVEL";
+// The patch that appends a white colour to NGraphics.BORDER_COLOR_CUSTOM_HIGHLIGHTS (00_graphics.lua)
+// for attention_area's hover outline. Empty if the file has no such table or already has it. Pure text.
+std::string PatchGraphicsDefines(const std::string& original);
+const char kHighlightWhiteTag[] = "-- hoi4_loader: white (attention_area hover outline)";
 
 // --- Scope blocks and iterators (region_scope; engine_scope.cpp, NOTES.md F5) -----------------
 // The vanilla state iterators the region iterators are cloned from. keys: the block keys the

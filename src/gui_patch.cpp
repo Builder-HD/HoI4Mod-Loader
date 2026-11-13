@@ -2,6 +2,7 @@
 // button, as vanilla's state_shared_slot_building_entry has, to province_building_entry. Pure text
 // work on whatever copy the game loads (vanilla's or a mod's), so it has no engine dependency and
 // the smoke tests call it directly.
+#include <ctype.h>
 #include <string.h>
 
 #include <string>
@@ -100,6 +101,56 @@ std::string PatchCountryStateViewGui(const std::string& original) {
         changed = true;
     }
     return changed ? out : std::string();
+}
+
+// Appends a white entry to NGraphics.BORDER_COLOR_CUSTOM_HIGHLIGHTS (the province group outline
+// colours), for attention_area's hover outline. Lua comments (--, --[[ ]]) are skipped while the
+// table's closing brace is searched. Empty if the file has no such table or already has the entry.
+std::string PatchGraphicsDefines(const std::string& original) {
+    if (original.find(kHighlightWhiteTag) != std::string::npos) return {};
+    // The name also appears in comments ("Refers to the colors in BORDER_COLOR_CUSTOM_HIGHLIGHTS"):
+    // the definition is the occurrence followed by `= {`.
+    size_t open = std::string::npos;
+    for (size_t key = original.find("BORDER_COLOR_CUSTOM_HIGHLIGHTS"); key != std::string::npos && open == std::string::npos;
+         key = original.find("BORDER_COLOR_CUSTOM_HIGHLIGHTS", key + 1)) {
+        size_t eq = original.find_first_not_of(" \t", key + 30);
+        if (eq == std::string::npos || original[eq] != '=') continue;
+        size_t brace = original.find_first_not_of(" \t\r\n", eq + 1);
+        if (brace != std::string::npos && original[brace] == '{') open = brace;
+    }
+    if (open == std::string::npos) return {};
+    size_t lastValue = std::string::npos;  // last character that is neither space nor comment
+    size_t i = open + 1;
+    while (i < original.size()) {
+        if (original.compare(i, 4, "--[[") == 0) {
+            size_t end = original.find("]]", i + 4);
+            if (end == std::string::npos) return {};
+            i = end + 2;
+        } else if (original.compare(i, 2, "--") == 0) {
+            size_t end = original.find('\n', i);
+            if (end == std::string::npos) return {};
+            i = end + 1;
+        } else if (original[i] == '{') {
+            return {};  // nested tables: not the expected shape
+        } else if (original[i] == '}') {
+            break;
+        } else {
+            if (!isspace((unsigned char)original[i])) lastValue = i;
+            ++i;
+        }
+    }
+    if (i >= original.size()) return {};
+    bool crlf = original.find("\r\n") != std::string::npos;
+    const char* nl = crlf ? "\r\n" : "\n";
+    // The closing brace's own line: insert before its indentation so the entry gets its own line.
+    size_t lineStart = original.rfind('\n', i);
+    lineStart = lineStart == std::string::npos || lineStart < open ? i : lineStart + 1;
+    std::string out = original;
+    out.insert(lineStart, std::string("\t\t1.0, 1.0, 1.0, 1.0, ") + kHighlightWhiteTag + nl);
+    // The previous last value needs a separator (Lua); it lies before lineStart, so insert it second.
+    if (lastValue != std::string::npos && original[lastValue] != ',' && original[lastValue] != '{')
+        out.insert(lastValue + 1, ",");
+    return out;
 }
 
 }  // namespace Engine
