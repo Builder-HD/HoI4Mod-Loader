@@ -1,0 +1,61 @@
+# hoi4_loader test mod: air scenarios (feature air_scenarios, MODDING.md "Air scenarios").
+# Entries in this folder say where an entity plays. The entities can have any name.
+#
+#   <unique name> = {
+#       entity   = the scenario's entity (gfx/entities/*.asset)
+#       slot     = the game's scenario it plays in (mission + plane count), e.g. bomber_1_CAS
+#       attacker = {                 optional
+#           equipment = { ... }      types or archetypes of the attacking planes
+#           country   = { ... }      country tags of the attacking planes
+#       }
+#       defender = { ... }           optional, same keys; only for slots with a defender
+#                                    (the "_vs_" fights)
+#       weight   = 1                 optional: chance against other matching entries
+#   }
+#
+# Every condition written must hold; within a side, one matching plane is enough. A missing
+# block or key matches anything. A matching entry plays instead of vanilla. An entry of the
+# same name in a later mod replaces this one.
+
+# Gunship orbit: CAS (one plane) for small_plane_cas_airframe_1 only.
+hlt_air_gunship_orbit = {
+	entity = hlt_air_gunship_orbit_entity
+	slot = bomber_1_CAS
+	attacker = {
+		equipment = { small_plane_cas_airframe_1 }
+	}
+}
+
+# Long chase: 1 vs 1 for every small plane (archetype small_plane_airframe).
+hlt_air_long_chase = {
+	entity = hlt_air_long_chase_entity
+	slot = fighter_1_vs_fighter_1
+	attacker = {
+		equipment = { small_plane_airframe }
+	}
+}
+
+# Head-on: 1 vs 1 when a GERMAN fighter_equipment_1 attacks. It also matches the long chase:
+# this one plays 3 times out of 4 (weight 3 against 1).
+hlt_air_head_on = {
+	entity = hlt_air_head_on_entity
+	slot = fighter_1_vs_fighter_1
+	attacker = {
+		equipment = { fighter_equipment_1 }
+		country = { GER }
+	}
+	weight = 3
+}
+
+# Interception: two fighter types against a British or American heavy bomber, which fires back.
+hlt_air_interception = {
+	entity = hlt_air_interception_entity
+	slot = fighter_1_vs_bomber_1
+	attacker = {
+		equipment = { fighter_equipment_0 fighter_equipment_1 }
+	}
+	defender = {
+		equipment = { strat_bomber_equipment_1 }
+		country = { ENG USA }
+	}
+}
