@@ -688,6 +688,21 @@ int RegionOfState(int stateId) {
     return 0;
 }
 
+int StateCount() {
+    void* gs = GameState();
+    return gs && g_stateArray && g_stateCount ? Rd<int>(gs, g_stateCount) : 0;
+}
+
+bool AreaProvinceObjects(AreaKind kind, int id, std::vector<void*>* out) {
+    out->clear();
+    if (!g_provinces || !g_provinceCount) return false;
+    void* area = kind == AreaKind::State ? StateById(id) : RegionById(id);
+    if (!area) return false;
+    PtrList l = ListAt(area, g_provinces, g_provinceCount);
+    out->assign(l.data, l.data + l.count);
+    return true;
+}
+
 int GameDateHours() {
     void* gs = GameState();
     return gs && g_gameDate ? Rd<int>(gs, g_gameDate) : 0;

@@ -24,7 +24,11 @@
 // Args::key = the text.
 // Int with choices: a number, or one of the words in ParamSpec::choices ("all"). A word reads as
 // Args::i = kIntWord0 + its index; IntWordIndex tells them apart (-1 for a number).
-enum class ParamType { Int, Bool, Key, Country, Choice, Token, Text };
+// Number: a decimal such as 0.8 or -2.5 (|x| <= 1000000), kept in thousandths: Args::i = 800,
+// Args::num = 0.8.
+// Block: a nested `key = { <sub keys> }` with its own schema (ParamSpec::block). Its keys are read
+// by the game's own clause reader, so errors carry file and line. Args::count / Args::block read it.
+enum class ParamType { Int, Bool, Key, Country, Choice, Token, Text, Number, Block };
 enum : int { kIntWord0 = INT32_MIN };
 inline int IntWordIndex(int v) { return v >= kIntWord0 && v < kIntWord0 + 64 ? v - kIntWord0 : -1; }
 enum class CommandKind { Effect, Trigger };
@@ -69,11 +73,19 @@ struct ParamSpec {
     // Declared but not supported yet: writing it is a parse error ("not supported yet"), so the
     // name stays reserved for a later version instead of reading as a typo.
     bool reserved = false;
+    // Int or Block only: the key may be written several times; every value is kept, in script
+    // order (Args::count / Args::at / Args::block). Without it a second value replaces the first.
+    bool repeat = false;
+    // Block: the keys allowed inside (any types but Block; no scope defaults). Must outlive the
+    // registration call (copied then).
+    const std::vector<ParamSpec>* block = nullptr;
 };
 
 // Country parameter values below 1 are scope keywords, resolved per evaluation; kCountryAny
 // (only where the parameter's choices are "any") stays as it is.
 enum : int { kCountryThis = -1, kCountryRoot = -2, kCountryFrom = -3, kCountryPrev = -4, kCountryAny = -5 };
+
+struct ParsedCommand;
 
 struct ArgValue {
     bool present = false;
@@ -81,6 +93,8 @@ struct ArgValue {
     bool b = false;
     const char* s = "";  // Key text (owned by the parsed command), "" if absent
     bool fromScope = false;  // filled in from the scope (ParamSpec::fromScope), not written in script
+    const std::vector<int>* ints = nullptr;                // repeat Int: every value written
+    const std::vector<ParsedCommand*>* blocks = nullptr;  // Block: every block written
 };
 
 // Typed arguments in schema order. Plain reads: safe in trigger evaluate (no allocation).
@@ -92,9 +106,23 @@ public:
     int i(size_t i) const { return i < n_ ? v_[i].i : 0; }
     bool b(size_t i) const { return i < n_ && v_[i].b; }
     const char* key(size_t i) const { return i < n_ ? v_[i].s : ""; }
+    double num(size_t i) const { return i < n_ ? v_[i].i / 1000.0 : 0.0; }  // Number
     // True when the value came from the scope, e.g. a region inside a strategic region block.
     // Tooltips use it to leave out what the scope's header already names.
     bool fromScope(size_t i) const { return i < n_ && v_[i].fromScope; }
+    // Repeated Int / Block: how many values were written (0 if absent); a single Int counts 1.
+    size_t count(size_t i) const {
+        if (!has(i)) return 0;
+        if (v_[i].ints) return v_[i].ints->size();
+        if (v_[i].blocks) return v_[i].blocks->size();
+        return 1;
+    }
+    int at(size_t i, size_t k) const {
+        return i < n_ && v_[i].ints && k < v_[i].ints->size() ? (*v_[i].ints)[k] : (k == 0 ? this->i(i) : 0);
+    }
+    // The k-th block's own arguments, in its schema's order. Country values inside a block are as
+    // written (a tag, or a scope keyword code): resolve them with native_country().
+    Args block(size_t i, size_t k) const;
 
 private:
     const ArgValue* v_;
@@ -119,6 +147,10 @@ private:
     Scope link(size_t offset) const;
     const uint8_t* p_;
 };
+
+// A Country value as stored (tag, or THIS/ROOT/FROM/PREV code) resolved in a scope: the tag, or
+// 0 if the keyword names no country there. kCountryAny stays as it is.
+int native_country(int code, const Scope& s);
 
 // Tooltip text builder (UTF-8). Allocation is fine here: tooltips run in UI code only.
 class TooltipText {
@@ -337,6 +369,10 @@ struct Command {
     std::vector<int> childTokens;  // engine tokens of childNames (set at engine registration)
     void (*blockExecute)(const Args&, const Scope&, const EffectChildren&) = nullptr;
     std::vector<LocText> texts;  // translatable tooltip texts (docs)
+    // Block parameters: the sub-schema of params[i] as its own command (null for other types).
+    // Not registered with the engine; the binding gives it a parse-only object (engineEntry).
+    std::vector<Command*> blocks;
+    void* engineEntry = nullptr;
 
     CommandStatus status = CommandStatus::Pending;
     std::string reason;               // why refused
@@ -360,6 +396,10 @@ struct ParsedCommand {
     const Command* cmd;
     std::vector<ArgValue> args;
     std::vector<std::string> storage;  // Key text
+    // Repeated Int values and Block children per parameter (sized once, so the inner vectors
+    // never move: ArgValue::ints / ::blocks point at them).
+    std::vector<std::vector<int>> lists;
+    std::vector<std::vector<ParsedCommand*>> children;
     bool parseError = false;
     // Numeric triggers: which form was written; block form needs its compare key.
     bool valueForm = false;
@@ -392,6 +432,9 @@ int NativeParamIndex(const Command& cmd, int keyToken);
 ParsedCommand* NativeNewParsed(const Command& cmd);
 // Converts text by the parameter's type. Returns false and fills *error on a type error.
 bool NativeSetArg(ParsedCommand& pc, size_t index, const char* text, std::string* error);
+// Block parameters: adds a parsed (and validated) child block. False and *error if index is not a
+// Block parameter, the child is invalid, or a non-repeat block was already written.
+bool NativeAddBlock(ParsedCommand& pc, size_t index, ParsedCommand* child, std::string* error);
 // All required parameters present and no parse error. Logs the first problem per command.
 bool NativeValidate(ParsedCommand& pc);
 

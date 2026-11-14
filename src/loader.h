@@ -149,3 +149,4 @@ bool TimeControlInit();       // plugin_time_control.cpp
 bool ProvinceBuildingRemovalInit();  // plugin_province_buildings.cpp
 bool AirScenariosInit();      // plugin_air_scenarios.cpp
 bool EquipmentConversionInit();  // plugin_equipment_conversion.cpp
+bool AttentionAreaInit();        // plugin_attention_area.cpp

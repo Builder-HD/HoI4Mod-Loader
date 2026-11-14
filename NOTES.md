@@ -5297,3 +5297,213 @@ Single player, test mod enabled, 1.19.5. Start any game and use the console:
 - **Not seen in play:** head-on's weight (needs German `fighter_equipment_1` attackers; the owner's
   fighters are designer types) and the interception's defender block (needs British or American
   heavy bombers). Both rest on the matching and pick code the unit test covers.
+# Part M: attention areas (`attention_area`, investigation)
+
+Request (2026-11-12): mark a state, province or any collection of provinces with an outline whose
+colour, width and effect (pulse, glow) a mod chooses, and move/zoom the camera so the marked area
+is in view. Gameplay (what is marked, when) goes in a mod; the loader adds the mechanics.
+
+## M1: what vanilla already has (1.19.4.2 documentation folder)
+
+- **Scripted map modes** (`common/map_modes/*.txt`, documented in `common/map_modes/documentation.md`):
+  two layers (`bottom`, `top`), each of `type = none | country | state | state_controller` or one of
+  the hard-coded `game_map_mode_*` layers. A `color` trigger sets temp variables `red green blue
+  alpha` (0..1), `thickness` (with `thickness = yes`) and `highlighted` (pulsing). `targets` limits
+  the scopes. So vanilla can outline whole **states or countries**, never single provinces.
+- **Camera:** `goto_state` / `goto_province` effects (centre on one place, fully zoomed in). No zoom
+  control, no "fit these provinces".
+- **Map mode switch from script:** none (`force_update_map_mode` only rebuilds a map mode). The
+  console has `mapmode`.
+- **No province scope** in script (`is_coastal` is a state trigger), so "the coastal provinces of
+  CHI" cannot be written in vanilla at all.
+
+Conclusion: province-level outlines, the zoom/fit camera and switching to the map mode need the
+loader.
+
+## M2: engine findings (1.19.4.2 `v1.19.4.2.2da5`, Ghidra 12.2; addresses for orientation only)
+
+### Gradient borders (the renderer the outlines reuse)
+
+- `CGradientBorderManager` (`FUN_140fbeef0` = rebuild dispatcher) owns **23 layers**
+  (`manager+0x18`, one pointer per layer type 0..0x16). Layer types 0xf / 0x10 are the current
+  scripted map mode's bottom / top: `FUN_140b01810(scriptedMapMode, layer, isTop)` →
+  `FUN_140aff8e0(layerDef = mapMode + (isTop ? 0x78 : 8), layer)`.
+- **Layer** (`CGradientBorderLayer`): borders `CPdxArray<border*>` at +0 (data, cap +8, count +0xc,
+  allocator +0x10); `+0x18` province → owning border (one border per province **per layer**);
+  `+0x48` dirty; `+0x58` dirty province list; `+0x78` non-null while a fill job runs
+  (`FUN_141710c60` waits for it; every border setter calls it first).
+- **Border** (0x88 bytes, `FUN_1416331e0(mem, layer)` constructs, `FUN_141633330` clears and
+  frees its arrays, then `operator delete(0x88)`):
+  | Field | Meaning | Setter |
+  |---|---|---|
+  | +0x18 / +0x24 | province ids / count | `FUN_141635120(border, id)` adds (no duplicates) |
+  | +0x48 | dirty | set by every setter |
+  | +0x4c (short) | outline mode: 0xf4 without thickness, -1 with | `FUN_141638f60` |
+  | +0x50 (float) | thickness (1.0 default) | `FUN_1416391c0` |
+  | +0x57 (bool) | highlighted = pulsing (set directly, then +0x48) | - |
+  | +0x58 | packed colour | `FUN_141638df0(border, CColor*)` |
+  | +0x68/+0x70/+0x78 | camera-distance callbacks (thickness mode) | `FUN_141639750(border, 1)` |
+  - `FUN_141635df0(border)`: reset (provinces, colour, flags) without freeing.
+  - Colour: `FUN_1422b4b70(c)` init, `FUN_1422b5450(c, r, g, b, a)` floats 0..1.
+- **Scripted layer fill** `FUN_140b01900(layerDef, border, scope, provinceList)`: reset if the list
+  changed; evaluate `color`; read temp variables `alpha red green blue` (`0x143128530/4d0/4f0/510`,
+  clamped 0..1), set colour, `highlighted` → +0x57, then thickness mode (`0xf4`, or -1 + thickness
+  + callbacks); then `FUN_141635120` per province. **A border takes any province list**, which is
+  what province-level areas need.
+
+### Which layers are drawn
+
+- `FUN_140e85e10(map, mode, force, notify)` sets up a map mode: `FUN_140fb5fc0(manager, &{lo, hi})`
+  picks **the two layers drawn** (`-1` = none). The default political mode (0) already uses two
+  (`{5, 0}`). So an always-on overlay would need a third slot in the renderer: **not attempted**.
+- Scripted map modes are modes `0x28 + index` (database `FUN_1403b6810()+0x28`); the current one is
+  stored at `map+0x118` (`FUN_140e81890()` = `DAT_1433ead00`) and drawn from layers 0xf / 0x10.
+- Switching: map mode dispatcher `DAT_1433e7818` (`FUN_140ab7ea0`),
+  `FUN_140ab8110(dispatcher, mode, 0)`; full border rebuild + refresh `FUN_140ab80b0(dispatcher, x)`.
+
+### Camera
+
+- `goto_state` effect (`CGoToStateEffect` slot 13, `FUN_140371250`): only for the player's country
+  (`gamestate+0x520/0x524`); `interface->vt[0x1b8/8](province id)` centres on the state's first
+  province, then `FUN_1412f3390(interface->vt[0x138/8](), 0)` = set the target camera height
+  (0 → clamped to the minimum, i.e. fully zoomed in). `interface` = `DAT_1433ddb10`
+  (`FUN_1402ba210` sets it with `DAT_1433ddb08`).
+- Camera object (from `interface->vt[0x138/8]()`): eye `+0x680` (x, height, z), look-at `+0x68c`;
+  **targets** the camera moves to smoothly: eye `+0x698..0x6a0`, look-at `+0x6a4..0x6ac`; height
+  limits `+0x6d0` (min, int) and `+0x6d4` (max, int; `debug_zoom` sets 0 / 1200);
+  `FUN_1412f01b0` clamps to the map size (`DAT_1433e7700+0x40/+0x44`) and the height limits.
+- `FUN_1412f15c0(camera, &pos{x,y,z})`: look at a position (sets both targets, keeps the tilt
+  offset from `FUN_140210ed0()+0x260`). With `FUN_1412f3390` this gives "centre on (x, z) at height
+  h", i.e. fit a bounding box.
+
+### Script parser
+
+- The effect clause reader (`CEffect` slot 3, `FUN_140587f40`) loops `key = value` pairs and calls
+  slot 4 (item) per key, so a nested `area = { ... }` can be read by calling it again on a helper
+  object. **Bare lists** (`{ 123 23 }`) and colour tuples were not traced; v1 uses repeated keys
+  (`province = 123 province = 23`) and `red/green/blue/alpha` keys instead.
+
+## M3: first design (superseded by M5: the owner asked for an always-on overlay)
+
+- The loader's own scripted map mode `hoi4_loader_attention_areas` (defined by the mod: bottom
+  `game_map_mode_country`, top `none`). When its top layer is rebuilt, the loader fills it: one
+  border per attention area, with the area's provinces, colour, thickness, pulse.
+- `focus_attention_area` switches the player to that map mode, then centres and zooms the camera
+  on the area's bounding box.
+- Still to find: province centre positions, the coastal flag, the map mode index by name, and the
+  signatures for all of the above.
+
+## M4: follow-up idea: a general-purpose "area selector" (owner's request, 2026-11-13)
+
+The province filter `add_attention_area` uses (`area = { owner/controller/state/strategic_region/
+coastal ... }`) is useful far beyond drawing outlines. Idea: break it out into its own feature, an
+**area selector** other effects can iterate. Example from the owner: an event that builds coastal
+forts in every coastal province SWE controls:
+
+```
+every_selected_province = {            # name to be decided
+    area = { controller = SWE coastal = yes }
+    add_building_construction = { type = coastal_bunker level = 1 instant_build = yes }  # needs a province target
+}
+```
+
+Open points before doing it:
+- HoI4 has no province scope, so the children need one: either a new province scope (largest
+  piece of work; vanilla effects such as `add_building_construction` take `province = <id>`
+  inside a state scope), or the selector runs its children in the **state** scope of each
+  province with the province id in a temp variable (`hoi4_loader_province`), so vanilla
+  `add_building_construction = { province = var:hoi4_loader_province ... }` style effects work
+  if they accept variables (to check).
+- Determinism: selection reads game state only (ownership, control, map flags), iterated in
+  province id order, so it is multiplayer safe as an effect.
+- Implementation: keep the selection code in `attention_area` separate from the drawing
+  (`AreaSelect(const Args&, std::vector<int>* provinces)`), so the selector feature can reuse it.
+
+## M5: implementation (2026-11-13, always-on overlay)
+
+**Why injection.** Every map mode draws exactly two gradient border layers (manager `+0x64/+0x68`);
+the frame update (`FUN_140fbf610`) fills all 23 layers but uploads only those two to the GPU
+(`FUN_14170f5d0(ctx, layer, slot, rect, cutoff, thickness)`), and the political map already uses
+both (`{5, 0}`: layer 0 is the country colour layer, `FUN_140fb82c0`). A third layer would need a
+renderer and shader change. So the loader puts its own border objects into the layer drawn on top
+(the second slot, else the first) and keeps them there:
+- **Before the game rebuilds that layer** (RebuildAll / Rebuild hooks) they are taken out and freed
+  the way the game frees borders (Clear, then `operator delete(p, 0x88)`); after it, new ones are
+  added (`operator new(0x88)`, the border constructor, colour, cutoff, thickness, pulse, provinces).
+  The game's rebuilds free every border of a layer when the count differs, so leaving ours inside
+  would let the game free them under us.
+- **When a map mode picks other layers** (SetActiveLayers hook) they move; the old layer is rebuilt
+  by the game's own function so it gets its provinces back.
+- A province belongs to one border per layer (`layer+0x18[id]`), so inside an area the area's
+  border replaces the layer's own one, and the last added area wins on overlaps.
+- The manager pointer is never read from a global: each hook records it (`this`). Our borders are
+  only freed if they are still in that layer's list; otherwise they are forgotten.
+- Game entry (`OnGameEntering`) forgets everything without touching it.
+
+**Camera.** `focus_attention_area` (deferred to the next frame) calls the UI's own
+centre-on-province (vtable slot from `goto_state`) for the area's most central province, reads
+the camera's target look-at, and does the same for the province farthest from it vertically to
+learn the direction of the map's y axis in camera z. Then `LookAt(x, height, z)` on the box centre
+(offset from the first province) and `SetTargetHeight` (from `goto_state`'s tail), which clamps to
+the camera's limits (`+0x6d0/+0x6d4`). Fit height = max(box width / 1.78, box height).
+
+**Province data.** Province objects: gamestate +8 container, `Get(id)` = vtable slot 0 (as the
+railway code); id at `+0xa4` (from `goto_state`); pixel rect: `province->+0xb8 ->+0x88` {x, y, w, h}
+(the border fill); coastal: map data `[+0x268][id]->+0xd2 & 8` (the state coastal refresh);
+controller (railways), state owner `+0xcc` (province buildings). Land provinces: those in a state.
+
+**Native script API.** `Block` parameters are read by calling the game's effect clause reader
+(`CEffect` slot 3) on a parse-only object of the block's sub-command (a clone of the template
+effect with the generic item/validate slots), so keys, errors and file/line come from the game.
+Repeated Int keys and Number values are core-only (tested in `native_script_test`, section 13).
+
+**Out of the game (2026-11-13):** builds; `native_script_test` 233 checks pass; smoke test
+passes; `check_signatures.py` on 1.19.4.2: all 124 match once, the 15 new ones included.
+
+### M5 in-game test plan (not run yet)
+
+Install the DLL and the "HoI4Mod Loader: Attention Areas" mod; start a game as any country.
+1. `loader.log`: the three "Attention areas:" resolve lines, `Feature attention_area ... active`,
+   the four commands registered; `attention_area: gradient border hooks run on thread ... (the
+   main thread)` after the map shows.
+2. **Mark China's Coast:** a cyan border around China's whole coast (one outline, not per
+   province); the camera moves to it and zooms out to fit. Log: `marks N provinces`, the focus
+   line with the calibration values. Check: the camera lands on China, not mirrored north/south
+   (z sign), and the whole coast is in view.
+3. Switch map modes (political, terrain, supply, a scripted one): the border stays; switch back.
+   Wait a few days (refreshes): still there, no flicker.
+4. **Mark Sweden's Coast:** pulsing orange, sharp edge. Compare `glow = yes` (cyan) and `glow = no`
+   (orange): which is soft, which sharp? Does `width` change anything in both? (Note for
+   kCutoffLayer / kCutoffSharp.)
+5. **Mark Gotland and Part of Hainan:** red; camera at height 600 on the box between them.
+6. **Clear All Marks:** every border gone, the political map's colours are back in those provinces
+   at once (the layer rebuild).
+7. Save, load: no marks (not saved), no crash; mark again works.
+8. Main menu and back into another game: no crash, no stale borders.
+9. Without the loader: decisions hidden, no crash; `error.log` has the unknown-effect lines only.
+
+## M6: first in-game test (2026-11-13, 1.19.5.0, owner)
+
+- **Works:** "Mark China's Coast" drew one cyan outline around China's whole coast, in the
+  political map mode (the injection into the drawn layer works). `loader.log`: 31 provinces, box
+  4630,1032 86x230; the camera centred on it (z sign +1, look-at 4671/1146).
+- The "NOT the main thread" line at 06:43:44 was thread 24552, which *is* the main thread: the
+  hook first ran while the game loaded, before the first frame, when `IsMainThread()` is still
+  false. The line is now written only from the first hook call after the first frame.
+- **Too close:** fit height 230 for a 230-pixel box cut the coast at the bottom. Fit factor now 1.6
+  (`kFitFactor`): height = 1.6 x max(box height, box width / 1.78).
+- **Scattered areas** (Gotland and Hainan): the box centre lies in empty map. Owner: then don't
+  move the camera. Now: if the province nearest the box centre is farther than a quarter of the
+  box's larger side (at least 40 px), `focus_attention_area` logs it and leaves the camera.
+- **Clearing left provinces without the country colour:** the borders the loader freed had taken
+  those provinces in the country layer; the game's rebuild of that layer (`FUN_140fb82c0`) skips a
+  border whose province list is unchanged and `AddProvince` does nothing for a province already in
+  the list, so nobody owned them again. Now, when the loader's borders leave and are not put back
+  at once (areas removed or replaced, the drawn layer changes), every border of that layer is
+  reset first (`kSigBorderReset`, `FUN_141635df0`, the scripted fill's own reset), so the rebuild
+  adds every province again. Around the game's own rebuilds of that layer (same areas going back)
+  nothing is reset.
+- **Re-test passed (2026-11-13, owner):** the coast fits on screen with the 1.6 factor; the
+  scattered Gotland/Hainan area leaves the camera alone; "Clear All Marks" brings the country
+  colour back at once.
+- Still to check: glow/width looks; map mode switches; save/load; main menu and another game.

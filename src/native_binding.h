@@ -40,7 +40,11 @@ using Create_t = void*(__fastcall*)(void* entry);
 
 ParsedCommand* Rec(void* self);
 // A block key: the command's parameter, else "Unexpected token" (engine error, value skipped).
-void ReadItemFor(ParsedCommand* pc, void* parser, int token);
+// A Block parameter's `{ ... }` is read by the game's clause reader on a parse-only object of its
+// sub-command (BindBlocks); `mask` is the scope mask the reader passes on.
+void ReadItemFor(ParsedCommand* pc, void* parser, int token, void* mask = nullptr);
+// Parse-only objects for the command's Block parameters (call from every Bind* of a command).
+void BindBlocks(Command& c);
 EngineString* MakeTooltip(EngineString* out, const std::string& text);
 // Vtable copy with the RTTI locator at [-1]; `tail` is stored at vt[tmpl.slots].
 void** Clone(const Engine::Vtable& tmpl, void* tail = nullptr);

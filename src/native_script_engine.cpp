@@ -22,11 +22,34 @@ const char* ValueText(const void* value) {
     return n ? *(const char* const*)((const uint8_t*)value + 8) : "";
 }
 
-void ReadItemFor(ParsedCommand* pc, void* parser, int token) {
+using BlockClause_t = void(__fastcall*)(void* self, void* parser, void* mask);
+
+void ReadItemFor(ParsedCommand* pc, void* parser, int token, void* mask) {
     int idx = pc ? NativeParamIndex(*pc->cmd, token) : -1;
     if (idx < 0) {
         Engine::ParserUnexpected(parser);  // engine error with file/line, skips the value
         if (pc) pc->parseError = true;
+        return;
+    }
+    if (pc->cmd->params[idx].type == ParamType::Block) {
+        const Command* sub = pc->cmd->blocks[idx];
+        auto* e = sub ? (EffectEntryObj*)sub->engineEntry : nullptr;
+        void* obj = e ? EffectEntryCreate(e) : nullptr;
+        if (!obj) {
+            Engine::ParserUnexpected(parser);
+            pc->parseError = true;
+            Log("Native command '%s': cannot read the '%s' block (no parse object)", pc->cmd->name.c_str(),
+                pc->cmd->params[idx].name);
+            return;
+        }
+        // The game's block loop: `{` checked ("Non-assign effect is not enclosed"), each key to E_Item
+        // of the sub-command, then its validate. The object is a parse helper only (kept, never run).
+        ((BlockClause_t)Engine::effectBase.vt[kE_ReadClause])(obj, parser, mask);
+        std::string error;
+        if (!NativeAddBlock(*pc, (size_t)idx, Rec(obj), &error)) {
+            pc->parseError = true;
+            Log("Native command '%s': %s", pc->cmd->name.c_str(), error.c_str());
+        }
         return;
     }
     EngineString text{};
@@ -39,7 +62,7 @@ void ReadItemFor(ParsedCommand* pc, void* parser, int token) {
     }
 }
 
-void ReadItem(void* self, void* parser, int token) { ReadItemFor(Rec(self), parser, token); }
+void ReadItem(void* self, void* parser, int token, void* mask = nullptr) { ReadItemFor(Rec(self), parser, token, mask); }
 
 bool ReadValue(void* self, const void* value) {
     ParsedCommand* pc = Rec(self);
@@ -59,7 +82,7 @@ EngineString* MakeTooltip(EngineString* out, const std::string& text) {
 }
 
 // --- Effect slots --------------------------------------------------------------------------
-void __fastcall E_Item(void* self, void* parser, int token, void*) { ReadItem(self, parser, token); }
+void __fastcall E_Item(void* self, void* parser, int token, void* mask) { ReadItem(self, parser, token, mask); }
 bool __fastcall E_Validate(void* self) { return Rec(self) && NativeValidate(*Rec(self)); }
 bool __fastcall E_Value(void* self, const void* value) { return ReadValue(self, value); }
 EngineString* __fastcall E_Tooltip(void* self, EngineString* out, void* ctx) {
@@ -70,7 +93,7 @@ uint64_t __fastcall E_Scopes(void* self) { return Rec(self) ? Rec(self)->cmd->sc
 
 // --- Trigger slots -------------------------------------------------------------------------
 bool __fastcall T_Value(void* self, const void* value) { return ReadValue(self, value); }
-void __fastcall T_Item(void* self, void* parser, int token, void*) { ReadItem(self, parser, token); }
+void __fastcall T_Item(void* self, void* parser, int token, void* mask) { ReadItem(self, parser, token, mask); }
 bool __fastcall T_Validate(void* self) { return Rec(self) && NativeValidate(*Rec(self)); }
 uint64_t __fastcall T_Scopes(void* self) { return Rec(self) ? Rec(self)->cmd->scopes : 0; }
 uint64_t __fastcall T_Targets(void*) { return 0; }
@@ -122,7 +145,24 @@ void** EntryVtable(void** templateEntryVt, void* create) {
     return block + 1;
 }
 
+void BindBlocks(Command& c) {
+    for (Command* sub : c.blocks) {
+        if (!sub || sub->engineEntry) continue;
+        void** vt = Clone(Engine::effectTemplate);
+        vt[kE_ReadClause] = Engine::effectBase.vt[3];
+        vt[kE_Item] = (void*)&E_Item;
+        vt[kE_Validate] = (void*)&E_Validate;
+        vt[kE_Value] = (void*)&E_Value;
+        vt[kE_Tooltip] = (void*)&E_Tooltip;
+        vt[kE_Execute] = (void*)&E_Execute;  // never runs: the sub-command has no execute callback
+        vt[kE_Scopes] = (void*)&E_Scopes;
+        sub->engineEntry =
+            new EffectEntryObj{EntryVtable(Engine::effectTemplateEntryVtable, (void*)&EffectEntryCreate), sub->help.c_str(), sub, vt};
+    }
+}
+
 bool BindEffect(Command& c) {
+    BindBlocks(c);
     void** vt = Clone(Engine::effectTemplate);
     vt[kE_ReadClause] = c.form == Form::Block ? Engine::effectBase.vt[3] : Engine::effectValueReader.vt[3];
     vt[kE_Item] = (void*)&E_Item;
@@ -136,6 +176,7 @@ bool BindEffect(Command& c) {
 }
 
 bool BindTrigger(Command& c) {
+    BindBlocks(c);
     void** vt = Clone(Engine::triggerTemplate);
     vt[kT_Value] = (void*)&T_Value;
     vt[kT_ReadClause] = c.form == Form::Block ? Engine::triggerBase.vt[5] : Engine::triggerTemplate.vt[5];

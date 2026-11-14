@@ -345,6 +345,36 @@ int main() {
                                                           nullptr},
                                         "feat_k"),
           "effect block named like a loader effect refused");
+    // Numbers, repeated keys and nested blocks (checked in 13).
+    static std::vector<ParamSpec> kZoneKeys;
+    kZoneKeys = {{"province", ParamType::Int, false}, {"owner", ParamType::Country, false}, {"coastal", ParamType::Bool, false}};
+    kZoneKeys[0].repeat = true;
+    ParamSpec zone{"zone", ParamType::Block, true};
+    zone.repeat = true;
+    zone.block = &kZoneKeys;
+    ParamSpec ids{"id", ParamType::Int, false};
+    ids.repeat = true;
+    CHECK(register_native_effect(Effect("mark_area", {{"alpha", ParamType::Number, false}, ids, zone}), "feat_m"),
+          "effect with a number, a repeated int and a repeated block queued");
+    ParamSpec badRepeat{"name", ParamType::Key, false};
+    badRepeat.repeat = true;
+    CHECK(!register_native_effect(Effect("bad_repeat", {badRepeat}), "feat_m"), "repeated key parameter refused");
+    CHECK(!register_native_effect(Effect("bad_block", {{"zone", ParamType::Block, true}}), "feat_m"), "block without keys refused");
+    static std::vector<ParamSpec> kNested;
+    kNested = {zone};
+    ParamSpec outer{"outer", ParamType::Block, false};
+    outer.block = &kNested;
+    CHECK(!register_native_effect(Effect("bad_nested", {outer}), "feat_m"), "block inside a block refused");
+    static std::vector<ParamSpec> kScoped;
+    kScoped = {{"region", ParamType::Int, false, ScopeDefault::StrategicRegion}};
+    ParamSpec scoped{"zone", ParamType::Block, false};
+    scoped.block = &kScoped;
+    CHECK(!register_native_effect(Effect("bad_scoped", {scoped}), "feat_m"), "scope default inside a block refused");
+    std::vector<ParamSpec> many;
+    static const char* kNames[] = {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"};
+    for (const char* nm : kNames) many.push_back({nm, ParamType::Int, false});
+    CHECK(register_native_effect(Effect("eleven_params", many), "feat_m"), "11 parameters accepted (limit 16)");
+
     CHECK(!NativeFeatureComplete("feat_a"), "feature incomplete before engine registration");
     CHECK(NativeFeatureComplete("no_commands"), "feature without native commands counts as complete");
 
@@ -353,7 +383,7 @@ int main() {
     be.failBind.insert("bind_fails");
     document_on_action("on_test_loaded", "feat_d", "Fires in tests.");
     int n = NativeScriptFinalize(be, L"");
-    CHECK(n == 18, "18 commands registered (got %d)", n);
+    CHECK(n == 20, "20 commands registered (got %d)", n);
     CHECK(NativeFeatureComplete("feat_k") && !NativeFeatureComplete("feat_g"), "effect block features: complete / unknown child");
     CHECK(LogCount("the game has no effect 'no_such_effect' to allow inside") == 1, "unknown child effect logged");
     CHECK(NativeScriptFinalized(), "window closed after finalize");
@@ -743,6 +773,60 @@ int main() {
         "### ghost_group\n\n- Feature: feat_g\n- Status: REFUSED: the game has no effect 'no_such_effect' to allow inside\n",
     };
     for (const char* e : expected12)
+        CHECK(docs.find(e) != std::string::npos, "docs contain: %.70s", e);
+
+    // 13. Numbers, repeated keys, nested blocks.
+    const Command* mark = nullptr;
+    for (const Command* c : NativeCommands())
+        if (c->name == "mark_area") mark = c;
+    CHECK(mark && mark->blocks.size() == 3 && mark->blocks[2] && !mark->blocks[0], "block sub-command created");
+    if (!mark || !mark->blocks[2]) return g_fail;
+    const Command* zc = mark->blocks[2];
+    CHECK(zc->paramTokens.size() == 3 && NativeParamIndex(*zc, be.Intern("coastal")) == 2, "block keys interned");
+    ParsedCommand* m1 = NativeNewParsed(*mark);
+    CHECK(NativeSetArg(*m1, 0, "0.8", &err) && m1->args[0].i == 800, "number 0.8 kept as 800 thousandths");
+    CHECK(NativeSetArg(*m1, 0, "-2.5", &err) && m1->args[0].i == -2500, "negative number");
+    CHECK(!NativeSetArg(*m1, 0, "abc", &err) && err.find("expects a number") != std::string::npos, "bad number refused");
+    CHECK(NativeSetArg(*m1, 0, "1", &err) && m1->args[0].i == 1000, "whole number as a number");
+    CHECK(NativeSetArg(*m1, 1, "5", &err) && NativeSetArg(*m1, 1, "7", &err) && NativeSetArg(*m1, 1, "9", &err), "id written 3 times");
+    CHECK(!NativeSetArg(*m1, 2, "x", &err) && err.find("expects a block") != std::string::npos, "block given a plain value refused");
+    ParsedCommand* zb1 = NativeNewParsed(*zc);
+    CHECK(NativeSetArg(*zb1, 0, "11", &err) && NativeSetArg(*zb1, 0, "12", &err) && NativeSetArg(*zb1, 1, "GER", &err) &&
+              NativeSetArg(*zb1, 2, "yes", &err),
+          "first block's keys parsed");
+    CHECK(NativeAddBlock(*m1, 2, zb1, &err), "first block added");
+    ParsedCommand* zb2 = NativeNewParsed(*zc);
+    CHECK(NativeSetArg(*zb2, 1, "ROOT", &err) && NativeAddBlock(*m1, 2, zb2, &err), "second block added");
+    ParsedCommand* zbad = NativeNewParsed(*zc);
+    zbad->parseError = true;
+    CHECK(!NativeAddBlock(*m1, 2, zbad, &err) && err.find("block is invalid") != std::string::npos, "invalid block refused");
+    CHECK(!NativeAddBlock(*m1, 1, zb2, &err), "a non-block parameter takes no block");
+    CHECK(NativeValidate(*m1), "command with blocks valid");
+    ParsedCommand* m2 = NativeNewParsed(*mark);
+    CHECK(!NativeValidate(*m2), "required block missing: invalid");
+    {
+        Args a(m1->args.data(), m1->args.size());
+        Args b0 = a.block(2, 0), b1 = a.block(2, 1);
+        FakeScope sc;
+        sc.country = 9;
+        sc.root = &rootCountry;
+        CHECK(a.num(0) == 1.0 && a.count(1) == 3 && a.at(1, 0) == 5 && a.at(1, 2) == 9 && a.count(2) == 2,
+              "Args: number, 3 ids, 2 blocks");
+        CHECK(b0.count(0) == 2 && b0.at(0, 1) == 12 && b0.i(1) == 7 && b0.b(2) && !b1.has(0) && b1.i(1) == kCountryRoot,
+              "Args: the blocks' own keys");
+        CHECK(native_country(b0.i(1), Scope(&sc)) == 7 && native_country(b1.i(1), Scope(&sc)) == rootCountry.country, "block countries resolved");
+        CHECK(a.block(2, 5).size() == 0 && a.block(0, 0).size() == 0, "no such block: empty");
+    }
+    CHECK(NativeTooltip(m1, &regionScope, false) == "" , "effect without tooltip callback: no line");
+    docs = NativeScriptDocs();
+    const char* expected13[] = {
+        "- Usage: `mark_area = { alpha = <number> id = <int> zone = { province = <int> owner = <country> coastal = <bool> } }`\n",
+        "  - `alpha`: number (a decimal such as 0.5), optional\n",
+        "  - `id`: int, optional, may be written several times\n",
+        "  - `zone`: block { province = <int> owner = <country> coastal = <bool> }, required, may be written several times\n",
+        "    - `owner`: country (tag, THIS, ROOT, FROM or PREV), optional\n",
+    };
+    for (const char* e : expected13)
         CHECK(docs.find(e) != std::string::npos, "docs contain: %.70s", e);
 
     printf("%s (%d checks, %d failure(s))\n", g_fail ? "FAILED" : "PASSED", g_checks, g_fail);

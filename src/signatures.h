@@ -614,6 +614,69 @@ static const size_t kConvOrderEntryNameBefore = 0x180, kConvOrderEntryNameAfter 
 static const size_t kConvTooltipAnchorWithin = 0x100, kConvTooltipAppendWithin = 0x300;
 SIG(kSigConversionCost,"4C 89 4C 24 20 48 89 54 24 10 48 89 4C 24 08 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ?? ?? ?? ?? 48 81 EC ?? ?? ?? ?? 49 8B F9 4D 8B F8 4C 8B E2 4C 8B E9 33 F6 89 74 24 ?? 48 89 32 48 8D 4A 08 E8 ?? ?? ?? ?? C7 44 24 ?? 01 00 00 00 48 89 75 ?? 4C 8D 45 ?? BA 4D 00 00 00 49 8B CF E8")
 
+// --- Attention areas (attention_area, NOTES.md Part M; addresses 1.19.4.2) --------------------
+// Gradient borders: a CGradientBorderManager owns 23 layers; a layer owns borders (0x88 bytes),
+// each with a province list, colour, thickness and pulse flag. Every border setter waits for the
+// layer's fill job (layer+0x78) first. Field offsets are part of the patterns.
+// border->AddProvince(id): no duplicates; claims the province in the layer. Function. (0x141635120)
+SIG(kSigBorderAddProvince, "48 63 41 24 45 33 C9 85 C0 7E 1D 4C 8B D0 45 8B C1 48 8B 41 18 39 10 74 15 41 FF C1 49 FF C0 48 83 C0 04 4D 3B C2 7C ED 41 B9 FF FF FF FF 41 83 F9 FF 41 0F 95 C0 E9")
+// border->SetColor(const CColor*): packs r,g,b,a floats (+0x10..+0x1c) into +0x58; first, if the
+// layer (+0x80) has a fill job (+0x78), waits for it (E8 at +0x2a, no arguments). (0x141638df0)
+SIG(kSigBorderSetColor,"48 89 5C 24 08 57 48 83 EC 20 48 8B D9 48 8B CA E8 ?? ?? ?? ?? 8B F8 3B 43 58 74 ?? 48 8B 93 80 00 00 00 48 83 7A 78 00 74 05 E8 ?? ?? ?? ?? C6 43 48 01 89 7B 58")
+static const size_t kSigBorderColorWaitCall = 0x2a;
+// border->SetOutlineMode(short): +0x4c (0xf4 gradient, -1 with thickness). (0x141638f60)
+SIG(kSigBorderSetMode, "48 89 5C 24 08 57 48 83 EC 20 0F B7 FA 48 8B D9 66 39 51 4C 74 ?? 48 8B 81 80 00 00 00 48 83 78 78 00 74 05 E8 ?? ?? ?? ?? 66 89 7B 4C C6 43 48 01")
+// border->SetThickness(float): +0x50. (0x1416391c0)
+SIG(kSigBorderSetThickness, "40 53 48 83 EC 30 F3 0F 10 41 50 48 8B D9 0F 29 74 24 20 0F 28 F1 0F 2E C6 7A 02 74 ?? 48 8B 81 80 00 00 00 48 83 78 78 00 74 05 E8 ?? ?? ?? ?? F3 0F 11 73 50")
+// border->Clear(): releases its provinces in the layer and frees its arrays (before delete). (0x141633330)
+SIG(kSigBorderClear, "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 41 56 41 57 48 83 EC 20 48 8B D9 48 8B 81 80 00 00 00 48 83 78 78 00 74 05 E8 ?? ?? ?? ?? 45 33 FF 44 89 7B 0C 48 8B AB 80 00 00 00")
+// border->Reset(): releases its provinces in the layer, empties its list and resets the look
+// (the scripted layer fill calls it when a border's provinces changed). (0x141635df0)
+SIG(kSigBorderReset, "40 53 55 41 57 48 83 EC 20 48 8B 81 80 00 00 00 48 8B D9 48 83 78 78 00 74 05 E8 ?? ?? ?? ?? 48 8B AB 80 00 00 00 45 33 FF 44 89 7B 0C 48 85 ED 0F 84")
+// The scripted layer rebuild creating a border: operator new(0x88) (E8 at +5), then
+// CGradientBorder(mem, layer) (E8 at +0x19). (0x140affd60)
+SIG(kSigBorderAlloc, "B9 88 00 00 00 E8 ?? ?? ?? ?? 48 89 45 A8 48 85 C0 74 ?? 49 8B D6 48 8B C8 E8 ?? ?? ?? ??")
+static const size_t kSigBorderAllocNew = 5, kSigBorderAllocCtor = 0x19;
+// The same rebuild freeing its borders: Clear (E8 at +3), then operator delete(p, 0x88) (E8 at +0x10).
+// (0x140affcc8)
+SIG(kSigBorderFree, "48 8B CF E8 ?? ?? ?? ?? BA 88 00 00 00 48 8B CF E8 ?? ?? ?? ?? 48 83 C3 08 49 3B DC 75 DA 41 89 76 0C")
+static const size_t kSigBorderFreeClear = 3, kSigBorderFreeDelete = 0x10;
+// manager->SetActiveLayers(const int pair[2]): the two layers the map draws, +0x64 (disp8 at +2)
+// and +0x68 (disp8 at +0x12); -1 = none. Called by every map mode setup. Function. (0x140fb5fc0)
+SIG(kSigBorderSetPair, "8B 41 64 39 02 74 04 C6 41 5F 01 8B 02 89 41 64 8B 41 68 39 42 04 74 04 C6 41 60 01 8B 42 04 89 41 68 C3")
+static const size_t kSigBorderPairLoDisp = 2, kSigBorderPairHiDisp = 0x12;
+// manager->RebuildAll(bool): every layer type 0..0x16 (imm8 at +0x3a), layers at +0x18 (disp8 at
+// +0x33). Function. (0x140fbeef0)
+SIG(kSigBorderRebuildAll, "48 89 5C 24 08 48 89 6C 24 10 56 57 41 54 41 56 41 57 48 83 EC 30 33 DB 4C 8D 25 ?? ?? ?? ?? 33 FF 4C 8D 3D ?? ?? ?? ?? 0F B6 EA 4C 8B F1 66 90 49 8B 46 18 48 8B 34 07 83 FB 16")
+static const size_t kSigRebuildAllLayersDisp = 0x33, kSigRebuildAllLastImm = 0x3a;
+// manager->Rebuild(type, bool): one layer (layers disp8 at +0xd, last type imm8 at +0x1b). Function.
+// (0x140fb7ff0)
+SIG(kSigBorderRebuildOne, "48 89 5C 24 08 57 48 83 EC 30 48 8B 41 18 45 0F B6 D0 48 63 FA 48 8B 1C F8 83 FF 16 0F 87")
+static const size_t kSigRebuildOneLayersDisp = 0xd, kSigRebuildOneLastImm = 0x1b;
+// Camera LookAt(const float pos[3]): both targets (+0x698 eye, +0x6a4 look-at) keeping the tilt.
+// Function. (0x1412f15c0)
+SIG(kSigCameraLookAt, "48 89 5C 24 08 57 48 83 EC 20 F2 0F 10 02 48 8B DA F2 0F 11 81 98 06 00 00 48 8B F9 8B 42 08 89 81 A0 06 00 00 F2 0F 10 02 F2 0F 11 81 A4 06 00 00")
+// goto_state's execute tail (CGoToStateEffect): ui = [rip] (rel32 +3); province = state's first
+// province (E8 at +0xa); ui->CentreOn(province->id) (id disp32 +0x17, vtable disp32 +0x1e);
+// camera = ui->Camera() (disp32 +0x2a); SetTargetHeight(camera, 0) (E8 at +0x34). (0x1403713a1)
+SIG(kSigGotoStateTail, "48 8B 1D ?? ?? ?? ?? 48 8B C8 E8 ?? ?? ?? ?? 4C 8B 03 48 8B CB 8B 90 ?? ?? ?? ?? 41 FF 90 ?? ?? ?? ?? 48 8B 03 48 8B CB FF 90 ?? ?? ?? ?? 48 8B C8 0F 57 C9 E8 ?? ?? ?? ??")
+static const size_t kSigGotoUiRel = 3, kSigGotoProvinceIdDisp = 0x17, kSigGotoCentreDisp = 0x1e, kSigGotoCameraDisp = 0x2a,
+                    kSigGotoSetHeight = 0x34;
+// Console debug_zoom: camera (vtable disp32 +0xc) min height = 0 (field disp32 +0x12), max = 1200
+// (disp32 +0x2c). (0x1402678ab)
+SIG(kSigDebugZoom, "48 8B 0D ?? ?? ?? ?? 48 8B 01 FF 90 ?? ?? ?? ?? C7 80 ?? ?? ?? ?? 00 00 00 00 48 8B 0D ?? ?? ?? ?? 48 8B 01 FF 90 ?? ?? ?? ?? C7 80 ?? ?? ?? ?? B0 04 00 00")
+static const size_t kSigZoomCameraDisp = 0xc, kSigZoomMinDisp = 0x12, kSigZoomMaxDisp = 0x2c;
+// State "is coastal" refresh: any province with map data [rip] (rel32 +0x1c, insn ends +0x20)
+// ->provinces (disp32 +0x39, count disp32 +0x2d) [id]->flags (disp32 +0x4f) & bit (imm8 +0x53).
+// Function. (0x140b0f110)
+SIG(kSigStateCoastal, "48 63 41 ?? 4C 8B D1 C6 81 ?? ?? ?? ?? 00 85 C0 7E ?? 4C 8B 41 ?? 4C 8B D8 4C 8B 0D ?? ?? ?? ?? 33 D2 49 63 00 83 F8 01 7C ?? 41 3B 81 ?? ?? ?? ?? 7D ?? 48 8B C8 49 8B 81 ?? ?? ?? ?? 48 8D 04 C8 EB ?? 49 8B 81 ?? ?? ?? ?? 48 8B 00 F6 80 ?? ?? ?? ?? ??")
+static const size_t kSigCoastalMapRel = 0x1c, kSigCoastalCountDisp = 0x2d, kSigCoastalArrayDisp = 0x39,
+                    kSigCoastalFlagsDisp = 0x4f, kSigCoastalBit = 0x53;
+// A border's fill: province = gamestate->provinces.Get(id); rect = province->gfx (disp32 +0x16)
+// ->pixel rect {x, y, w, h} (disp32 +0x1d). (0x141636010)
+SIG(kSigProvinceRect, "49 8B 06 4C 8B 00 48 8B 46 18 8B 14 B8 49 8B CE 41 FF D0 48 8B 88 ?? ?? ?? ?? 0F 10 81 ?? ?? ?? ??")
+static const size_t kSigRectGfxDisp = 0x16, kSigRectDisp = 0x1d;
+
 // --- Code shapes at RTTI-found addresses (numeric triggers, NOTES.md E2) -------------------
 // CODE(name, "..."): checked with SigMatchAt at an address reached through an RTTI vtable, not
 // scanned (so not required to be unique). tools/check_code_shapes.py checks them on exe copies.
@@ -960,6 +1023,11 @@ static const size_t kCodeAirCreatorTagDisp = 6, kCodeAirCreatorTagDisp2 = 0xb;
 // +0xa (the type's name, std::string). (0x1412d8739)
 CODE(kCodeAirModelType, "48 8B 8F ?? ?? ?? ?? 48 83 C1 ?? 48 8D 54 24")
 static const size_t kCodeAirDesignTypeDisp = 3, kCodeAirTypeNameDisp = 0xa;
+// --- Attention areas (NOTES.md Part M) ------------------------------------------------------------
+// CGradientBorder(mem, layer), at kSigBorderAlloc's second call: zeroes the border, then stores the
+// layer at +0x80 (searched with SigFindIn within 0x98 bytes).
+CODE(kCodeBorderCtor, "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 44 8B 05")
+CODE(kCodeBorderCtorLayer, "66 C7 43 4C FF FF 48 C7 43 50 00 00 80 3F 48 89 BB 80 00 00 00")
 
 #undef CODE
 #undef SIG

@@ -29,6 +29,21 @@ A–F; NOTES.md has the findings and test results behind each.
 - **Fix:** an Alt+Shift+click on a badge right after its dismantle entry was cancelled (Shift+click,
   before the next in-game day) deepened the cancelled entry, so the click did nothing. Cancelled
   entries are now skipped, and the click queues a new one.
+- **New feature `attention_area`** (engine tier; guard `hoi4_loader_feature_attention_area`; script
+  version unchanged). NOTES.md Part M. First in-game test on 1.19.5.0: outlines work; fixed
+  then: zoom too close, camera moved for scattered areas, cleared provinces lost their country colour.
+  - `add_attention_area = { id color red green blue alpha width pulse glow area = { ... } }`
+    outlines provinces with the game's gradient borders, in every map mode. Each `area` block
+    selects provinces by `province`, `state`, `strategic_region` ids, then `owner`, `controller`,
+    `coastal`.
+  - `remove_attention_area = <id>|all`, `focus_attention_area = { id zoom }` (centre and zoom the
+    player's camera), trigger `has_attention_area = <id>`.
+  - Display only, not saved: mods add areas again after loading.
+  - Hooks three engine functions (DEVELOPING.md "Global hooks"); 16 new signatures (134 in all),
+    checked on 1.19.4.2 only.
+- **Native script API:** parameters of type `Number` (decimals) and `Block` (a nested
+  `key = { ... }` read by the game's own clause reader), `ParamSpec::repeat` (a key written several
+  times keeps every value), and up to 16 parameters per command (was 8).
 
 ## 0.6.0-beta (2026-11-13), script version 3
 
