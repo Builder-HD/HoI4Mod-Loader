@@ -15,7 +15,8 @@ A–F; NOTES.md has the findings and test results behind each.
   lowest link's level, so a finished upgrade looked lost. The engine's segment builder gets a copy
   of the supply array with those provinces marked as nodes; supply itself is unchanged. Hooks
   `FindRailwayLine` (only the badge click calls it) and the segment builder; three new signatures,
-  and `kSigRailLineList` now starts at `FindRailwayLine`. Checked on 1.19.4.2 only.
+  and `kSigRailLineList` now starts at `FindRailwayLine`. Signatures checked on 1.19.4.2 and 1.19.5;
+  tested in game on 1.19.5 (2026-11-14).
 - **Railway badges while dismantling** (`railway_queue`; NOTES.md H7). A segment with a dismantle
   entry now looks like one being upgraded: the target level in red with the under-construction
   mark, and a "Currently dismantling ... to level N" tooltip line with its own click hints
@@ -24,7 +25,10 @@ A–F; NOTES.md has the findings and test results behind each.
   click or right click on such a segment used to turn the dismantle entry into a rebuild of the
   links already taken down. A railway being removed entirely (dismantled to 0) keeps its badge,
   showing its current level in red, until it is gone; vanilla made no badge for it. Hooks the badge
-  tooltip and right click; four new signatures.
+  tooltip and right click; four new signatures. Tested in game on 1.19.5 (2026-11-14).
+- **Fix:** an Alt+Shift+click on a badge right after its dismantle entry was cancelled (Shift+click,
+  before the next in-game day) deepened the cancelled entry, so the click did nothing. Cancelled
+  entries are now skipped, and the click queues a new one.
 - **New feature `attention_area`** (engine tier; guard `hoi4_loader_feature_attention_area`; script
   version unchanged). NOTES.md Part M. First in-game test on 1.19.5.0: outlines work; fixed
   then: zoom too close, camera moved for scattered areas, cleared provinces lost their country colour.

@@ -53,6 +53,14 @@ Addresses below are for orientation in the named build only. Code uses the signa
 | **1.19.4.2** | **vanilla (`v1.19.4.2.2da5`), Steam update of 2026-11-05** | `bccc62909b6a1ec2c1d5a46ef18608e4d0c7cdc89ad341b7402a23c40f7a8037` |
 | **1.19.5** | **vanilla (`v1.19.5.0.7c6c`), Steam update of 2026-11-12** | `709f916afbebcfe64a26678702691aeb40945d206074c2a80de8e9d601fce148` |
 
+**What changed from 1.19.4.2 to 1.19.5 (compared 2026-11-13):**
+- No checksum patch (`E8 ?? ?? ?? ?? 31 C0 0F 94 C3`: 0 matches), so vanilla.
+- Same file size as 1.19.4.2 (56,535,160 bytes); only 9,874 bytes differ, almost all in data
+  (build strings, version texts).
+- `.text` has three changed spots (VA `0x14123d9ed` 2 bytes, `0x14124b944` 424 bytes,
+  `0x141256ff5` 1 byte), none within 0x800 bytes of any loader signature; every function keeps
+  its address. That is why every signature and code shape matches unchanged.
+
 **Vanilla 1.19.3 verified (2026-10-12 23:01):**
 - After Steam's "Verify integrity", `hoi4.exe` is `v1.19.3.0.c01a`, the same size as the
   patched 1.19.3.
@@ -3890,6 +3898,7 @@ and the upgrade entry stayed in the queue.
 6. Supply in the area is unchanged by the split (only the badges change).
    - **Result (2026-11-12):** passed for items 1, 2 and 5: after the dismantle and the upgrade, the
      upgraded stretch has its own badge at 4 next to the level-1 stretch; the log is clean.
+   - **Result (2026-11-14, 1.19.5, China):** passed for every item.
 
 ## H7: segments being dismantled on the badge (requested 2026-11-12)
 
@@ -3971,6 +3980,10 @@ upgrading ... to level N") when a segment is being dismantled.
    vanilla.
 5. `loader.log`: "dismantling shown (mark +0x670, tooltip yes), right click changes the dismantle
    entry".
+   - **Result (2026-11-14, 1.19.5, China):** passed for every item. The log showed one bug: an
+     Alt+Shift+click right after a Shift+click cancel logged "one level deeper", because
+     `QueueOrDeepenRailwayDismantle` still found the cancelled entry (it stays in the list until the
+     next daily update). It now skips cancelled entries, as `LessenRailwayDismantle` does.
 
 # Part I: province building removal (supply hubs first)
 
