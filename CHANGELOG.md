@@ -13,12 +13,16 @@ A–F; NOTES.md has the findings and test results behind each.
   dropdown and with its own slot positions. The archetype keeps its real type, so the production
   tab (infantry/artillery), the experience (army) and the save path stay the game's own. The tank
   window gets up to 20 normal and 20 `fixed_` slot windows (added to `tank_designer_view.gui` at
-  load); other designs keep vanilla's look. UI only (multiplayer and saves unaffected); needs No
-  Step Back and the archetype's `interface/equipmentdesigner` layout, as vanilla does. Land window
-  only for now; stats per designer and the air and naval windows are planned. Hooks the
-  "can open designer" check, the window's open and refresh; 6 new signatures and 2 anchors (smoke
-  `2/137`). Checked on 1.19.4.2 and 1.19.5; tested in game on 1.19.5 (2026-11-14). The test mod has
-  a small arms designer (decision "Unlock the test small arms").
+  load); other designs keep vanilla's look. Optional per designer: `stats` (the rows of the three
+  stat panels, by `add_stats` names), `xp = army | navy | air` (the pool a design is checked against
+  and paid from, shown and named in the cost texts; a game rule, so every multiplayer player needs
+  the loader) and `hide` (elements of the tank window). Needs No Step Back and the archetype's
+  `interface/equipmentdesigner` layout, as vanilla does. Land window only for now; the air and naval
+  windows are planned. Hooks the "can open designer" check, the window's open, refresh, stats and
+  buttons update, and, only when `xp` is used, the experience pool, the two deduction tests of the
+  variant commands, the cost tooltip and icon; 13 new signatures and 2 anchors (smoke `2/144`).
+  Checked on 1.19.4.2 and 1.19.5; tested in game on 1.19.5 (2026-11-14). The test mod has a small
+  arms designer (decision "Unlock the test small arms").
 - **Shared code:** the Paradox script reader (`src/script_tree.cpp`) and the mod folder scan
   (`ModList::ScanFolder`) moved out of air_scenarios, which now uses them; `UserFolder()` and
   `GameFolder()` in `loader.h`.

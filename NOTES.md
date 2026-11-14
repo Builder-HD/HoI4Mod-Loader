@@ -6423,3 +6423,51 @@ list and finds the id by the loc key in the game's table at runtime.
    other designs.
 4. **Later candidates** (not in this step): an XP cost factor, a country trigger for who may use the
    designer, a blueprint background per designer, the air and naval windows.
+
+## N12: stats, `xp` and `hide`: implementation and in-game test (2026-11-14)
+
+**Stats** (`kSigEqdStats`, hooked): for a listed archetype with `stats`, the detour calls the game's
+Fill with the definition's rows (8-byte `{id, kind 0}` entries the plugin builds once, ids looked up
+by loc key in the game's table `kSigEqdStatName`) and the game's own arrays for panels left out.
+`check_code_shapes.py` checks that every entry of the game's three arrays names a stat of that table.
+
+**`xp`** (all hooked only when a definition uses it):
+- `kSigEqdPool`: the pool for listed types (validation, the window's "can afford").
+- `IsAir` / `IsNaval` (the window picker's calls +0x68 / +0x23, the pool's calls must agree): a
+  different answer only when the return address is right after the create or update command's
+  deduction test (RTTI execute, `kCodeEqdCreateAir/Naval`, `kCodeEqdUpdateTest` twice). Every other
+  caller gets the game's answer.
+- The window's line: `DESIGNER_<POOL>_EXPERIENCE` with the player's pool (container from
+  `kSigEqdXpShown`), set after each refresh.
+- Cost texts: the tooltip (`kSigEqdTooltip`) and the icon name function (`kSigEqdXpIcon`,
+  `army_experience` / `navy_experience` / `air_experience`, used for `$XPICON$` and `$EXPERIENCE_TYPE$`)
+  get one bit of the pool's mask while the tank window's root is visible and shows a listed design
+  with `xp`. Their callers are the designer and its module picker only.
+
+**`hide`.** The window's root (`view+0xf2b8`) has several lookups by name, one per element class
+(vtable `+0x78` text boxes, `+0xa0` the role dropdown and some buttons, `+0x88`, `+0x68`, `+0x1b0`);
+a missing name returns that lookup's placeholder object, not null. The first implementation asked
+`+0xa0` only and got the placeholder for every name (the in-game log showed one pointer for four
+names), so nothing hid. Now the loader collects the lookup slots from setup's own calls (only those
+whose result the window keeps), learns each slot's placeholder from a name no window has, and takes
+the first real result. The game shows some elements again when it updates the window's buttons
+(`kSigEqdButtons`, called by open, refresh and ~10 other UI paths), so `hide` is applied again after
+that too.
+
+**In-game test** (1.19.5, Germany 1936, branch build, test mod only; driven with screenshots, not
+yet by the owner):
+1. `loader.log`: stats, experience, icon, buttons and 5 lookup slots resolved; all hooks queued; no
+   ERROR.
+2. The small arms designer: base panel Reliability, Max Speed, Production Cost; combat Soft
+   Attack, Hard Attack, Piercing, Defense, Breakthrough; misc empty (as defined).
+3. The window's experience line shows the navy icon with 50; module costs ("Costs ★5 to replace")
+   and Save ("Spend ★5 to save the changes") show the navy icon.
+4. Saving a design with grenades: navy experience 50 → 45, army 50 unchanged; the design is listed.
+5. `hide` (with `designer_title` and `production_value` added for the test): the title, the
+   production cost, "Select Model" and the historical design button are hidden.
+6. The Panzer II afterwards: "Tank Designer", "Light Tank" dropdown, "Select Model", production cost,
+   both buttons, the army icon with 50 and the tank's 4 + 8 + 5 stat rows are back.
+
+**Not tested:** multiplayer with `xp` (expected: in sync when every player has the loader and mods;
+out of sync otherwise, as accepted), the update command (editing a saved design) paying from the
+`xp` pool (same tests, same hook; only the create command was used), `xp = air`.
