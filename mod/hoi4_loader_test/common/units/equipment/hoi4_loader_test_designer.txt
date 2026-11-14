@@ -1,0 +1,51 @@
+# hoi4_loader test: a modular infantry-type archetype for equipment_designers (MODDING.md
+# "Equipment designers", NOTES.md Part N). Ten normal slots and one fixed_ slot: more than the
+# tank designer window's nine, so the loader's extra slot windows are used. Unlocked by the
+# decision "Unlock the test small arms" (hoi4_loader_test_designer_decisions.txt).
+equipments = {
+	hoi4_loader_test_small_arms = {
+		year = 1936
+		is_archetype = yes
+		is_buildable = no
+		picture = archetype_infantry_equipment
+		type = infantry
+		group_by = archetype
+		interface_category = interface_category_land
+		module_slots = {
+			sa_main_slot = { required = yes allowed_module_categories = { hoi4_loader_test_sa_main } }
+			sa_extra_slot_1 = { required = no allowed_module_categories = { hoi4_loader_test_sa_extra } }
+			sa_extra_slot_2 = { required = no allowed_module_categories = { hoi4_loader_test_sa_extra } }
+			sa_extra_slot_3 = { required = no allowed_module_categories = { hoi4_loader_test_sa_extra } }
+			sa_extra_slot_4 = { required = no allowed_module_categories = { hoi4_loader_test_sa_extra } }
+			sa_extra_slot_5 = { required = no allowed_module_categories = { hoi4_loader_test_sa_extra } }
+			sa_extra_slot_6 = { required = no allowed_module_categories = { hoi4_loader_test_sa_extra } }
+			sa_extra_slot_7 = { required = no allowed_module_categories = { hoi4_loader_test_sa_extra } }
+			sa_extra_slot_8 = { required = no allowed_module_categories = { hoi4_loader_test_sa_extra } }
+			sa_extra_slot_9 = { required = no allowed_module_categories = { hoi4_loader_test_sa_extra } }
+			fixed_sa_sight_slot = { required = no allowed_module_categories = { hoi4_loader_test_sa_sight } }
+		}
+		default_modules = {
+			sa_main_slot = hoi4_loader_test_sa_rifle
+		}
+		reliability = 0.9
+		maximum_speed = 4
+		defense = 20
+		breakthrough = 2
+		hardness = 0
+		armor_value = 0
+		soft_attack = 3
+		hard_attack = 0.5
+		ap_attack = 1
+		air_attack = 0
+		lend_lease_cost = 1
+		build_cost_ic = 0.5
+		resources = { steel = 1 }
+	}
+	hoi4_loader_test_small_arms_1 = {
+		year = 1936
+		archetype = hoi4_loader_test_small_arms
+		priority = 10
+		module_slots = inherit
+		visual_level = 0
+	}
+}
