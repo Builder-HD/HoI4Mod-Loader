@@ -312,7 +312,8 @@ struct AttentionDraw {
 bool HookAttention(void (*onFault)(const char* where));
 // Main thread, at a safe point: replaces what is drawn (empty: nothing). Borders go into the
 // layer the map currently draws (NOTES.md M5); they are re-added after the game rebuilds it.
-void SetAttentionDraw(const std::vector<AttentionDraw>& areas);// Main thread, every frame (cheap): draws wanted areas once the map's layers are known.
+void SetAttentionDraw(const std::vector<AttentionDraw>& areas);
+// Main thread, every frame (cheap): draws wanted areas once the map's layers are known.
 void AttentionTick();
 // The game entry: forget the borders of the previous game without touching them.
 void ForgetAttentionDraw();

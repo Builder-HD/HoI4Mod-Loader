@@ -1052,12 +1052,12 @@ static const size_t kCodeAirDesignTypeDisp = 3, kCodeAirTypeNameDisp = 0xa;
 // CGradientBorder(mem, layer), at kSigBorderAlloc's second call: zeroes the border, then stores the
 // layer at +0x80 (searched with SigFindIn within 0x98 bytes).
 CODE(kCodeBorderCtor, "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 44 8B 05")
+CODE(kCodeBorderCtorLayer, "66 C7 43 4C FF FF 48 C7 43 50 00 00 80 3F 48 89 BB 80 00 00 00")
 // CInGameIdler's centre-on-province-id (the vtable slot goto_state calls, kSigGotoStateTail): looks
 // the province up, then tail-jumps to centre-on-province-object (vtable disp32 at +0xe), province
 // in rdx. Searched with SigFindIn within 0x200 bytes. (0x140e3494b)
 CODE(kCodeIdlerCentreTail, "48 8B 07 48 8B CF 48 83 C4 30 5F 48 FF A0 ?? ?? ?? ??")
 static const size_t kCodeCentreTailDisp = 0xe;
-CODE(kCodeBorderCtorLayer,"66 C7 43 4C FF FF 48 C7 43 50 00 00 80 3F 48 89 BB 80 00 00 00")
 
 #undef CODE
 #undef SIG
