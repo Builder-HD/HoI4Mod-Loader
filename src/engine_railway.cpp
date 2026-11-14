@@ -656,8 +656,16 @@ EngineString* __fastcall LocalizeDetour(EngineString* out, const char* key, void
     return g_localizeOrig(out, key, args, count);
 }
 
+RailwayHover_t g_hoverHandler = nullptr;
+
 uint64_t __fastcall TooltipDetour(void* item, void* element, void* out) {
     void* line = item ? g_lookupLine((uint8_t*)item + g_tooltipId) : nullptr;
+    // Hover: the tooltip is built while the player points at the entry (UI, main thread).
+    if (g_hoverHandler && line && *(void***)line == g_vtLine) {
+        int count = 0;
+        const int* path = LinePath(line, &count);
+        if (path && count > 0) g_hoverHandler(path, count);
+    }
     if (!IsDismantleLine(line)) return g_tooltipOrig(item, element, out);
     ++g_inDismantleTooltip;
     uint64_t r = g_tooltipOrig(item, element, out);
@@ -756,6 +764,12 @@ bool HookRailwayTooltip() {
     g_lookupLine = (LookupLine_t)SigFollowRel32(p + kSigRailTooltipLookupCall);
     return HookQueue(g_tooltipFn, (void*)&TooltipDetour, (void**)&g_tooltipOrig, "railway_tooltip") &&
            HookQueue(g_localizeFn, (void*)&LocalizeDetour, (void**)&g_localizeOrig, "localize");
+}
+
+bool SetRailwayHoverHandler(RailwayHover_t handler) {
+    if (!g_tooltipFn) return false;  // the tooltip hook is not queued
+    g_hoverHandler = handler;
+    return true;
 }
 
 bool HookRailwayEntryTitle() {

@@ -317,11 +317,33 @@ void SetAttentionDraw(const std::vector<AttentionDraw>& areas);
 void AttentionTick();
 // The game entry: forget the borders of the previous game without touching them.
 void ForgetAttentionDraw();
+// Province group outlines (the thin lines construction mode draws around build targets): one
+// outline at a time for the UI. Main thread. Palette index: BORDER_COLOR_CUSTOM_HIGHLIGHTS.
+bool HaveHighlight();
+int HighlightPaletteSize();          // colours in the palette (0 if unknown)
+int HighlightWhiteIndex();           // the colour made white in the renderer's table, else -1
+// Queues the hook that makes one outline colour white when the renderer builds its colour table
+// (once, at the map's graphics setup). Call from a feature's init.
+bool HookHighlightWhite();
+// The outline owner's hovered item (a hovered queue entry's province): drawn before every outline,
+// so it covers an outline's edges. The filter sees each province the game sets (UI, main thread)
+// and returns true to set nothing instead. Queues a hook.
+using HoverFilter_t = bool (*)(int provinceId);
+bool HookHoveredProvince(HoverFilter_t filter);
+// Main thread: clears the hovered item now if it is a province the filter accepts. True if cleared.
+bool ClearHoveredProvinceIf(HoverFilter_t filter);
+bool ShowHighlight(const std::vector<int>& provinces, int paletteIndex);  // replaces the previous one
+void HideHighlight();
 // Main thread, at a safe point: centre the camera on the box (map pixels) and set the target
 // height (height <= 0: fit the box, times fitFactor). `ref` and `ref2` are provinces of the area
 // used to calibrate the map -> camera mapping through the game's own centre-on-province. False if
 // not possible now (no game UI).
 bool FocusCamera(const int box[4], int ref, int ref2, float height, float fitFactor);
+// The UI's centre-on-province (right-click on a construction queue entry, goto_state, ...): the
+// filter sees each call's province id (UI, main thread) and returns true to take it over (the
+// game's centring is then skipped). Not called for FocusCamera's own calibration. Queues a hook.
+using CentreFilter_t = bool (*)(int provinceId);
+bool HookCentreOnProvince(CentreFilter_t filter);
 
 // --- Railways (railways; engine_railway.cpp, NOTES.md Part H) ---------------------------------
 // Main thread only: the effect that uses them runs there, and DowngradeRailway writes game state.
@@ -365,6 +387,10 @@ bool QueueRailwayDismantle(int tag, const std::vector<int>& path, int from, int 
 // localisation defines it. Queues the tooltip and Localize hooks; false if not found.
 const char kRailwayDismantleTooltipKey[] = "HOI4_LOADER_RAILWAY_DISMANTLE_TOOLTIP";
 bool HookRailwayTooltip();
+// Called with a railway queue entry's province path each time the game builds its tooltip (the
+// player points at the entry; UI, main thread). Needs HookRailwayTooltip first; false otherwise.
+using RailwayHover_t = void (*)(const int* path, int count);
+bool SetRailwayHoverHandler(RailwayHover_t handler);
 // Railway entries' titles in the queue start with a marker: vanilla's red down triangle text icon
 // for dismantling, its green up triangle for building and upgrading, or the localisation of these
 // keys if a mod defines them. Queues the entry-update and SetText hooks; needs HookRailwayTooltip
@@ -442,7 +468,6 @@ int RemoveProvinceBuildingLevel(void* province, void* type, void* state, std::st
 // if the file has no such entry or already has the button. Pure text; tests call it directly.
 std::string PatchCountryStateViewGui(const std::string& original);
 const char kProvinceBuildingRemoveTooltipKey[] = "BUILDING_SLOT_REMOVE_BUILDING_LEVEL";
-
 // --- Scope blocks and iterators (region_scope; engine_scope.cpp, NOTES.md F5) -----------------
 // The vanilla state iterators the region iterators are cloned from. keys: the block keys the
 // vanilla item handler reads itself (decoded from its compare chain); limitKey: the one whose

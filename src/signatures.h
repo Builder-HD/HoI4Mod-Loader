@@ -676,6 +676,31 @@ static const size_t kSigCoastalMapRel = 0x1c, kSigCoastalCountDisp = 0x2d, kSigC
 // ->pixel rect {x, y, w, h} (disp32 +0x1d). (0x141636010)
 SIG(kSigProvinceRect, "49 8B 06 4C 8B 00 48 8B 46 18 8B 14 B8 49 8B CE 41 FF D0 48 8B 88 ?? ?? ?? ?? 0F 10 81 ?? ?? ?? ??")
 static const size_t kSigRectGfxDisp = 0x16, kSigRectDisp = 0x1d;
+// Province group outlines (the thin coloured lines the construction mode draws around build
+// targets): CreateHighlight(owner, shared_ptr* out, CPdxArray<int>* provinces, const int style[2]
+// {kind, palette index}) builds a CProvinceGroupHighlight (its outer edges) and registers a weak
+// reference in owner+0x430; it is drawn while the shared_ptr lives. Function start. (0x140bb9490)
+SIG(kSigHighlightCreate, "48 89 5C 24 08 48 89 6C 24 18 48 89 74 24 20 48 89 54 24 10 57 48 83 EC 30 49 8B F9 49 8B F0 48 8B DA 48 8B E9 B9 48 00 00 00 E8")
+// A caller (construction mode's secondary targets): ui = [rip] (rel32 +3); style = lea [rip]
+// (rel32 +0xa, insn ends +0xe); owner = ui->[disp32 +0x19]; E8 at +0x1d = CreateHighlight. (0x141dfae8c)
+SIG(kSigHighlightCreateSite, "48 8B 05 ?? ?? ?? ?? 4C 8D 0D ?? ?? ?? ?? 4D 8B C6 48 8D 54 24 ?? 48 8B 88 ?? ?? ?? ?? E8 ?? ?? ?? ??")
+static const size_t kSigHlUiRel = 3, kSigHlStyleRel = 0xa, kSigHlOwnerDisp = 0x19, kSigHlCreateCall = 0x1d;
+// Decision highlight colour validation: colours = [rip] (rel32 +2, the float count of
+// BORDER_COLOR_CUSTOM_HIGHLIGHTS, a CPdxArray<float> whose data pointer is 0xc before) / 4. (0x1407784ec)
+SIG(kSigHighlightPaletteCount, "8B 05 ?? ?? ?? ?? 99 83 E2 03 8D 3C 02 C1 FF 02 8B 8B ?? ?? ?? ??")
+static const size_t kSigPaletteCountRel = 2;
+// The map renderer's colour table build (once, in the map graphics setup FUN_14130c570, before the
+// defines are read, so it holds the built-in vanilla palette): table = fixed colours (imm8 at
+// +0x32, 10), then the palette; its count field disp32 at +0x35 (CPdxArray<float4>, data 0xc
+// before); palette float count rel32 at +8. Function start. (0x14130b730)
+SIG(kSigHighlightColourTable, "40 57 48 83 EC 40 8B 05 ?? ?? ?? ?? 48 8B F9 99 48 89 6C 24 ?? 83 E2 03 48 89 74 24 ?? 03 C2 4C 89 7C 24 ?? C1 F8 02 BE 10 00 00 00 4C 63 F8 41 8D 6F ?? 3B A9 ?? ?? ?? ??")
+static const size_t kSigTablePaletteRel = 8, kSigTableFixedImm = 0x32, kSigTableCountDisp = 0x35;
+// The outline owner's "hovered item" setters (the construction queue sets the hovered entry's
+// province or state; the draw code gives that object's edges colour id 5 before any outline):
+// SetHoveredProvince(owner, province) at +0: type (disp32 +2) = 0, item (disp32 +0xd) = province;
+// a +0x428 setter at +0x20; SetHoveredState at +0x30: type (disp32 +0x32) = 1, item (+0x3d). (0x140bbff00)
+SIG(kSigHoverSetters, "C7 81 ?? ?? 00 00 00 00 00 00 48 89 91 ?? ?? 00 00 C3 CC CC CC CC CC CC CC CC CC CC CC CC CC CC 48 89 91 ?? ?? 00 00 C3 CC CC CC CC CC CC CC CC C7 81 ?? ?? 00 00 01 00 00 00 48 89 91 ?? ?? 00 00 C3")
+static const size_t kSigHoverTypeDisp = 2, kSigHoverItemDisp = 0xd, kSigHoverStateTypeDisp = 0x32, kSigHoverStateItemDisp = 0x3d;
 
 // --- Code shapes at RTTI-found addresses (numeric triggers, NOTES.md E2) -------------------
 // CODE(name, "..."): checked with SigMatchAt at an address reached through an RTTI vtable, not
@@ -1028,6 +1053,11 @@ static const size_t kCodeAirDesignTypeDisp = 3, kCodeAirTypeNameDisp = 0xa;
 // layer at +0x80 (searched with SigFindIn within 0x98 bytes).
 CODE(kCodeBorderCtor, "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 44 8B 05")
 CODE(kCodeBorderCtorLayer, "66 C7 43 4C FF FF 48 C7 43 50 00 00 80 3F 48 89 BB 80 00 00 00")
+// CInGameIdler's centre-on-province-id (the vtable slot goto_state calls, kSigGotoStateTail): looks
+// the province up, then tail-jumps to centre-on-province-object (vtable disp32 at +0xe), province
+// in rdx. Searched with SigFindIn within 0x200 bytes. (0x140e3494b)
+CODE(kCodeIdlerCentreTail, "48 8B 07 48 8B CF 48 83 C4 30 5F 48 FF A0 ?? ?? ?? ??")
+static const size_t kCodeCentreTailDisp = 0xe;
 
 #undef CODE
 #undef SIG

@@ -49,6 +49,80 @@ float g_focusHeight = 0;
 bool g_focusPending = false;
 volatile long g_missingFocusLogged = 0;
 
+// --- Hover mark: the railway queue entry the player points at (UI only, this machine) ------------
+// The game builds the entry's tooltip while it is hovered (railway_queue's tooltip hook reports the
+// line's path). The mark stays until no tooltip build came for kHoverHoldMs. How often the tooltip
+// is built during one hover is logged for the first hovers (NOTES.md M7: does the game rebuild it
+// every frame, or only once?).
+const ULONGLONG kHoverHoldMs = 250;
+std::vector<int> g_hoverPath;  // provinces of the hovered line, sorted, unique
+ULONGLONG g_hoverLast = 0, g_hoverStart = 0;
+int g_hoverCalls = 0, g_hoverLogs = 0;
+bool g_hoverShown = false, g_hoverChanged = false;
+volatile long g_whiteMissingLogged = 0;
+int g_hoverEnds[2] = {0, 0};  // the hovered line's first and last province (path order)
+bool g_lineFocusPending = false;
+
+void OnRailwayHover(const int* path, int count) {
+    g_hoverEnds[0] = path[0];
+    g_hoverEnds[1] = path[count - 1];
+    std::vector<int> p(path, path + count);
+    std::sort(p.begin(), p.end());
+    p.erase(std::unique(p.begin(), p.end()), p.end());
+    ULONGLONG now = GetTickCount64();
+    if (p != g_hoverPath || !g_hoverShown) {
+        g_hoverPath = std::move(p);
+        g_hoverChanged = true;
+        g_hoverStart = now;
+        g_hoverCalls = 0;
+    }
+    ++g_hoverCalls;
+    g_hoverLast = now;
+}
+
+// Right-click on a railway queue entry: the game centres on the line's start (its centre-on-province).
+// While that line is hovered, the loader takes the call over and fits the whole line in the next frame
+// instead; a line too long to fit ends up centred at the camera's highest zoom (the height is clamped).
+bool OnCentre(int province) {
+    if (!g_hoverShown || province <= 0 || (province != g_hoverEnds[0] && province != g_hoverEnds[1])) return false;
+    g_lineFocusPending = true;
+    return true;
+}
+
+// An end of the railway line hovered right now (its tooltip came within the hold time). The game marks
+// the start province as the hovered item, which is drawn over every outline: while the loader's outline
+// is up that mark is dropped, so the outline is complete (sixth in-game test, NOTES.md M7).
+bool IsHoveredLineEnd(int province) {
+    return province > 0 && GetTickCount64() - g_hoverLast <= kHoverHoldMs &&
+           (province == g_hoverEnds[0] || province == g_hoverEnds[1]);
+}
+void HoverFrame() {
+    ULONGLONG now = GetTickCount64();
+    if (g_hoverChanged) {
+        g_hoverChanged = false;
+        g_hoverShown = true;
+        // The game's thin province group outline (as construction mode draws build targets), in the
+        // palette's white (the loader's defines patch), else the palette's first colour.
+        Engine::ClearHoveredProvinceIf(&IsHoveredLineEnd);  // set before the first tooltip of this hover
+        int white = Engine::HighlightWhiteIndex();
+        if (!Engine::ShowHighlight(g_hoverPath, white >= 0 ? white : 0) && g_hoverLogs < 5)
+            Log("attention_area: the railway hover outline could not be created");
+        if (white < 0 && InterlockedExchange(&g_whiteMissingLogged, 1) == 0)
+            Log("attention_area: no white outline colour (the renderer's colour table was not changed): hover "
+                "outlines use colour 0");
+    } else if (g_hoverShown && now - g_hoverLast > kHoverHoldMs) {
+        g_hoverShown = false;
+        if (g_hoverLogs < 5) {
+            ++g_hoverLogs;
+            Log("attention_area: railway hover mark (%zu provinces) shown %llu ms; the tooltip was built %d time(s) meanwhile%s",
+                g_hoverPath.size(), g_hoverLast - g_hoverStart + kHoverHoldMs, g_hoverCalls,
+                g_hoverLogs == 5 ? " (last such line)" : "");
+        }
+        g_hoverPath.clear();
+        Engine::HideHighlight();
+    }
+}
+
 // --- Named colours ----------------------------------------------------------------------------------
 const char kColors[] = "yellow|white|black|red|green|blue|cyan|magenta|orange|purple|grey|pink";
 const float kRgb[][3] = {{1, 0.9f, 0.1f}, {1, 1, 1},  {0, 0, 0},       {0.9f, 0.1f, 0.1f}, {0.1f, 0.8f, 0.2f}, {0.15f, 0.35f, 1},
@@ -225,6 +299,19 @@ bool EvalHas(const Args& a, const Scope&) {
 
 // --- Frame, game entry ------------------------------------------------------------------------------
 void Frame() {
+    HoverFrame();
+    if (g_lineFocusPending) {
+        g_lineFocusPending = false;
+        Area line;
+        line.provinces = g_hoverPath;
+        Measure(&line);
+        static int logged = 0;
+        if (logged < 3 && ++logged)
+            Log("attention_area: right-click on a railway entry: fitting the whole line (%zu provinces, box %dx%d)%s",
+                line.provinces.size(), line.box[2], line.box[3], logged == 3 ? " (last such line)" : "");
+        if (!line.provinces.empty() && line.ref > 0)
+            Engine::FocusCamera(line.box, line.ref, line.ref2 == line.ref ? 0 : line.ref2, 0.0f, kFitFactor);
+    }
     if (g_dirty) {
         g_dirty = false;
         std::vector<Engine::AttentionDraw> draw;
@@ -260,6 +347,9 @@ void OnEntering() {
     g_areas.clear();
     g_dirty = false;
     g_focusPending = false;
+    g_hoverPath.clear();
+    g_hoverShown = g_hoverChanged = false;
+    Engine::HideHighlight();
     Engine::ForgetAttentionDraw();
 }
 
@@ -325,5 +415,14 @@ bool AttentionAreaInit() {
     }
     OnMainThreadFrame(&Frame);
     OnGameEntering(&OnEntering);
+    // Optional: the hovered railway queue entry is marked (railway_queue's tooltip hook).
+    bool hover = Engine::HaveHighlight() && FeatureActive("railway_queue") && Engine::SetRailwayHoverHandler(&OnRailwayHover);
+    // White for the outline: one colour of the renderer's outline colour table (colour 14).
+    if (hover && !Engine::HookHighlightWhite()) Log("attention_area: the outline colour hook is not there; hover outlines use colour 0");
+    bool rightClick = hover && Engine::HookCentreOnProvince(&OnCentre);
+    if (hover && !Engine::HookHoveredProvince(&IsHoveredLineEnd))
+        Log("attention_area: the hovered-item hook is not there; the game's start-province mark may cover the outline");
+    Log("attention_area: railway queue right-click fits the whole line: %s", rightClick ? "on" : "off");
+    Log("attention_area: railway queue hover mark %s", hover ? "on" : "off (needs railway_queue's tooltip hook and the outline functions)");
     return true;
 }

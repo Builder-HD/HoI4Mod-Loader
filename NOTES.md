@@ -5507,3 +5507,112 @@ Install the DLL and the "HoI4Mod Loader: Attention Areas" mod; start a game as a
   scattered Gotland/Hainan area leaves the camera alone; "Clear All Marks" brings the country
   colour back at once.
 - Still to check: glow/width looks; map mode switches; save/load; main menu and another game.
+
+## M7: railway queue hover mark (branch `railway-hover-mark`, 2026-11-13)
+
+Owner's request: hovering a railway line in the construction queue marks its provinces with a
+thin white outline.
+- **Hover signal:** railway_queue's tooltip hook (`TooltipDetour`, `kSigRailTooltip`) already looks
+  up the entry's line; for railway lines (`g_vtLine`) it now passes the line's province path
+  (`LinePath`) to a handler (`SetRailwayHoverHandler`). UI, main thread.
+- **Drawing:** a second draw list in engine_attention (`SetAttentionUiDraw`), drawn after the
+  script's areas, so the mark sits on top and the script's areas come back afterwards.
+- **Look:** white, alpha 1, width 1, `glow = no` (sharp edge); no pulse.
+- **Hover end:** unknown whether the game rebuilds the tooltip every frame while hovered or once.
+  The mark stays until no tooltip build for 250 ms; the first five hovers log how long the mark
+  showed and how many tooltip builds came meanwhile. If the tooltip is built only once, the mark
+  vanishes after 250 ms while the pointer is still there, and another hover-end signal is needed
+  (the GUI's hovered object or the tooltip window).
+- **To watch:** each hover start and end replaces the drawn set, which resets and rebuilds the
+  drawn layer (the country-colour fix, M6). If that causes a stutter on hover, only the provinces
+  that leave should be given back instead of the whole layer.
+- Out of the game: builds; smoke test passes. Not tested in game.
+- **In-game test:** queue a railway (build or upgrade, and a dismantle with the Railway
+  Dismantle mod); open Construction; hover the entry: thin white outline along the line's
+  provinces; move away: it goes; hover another entry: it moves. Check for stutter. Send
+  `loader.log` (the "railway hover mark ... the tooltip was built N time(s)" lines).
+- **In-game test (2026-11-13, owner):** hovering a railway entry marked its 31 provinces; the
+  tooltip is built every frame while hovered (481 builds in 7.1 s, about 66/s), and the mark goes
+  about two frames after the pointer leaves: hover detection works as designed. But the gradient
+  border looked like a **fill** with a soft white edge in the construction map mode (the layer's
+  own settings decide), not the thin line wanted (the owner pointed at the game's thin red
+  highlight outline). Next: the game's highlight outline renderer (`CProvinceGroupHighlight`,
+  `CHighlightStates`) for the hover mark.
+- **Switched to the game's province group outline (2026-11-13).** `CProvinceGroupHighlight`, the
+  thin lines construction mode draws around build targets:
+  - `CreateHighlight(owner, shared_ptr* out, CPdxArray<int>* provinces, const int style[2])`
+    (`FUN_140bb9490`, `kSigHighlightCreate`): the constructor (`FUN_141725730`) collects the edges
+    between a province in the set and a neighbour outside it (`province->+0xb8->+0x70`, 0x30 per
+    neighbour), i.e. the group's outer border lines. Owner: `ui+0x6b8`
+    (`kSigHighlightCreateSite`, construction mode's secondary targets, style `{10, 2}`).
+  - The owner's list at `+0x430` holds **weak** references; its per-frame pass (`FUN_140bb7ca0`)
+    drops entries whose last strong reference is gone. So the outline is shown while the loader
+    holds the shared_ptr and disappears when it releases it (the game's MSVC layout: uses `+8`,
+    weaks `+0xc`, vtable slot 0 destroys the object, slot 1 the control block).
+  - Style `{palette index, type}`: the index is into `NGraphics.BORDER_COLOR_CUSTOM_HIGHLIGHTS`
+    (15 colours in vanilla, no white; when two groups share a border the earlier colour wins).
+    The type (2) is passed as construction mode passes it; its meaning was not traced.
+  - **White:** a file patch on `common/defines/00_graphics.lua` appends `1, 1, 1, 1` to that table
+    (`PatchGraphicsDefines`, tested in `gui_patch_test` incl. the real file: vanilla's first
+    occurrence of the name is in a comment). At runtime the palette (`kSigHighlightPaletteCount`:
+    float count, data 0xc before) is checked: if its last colour is white that index is used,
+    else colour 0 (light blue) and a log line (another mod replaced the table).
+  - The gradient UI draw list is gone again (unused).
+- To verify in game: thin white line around the railway's provinces, in the construction map
+  mode and in others; it goes when the pointer leaves; script areas unaffected.
+- **Second in-game test:** the line's outline came out **green**, and a white line around the
+  start province only. Vanilla without the loader (owner's screenshot) shows that white line
+  around the start province too: it is the game's own, and the green one was ours. So the colour
+  is the style's **second** number: construction mode's `{10, 2}` is palette colour 2 (green,
+  "good, while active"), and the loader's `{15, 2}` drew colour 2 as well. Now the loader passes
+  `{10 (as construction mode), palette index}`. The first number's meaning is still not traced.
+- **Third test:** the outline came out teal, not white, although the palette check found white at
+  index 15. The renderer's own colour table is built dynamically (`FUN_14130b730`: 10 fixed
+  colours, then the palette), so the limit is elsewhere; the teal matches colour 14 (or 0), so an
+  index past the vanilla 15 is most likely clamped. Now the defines patch **replaces colour 14**
+  (vanilla: FACTION_THEATER_HIGHLIGHT_COLOR_INDEX, the faction theatre map icon hover, which then
+  outlines in white too) instead of appending, and the loader takes the last white colour among
+  the first 15.
+- **Right-click** on a railway queue entry: the game centres on the line's start province
+  through the idler's centre-on-province (slot 55 -> tail jump to slot 56,
+  `kCodeIdlerCentreTail`). The loader hooks slot 56 (`HookCentreOnProvince`); while a railway
+  entry is hovered and the call is for one of its end provinces, the call is skipped and the next
+  frame fits the whole line (`FocusCamera`, fit factor 1.6); a line too long to fit ends up
+  centred at the camera's highest zoom (the height is clamped). FocusCamera's own calibration
+  bypasses the hook. The first three intercepts are logged. Not yet known whether the right-click
+  really goes through that function.
+- **Fourth test: still teal**, although the defines now held white at colour 14 (no warning in
+  the log). The renderer copies the palette into its own colour table once, in the map graphics
+  setup (`FUN_14130c570` -> `FUN_14130b730`: 10 fixed colours, then the palette; table at
+  `renderer+0x4b20`, count `+0x4b2c`), apparently before the defines file is read, i.e. from the
+  built-in vanilla values. That also explains the teal of colour 15 (clamped to 14). So the defines
+  patch is removed again; instead the loader hooks the table build (`kSigHighlightColourTable`)
+  and writes white into slot 10 + 14 right after it. `HighlightWhiteIndex` is 14 once that ran
+  (logged: "outline colour 14 made white in the renderer's colour table").
+- Right-click: no intercept was logged in the fourth test; to check whether a right-click was
+  made and whether it reaches the idler's centre-on-province.
+- **Fifth test: teal again**, with the table slot white (logged). The draw code (`FUN_14130f0e0`)
+  settles the style: for an edge in a group highlight it takes the style's **first byte** as the
+  edge's colour id (`cVar15 = *state`), and colour ids index the renderer's table directly: 0-9
+  the fixed border colours (country, state, ... borders use ids 1, 2, 4, 5, 7, 8, 9), `10 + i`
+  palette colour i (the decision highlights use `(char)i + 10`). So construction's `{10, 2}` is
+  palette 0 (teal), `{15, 2}` was palette 5 (green), and `{10, 15}` / `{10, 14}` were both
+  palette 0 (teal): every test fits. Now the loader passes `{10 + 14, 2}`: the white slot.
+- **Sixth test: white, works** ("Look great!"). Bug: while hovering, the start province's edges
+  were missing from the loader's outline; for the ~2 frames after leaving the entry it showed
+  complete. Frames of the owner's recording show the game's own start-province outline taking
+  those edges. The owner's outline list is sorted every frame by the style's **second number,
+  highest first** (`FUN_140bb2cd0`: insertion sort on `highlight+4`), and an edge shared by several
+  outlines takes the first one's colour. Construction mode uses 2; the start outline ranks higher.
+  The loader's outline now uses priority 100.
+- **Seventh test: the start province still had gaps** with priority 100. The draw code checks
+  three objects of the owner **before** the outline list: `owner+0x418` (colour id 4) and the
+  hovered item (`owner+0x458` type 0 province / 1 state, `+0x460` the object; colour id 5). The
+  construction queue (`FUN_141de6d80`, `FUN_141de8c20`) sets the hovered entry's start province
+  there through `SetHoveredProvince` (`0x140bbff00`, `kSigHoverSetters`), so no priority beats it.
+  Now the loader hooks that setter: while the railway line's tooltip came within the hold time and
+  the province is one of the line's ends, nothing is set instead; and when the loader's outline
+  appears, a start province already set is cleared (the original setter with null).
+- **Eighth test: works** ("Perfect!", Ganzhou - Wenzhou): one complete white outline around the
+  whole line, the start province included.
+- Right-click verified in the same test: the idler's centre-on-province hook caught it (`right-click on a railway entry: fitting the whole line (11 provinces, box 94x50)`) and the camera framed the whole line.
