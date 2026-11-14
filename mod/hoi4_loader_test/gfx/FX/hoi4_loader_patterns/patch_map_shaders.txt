@@ -1,0 +1,3 @@
+# Asks hoi4_loader to patch the map shaders for attention areas (MODDING.md "Attention areas").
+# This mod ships its own shaders too, which would be enough; the file shows what a mod that uses
+# only the built-in shaders ships. Any content, even empty.

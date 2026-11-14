@@ -286,7 +286,6 @@ bool AreaProvinceObjects(AreaKind kind, int id, std::vector<void*>* out);
 
 // --- Attention areas (attention_area; engine_attention.cpp, NOTES.md Part M) -------------------
 void ResolveAttention();
-bool HaveAttentionBorders();  // gradient border API, layer slots, allocation, rebuild hooks
 bool HaveAttentionCamera();   // UI, camera, centre on province, look-at, target height
 bool HaveProvinceData();      // province objects, ids, rects, controller, coastal, state owner
 // Province data (main thread or trigger reads; ids 1 .. ProvinceCount()-1).
@@ -296,35 +295,29 @@ bool ProvinceIsCoastal(int id);
 int ProvinceController(int id);              // tag, 0 if unknown
 int StateOwner(int stateId);                 // tag, 0 if unknown
 bool ProvinceRect(int id, int rect[4]);      // map pixels {x, y, width, height}
-// One drawn area: the look and the provinces (ids, ascending).
-struct AttentionLook {
-    float r = 1, g = 1, b = 0, a = 1;
-    float width = 1;     // border thickness (outline mode)
-    bool pulse = false;  // the engine's "highlighted" pulsing
-    bool glow = true;    // the engine's soft gradient (no fixed thickness)
-};
-struct AttentionDraw {
-    AttentionLook look;
+// Stripes (NOTES.md M9): the diagonal stripes the map draws for occupation and battle-plan orders,
+// in a chosen colour per province set, in every map mode. Colour bytes b, g, r, a (a: stripe strength).
+struct StripeArea {
+    uint32_t rgba = 0;
     std::vector<int> provinces;
 };
-// Queues the three hooks (layer pair, rebuild all, rebuild one). onFault: a fault in the loader's
-// part switched the drawing off for the session. Call from the feature's init.
-bool HookAttention(void (*onFault)(const char* where));
-// Main thread, at a safe point: replaces what is drawn (empty: nothing). Borders go into the
-// layer the map currently draws (NOTES.md M5); they are re-added after the game rebuilds it.
-void SetAttentionDraw(const std::vector<AttentionDraw>& areas);
-// Main thread, every frame (cheap): draws wanted areas once the map's layers are known.
-void AttentionTick();
-// The game entry: forget the borders of the previous game without touching them.
-void ForgetAttentionDraw();
+bool HookStripes();   // queues the stripe paint hook; false if its signature was not found
+bool HaveStripes();   // the hook is in place
+void SetStripes(const std::vector<StripeArea>& areas);  // replaces the set; applied at the next paint
+void ForgetStripes();  // a new game is entered
+// The fill ids the patched fill shader decodes (alpha 255 - n for n = 1 .. ids; 0: not patched).
+// While set, a game alpha in that range in a province no area holds is moved just outside it at
+// each paint (and logged once per value), so the game's stripes never read as a loader fill.
+void SetStripeIdRange(int ids);
 // Province group outlines (the thin lines construction mode draws around build targets): one
 // outline at a time for the UI. Main thread. Palette index: BORDER_COLOR_CUSTOM_HIGHLIGHTS.
 bool HaveHighlight();
-int HighlightPaletteSize();          // colours in the palette (0 if unknown)
-int HighlightWhiteIndex();           // the colour made white in the renderer's table, else -1
-// Queues the hook that makes one outline colour white when the renderer builds its colour table
-// (once, at the map's graphics setup). Call from a feature's init.
-bool HookHighlightWhite();
+int HighlightPaletteSize();               // colours in the palette (0 if unknown)
+int HighlightPaletteColourId(int index);  // the colour id of palette colour `index`
+// Queues the hook that appends the loader's colour slots to the renderer's outline colour table
+// when it is built (once, at the map's graphics setup); no vanilla colour is changed. Call from a
+// feature's init.
+bool HookOutlineColourTable();
 // The outline owner's hovered item (a hovered queue entry's province): drawn before every outline,
 // so it covers an outline's edges. The filter sees each province the game sets (UI, main thread)
 // and returns true to set nothing instead. Queues a hook.
@@ -332,7 +325,20 @@ using HoverFilter_t = bool (*)(int provinceId);
 bool HookHoveredProvince(HoverFilter_t filter);
 // Main thread: clears the hovered item now if it is a province the filter accepts. True if cleared.
 bool ClearHoveredProvinceIf(HoverFilter_t filter);
-bool ShowHighlight(const std::vector<int>& provinces, int paletteIndex);  // replaces the previous one
+bool ShowHighlight(const std::vector<int>& provinces, int colourId);  // replaces the previous one
+// Any number of outlines (script areas): one game outline per handle, shown while it is held.
+struct OutlineRef {
+    void* obj = nullptr;
+    void* ctrl = nullptr;  // the shared_ptr's control block
+};
+bool CreateOutline(const std::vector<int>& provinces, int colourId, int priority, OutlineRef* out);  // replaces *out
+void ReleaseOutline(OutlineRef* ref);
+// Colour ids in the loader's own slots: the hover mark's white (a slot of its own, never handed
+// out; -1 before the colour table is built or if it could not be extended), and a slot holding this
+// colour (-1 if none is free or the table could not be extended). Main thread.
+int HoverWhiteId();
+int OutlineColourId(float r, float g, float b, float a);
+void ResetOutlineColours();  // the colour slots may be handed out again (not the hover's white)
 void HideHighlight();
 // Main thread, at a safe point: centre the camera on the box (map pixels) and set the target
 // height (height <= 0: fit the box, times fitFactor). `ref` and `ref2` are provinces of the area

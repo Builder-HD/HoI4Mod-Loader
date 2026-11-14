@@ -5,16 +5,16 @@
 #
 # Runs build/smoke/{sig,nosig}/hoi4.exe (stand-ins that load version.dll like the game does)
 # through every scenario and checks both their results and the loader log lines. The hash
-# cache goes to an isolated %LOCALAPPDATA% under the build dir. The real loader.log is
-# overwritten unless the game is running (then the loader writes loader.<pid>.log, which
-# this script deletes afterwards). Note: scenario 3 touches and scenario 8 appends a byte to
+# cache goes to an isolated %LOCALAPPDATA% and the loader's user folder (loader.log, generated
+# docs, dlc_load.json) to an isolated HOI4_LOADER_USER_DIR, both under the build dir, so the
+# game's own loader.log in Documents is never touched. Note: scenario 3 touches and scenario 8 appends a byte to
 # the stand-in executables; that only affects the test binaries.
 BUILD="$(cd "${1:-$(dirname "$0")/../build}" && pwd)"
 SIG="$BUILD/smoke/sig"
 NOSIG="$BUILD/smoke/nosig"
 LA="$BUILD/smoke/localappdata"
 CACHE="$LA/hoi4_loader/hash_cache.ini"
-DOCS="$(cygpath -u "$(powershell -NoProfile -Command "[Environment]::GetFolderPath('MyDocuments')" | tr -d '\r')")/Paradox Interactive/Hearts of Iron IV"
+DOCS="$BUILD/smoke/userdir"
 rc=0
 
 echo "===== 0) native script API core (fake engine backend)"
@@ -30,6 +30,11 @@ echo "$out" | grep -E 'FAIL|gui_patch_test:'
 echo "===== 0a2) air scenario definitions, mod list, matching (air_scenarios)"
 out=$("$BUILD/tests/air_scenarios_test.exe"); trc=$?
 echo "$out" | grep -E 'FAIL|air_scenarios_test:'
+[ "$trc" = 0 ] || rc=1
+
+echo "===== 0a3) shader patterns: stitching, the mod shaders' compile check (attention_area)"
+out=$("$BUILD/tests/shader_patterns_test.exe"); trc=$?
+echo "$out" | grep -E 'FAIL|note:|shader_patterns_test:'
 [ "$trc" = 0 ] || rc=1
 
 echo "===== 0b) test mod stub clears every feature flag; MODDING.md lists every feature; docs links"
@@ -66,7 +71,7 @@ else echo "  skip not a git checkout"; fi
 for d in "$SIG" "$NOSIG"; do
     [ -f "$d/hoi4.exe" ] && [ -f "$d/version.dll" ] || { echo "missing $d/hoi4.exe or version.dll; build first"; exit 2; }
 done
-rm -rf "$LA"; mkdir -p "$LA"
+rm -rf "$LA" "$DOCS"; mkdir -p "$LA" "$DOCS"
 
 newest_log() { ls -t "$DOCS"/loader.log "$DOCS"/loader.*.log 2>/dev/null | head -1; }
 expect_log() {  # expect_log <description> <fixed string>
@@ -77,7 +82,7 @@ expect_no_log() {  # expect_no_log <description> <fixed string>
 }
 run() {  # run <dir> <engine|file> <title>
     echo "===== $3"
-    (cd "$1" && LOCALAPPDATA="$(cygpath -w "$LA")" ./hoi4.exe "$2") || rc=1
+    (cd "$1" && LOCALAPPDATA="$(cygpath -w "$LA")" HOI4_LOADER_USER_DIR="$(cygpath -w "$DOCS")" ./hoi4.exe "$2") || rc=1
 }
 hash_of() { sha256sum "$1/hoi4.exe" | cut -d' ' -f1; }
 ini_listed() { printf '[supported_hashes]\n; comment\nother = %064d\nsmoke_build = %s ; test build\n' 0 "$(hash_of "$1" | tr a-f A-F)" > "$1/loader_config.ini"; }
@@ -122,7 +127,7 @@ expect_log "summary of disabled features" "Engine-tier features disabled: engine
 expect_log "file tier summary" "File-tier features stay active: core detection"
 expect_log "ini line printed" "my_build = $(hash_of "$SIG")"
 expect_log "unlisted: read-only report" "Signature report (unlisted hoi4.exe build): read-only, nothing is hooked or patched"
-expect_log "unlisted: present signatures counted" "Signature report: 2/139 signatures and anchors match exactly once"
+expect_log "unlisted: present signatures counted" "Signature report: 2/129 signatures and anchors match exactly once"
 expect_log "unlisted: failing signature named" "FAILS kSigGameEntered: matches 0 times"
 expect_log "unlisted: code shapes summarised" "code shapes match where the resolver checks them"
 expect_log "unlisted: unreachable shape named" "NOT CHECKED kCodeTriggerFactory"

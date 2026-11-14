@@ -5616,3 +5616,401 @@ thin white outline.
 - **Eighth test: works** ("Perfect!", Ganzhou - Wenzhou): one complete white outline around the
   whole line, the start province included.
 - Right-click verified in the same test: the idler's centre-on-province hook caught it (`right-click on a railway entry: fitting the whole line (11 provinces, box 94x50)`) and the camera framed the whole line.
+
+
+## M8: `style = outline | band` (branch `outline-style`, 2026-11-13)
+
+Owner's test of the fill decisions in the supply map mode: the gradient band shows as solid red
+there and looks broken (the band lives in the political map's border layer; special map modes draw
+the layer differently). Owner's choice: a style per area.
+
+- `style = outline` (default): each area gets its own group outline (the railway hover mark's
+  renderer, M7) at priority 90 - its index (the hover mark stays at 100, above). Released on
+  remove, replace (all outlines are rebuilt on every change) and game entry.
+- Colours: when the renderer builds its outline colour table (the hook of M7), the loader appends
+  32 zeroed entries with the table's own allocator (vt[1] alloc(bytes, 16), vt[2] free; data,
+  cap, count, allocator at count field - 0xc / - 4 / 0 / + 4) and keeps the base id. An area's
+  colour is written into a free slot when the area is drawn; identical colours share one; a
+  rebuild of the table writes them again. The colour id is the style's first byte, so base + 32
+  must stay below 256 (the table has about 26 entries).
+- **Open (first test of M8):** does a colour written after the setup reach the screen (is the
+  table uploaded every frame, or once)? Is the shader's table larger than the game's count, or
+  are entries past the built-in ones read at all? If outlines come out black or in a wrong colour,
+  that is the cause; then the fallback is a fixed set of colours written at the build.
+- **First test (owner, "Very nice"):** `chi_coast` drew a thin cyan outline around China's whole
+  coast. A colour written into an extra slot after the table's build does reach the screen, so the
+  open question above is answered: the dynamic slots work.
+- `style = band` is the earlier path unchanged (width, pulse, glow).
+
+## M9: the stripe texture (`CMapSecondaryMask`), traced for a stripe / custom fill style (2026-11-13)
+
+Owner's question: the area defense order stripes its states diagonally; can that be a fill style,
+or can a modder use any shader for the fill? Addresses from the Part M Ghidra project, for
+orientation only.
+
+**Shader side** (`gfx/FX`, plain text, moddable). After the gradient borders, the terrain, water,
+tree and mesh shaders call `secondary_color_mask` (`standardfuncsgfx.fxh`) with sampler
+`ProvinceSecondaryColorMap` (index 6 in `pdxmap.shader`). It samples a map-sized RGBA texture at
+the map uv: rgb is the stripe colour, alpha scales the stripes (`CalculateOccupationMask`:
+diagonal cosine stripes, fading with camera distance). Alpha 0 means no stripes. Occupation in the
+political map, the supply map mode, operative missions and battle-plan orders all draw here.
+
+**Engine side: `CMapSecondaryMask`** (the gradient border manager holds it at +0x40; map modes keep
+a pointer too):
+- +0x00 CPdxArray<uint32> colour per province id (RGBA bytes; alpha = stripe strength).
+- +0x18 CPdxArray<int> provinces changed since the last paint (count +0x24, allocator +0x28).
+- +0x30 the CPU image (RGBA, map size), +0x38 its byte size, +0x3c width, +0x40 height.
+- +0x44 repaint everything.
+- `Clear(mask)` FUN_141a6e6a0: zeroes the image and every colour, sets +0x44. Called by every map
+  mode refresh, the supply overlay, the area defense / battle-plan code (FUN_140fd27d0, FUN_140fdc9b0).
+- `SetProvince(mask, province, rgba)` FUN_141a6eaa0: writes the colour if it changed and queues
+  the province. `SetProvinceRgbAlpha(mask, province, rgb, alpha byte)` FUN_141a6ead0.
+  `SetState(mask, state, rgba)` FUN_141a6eb10: every province of the state.
+- `Paint(mask, gamestate, ..., out)` FUN_141a6ecb0, called from the border manager's update
+  (FUN_140fbf610, throttled) right after the gradient layers: paints the queued provinces (or all)
+  into the image with a parallel job (`CUpdateSecondaryColorThreaded`, body FUN_141a6dd50: the
+  province's pixel spans at province +0xb8 -> +0x58, 6 bytes each {x, y, length}, count +100) and
+  marks the dirty 256-pixel tiles for upload.
+- Operative missions colour states through it (`OperativesMapModeColorOperativeMissionTargetState(...,
+  EOrderInstanceType, CMapSecondaryMask&)`); the order-type switch suggests battle-plan orders such
+  as area defense use the same path. Not checked in game yet.
+
+**Plan for `style = stripes`:**
+- Hook `Paint`: before the original runs, call `SetProvince` for every province of every stripe
+  area with the area's colour (alpha = the area's alpha). It only queues provinces whose colour
+  changed, so this costs little. The game's own writes (a map mode refresh after `Clear`) are
+  overwritten again before the next paint.
+- Remember the colour the game had in each province when the loader first overwrote it. On remove,
+  write that colour back (the next map mode refresh corrects it if it went stale).
+- Needs: signatures for Clear/SetProvince/Paint and the manager's mask offset (+0x40, read from the
+  call site in the border update), and the manager pointer, which the attention hooks already get.
+- Trade-off: the texture is shared, so marked provinces lose occupation or supply stripes while
+  marked.
+
+**Custom shaders:** the loader writes the area's colour, and puts a pattern number in the alpha
+byte (for example 255 = default stripes, 1..254 = pattern ids). A mod ships its own
+`secondary_color_mask` in `standardfuncsgfx.fxh` that decodes the alpha into its own patterns
+(solid, crosshatch, dots, pulse with `vGlobalTime`). Without such a mod, the vanilla shader treats
+the alpha as stripe strength, so low pattern ids would show faint stripes. A pattern encoding with
+high alpha values keeps vanilla visible. Conflict: two mods replacing `standardfuncsgfx.fxh`.
+- **Built (2026-11-13):** `style = stripes`. `kSigStripePaint` (unique on 1.19.4.2 and 1.19.5.0)
+  hooks Paint; the detour writes the areas' colours into mask +0 (bytes r, g, b, a) before the
+  original. After an area change it gives back the game's colours where areas left (kept per
+  province when first overwritten, 0 where the game had none) and sets +0x44 (repaint all);
+  otherwise it only rewrites colours the game changed (those provinces are queued already). The
+  set is guarded by an SRW lock. Untested in game: the byte order (if red shows blue, the texture
+  is BGRA), whether the paint runs often enough, and the supply map mode.
+- **First in-game test (owner): works.** Diagonal stripes over Shandong, as area defense draws them.
+  `color = red` came out blue: the texture is BGRA (byte 0 blue, byte 2 red); fixed in the plugin.
+
+## M10: can mods add shader code without replacing game files? (2026-11-13) Yes.
+
+Question: the fill and outline pattern shaders would have to replace `standardfuncsgfx.fxh` and
+`border.shader`, global files two mods cannot both replace. Could the loader stitch each mod's
+pattern code into the vanilla files instead?
+
+- **Shader sources are plain text, built at every start.** `gfx/FX/*.shader` and `*.fxh` are read
+  at startup; each effect variant's full HLSL source is assembled and cached by a hash of it in
+  `Documents/Paradox Interactive/Hearts of Iron IV/shadercache/dx11_win32/{ps,vs}_5_0/<hash>.scache`
+  (the source, comments kept) and `.bin` (the bytecode). A changed source gets a new hash and is
+  compiled. Map shaders compile when a map loads, not at the main menu.
+- **`.fxh`/`.shader` are Paradox script**: `ConstantBuffer(...) { }`, `Code [[ ... ]]`,
+  `PixelShader = { Code [[ ... ]] }`. HLSL is only legal inside `[[ ]]`; anything after the last
+  `]]` is a script parse error (`Unexpected token: //` in error.log).
+- **Probe, run 1:** a file patch (`register_file_patch(L"gfx/FX/standardfuncsgfx.fxh")`) appended a
+  comment at the end. The loader log showed the game reading the file through the patch
+  (44889 -> 44918 bytes, about 80 s after start) and error.log reported the parse error at line
+  1254: the game parsed the patched copy.
+- **Probe, run 2:** the comment went before the last `]]` (inside the PixelShader code). No errors.
+  Nothing compiled at the main menu; after starting a game as CHI, 57 new cache entries appeared,
+  every one with the probe comment. **The patched HLSL is compiled and used.** Probe removed.
+
+**Consequence:** mods can ship pattern functions in their own files; the loader can insert them
+(and a dispatcher keyed by pattern id) into `standardfuncsgfx.fxh`'s PixelShader code and into
+`border.shader` at read time, on top of whatever copy is loaded (vanilla or a graphics mod's).
+Still open: that the group outline is drawn by `border.shader` with the colour table entry as
+`vSelectionColor`; test-compiling mod patterns (D3DCompile) so one broken pattern cannot break the
+map; the first start after a pattern change recompiles the affected shaders (slower once).
+**Outline path checked (static):** the outline renderer's segment sort (FUN_14130f0e0) puts every
+map border segment into one of 12 buckets (renderer +0x4a00, stride 0x18, just before the colour
+table at +0x4b20); each 8-byte entry carries the segment, its colour id (the outline style's first
+byte; 5 for the hovered item) and a float. Of all `gfx/FX` shaders only `border.shader` has a
+selection colour: `ConstantBuffer(2) { float4 vSelectionColor; float2 vTime_Transparency; }`, added
+to the border texture's colour with a pulse (`vColor.rgb + vSelectionColor.rgb * pulse`, the pulse
+scaled by `vSelectionColor.a`). No shader reads a colour array. So outline colours reach the screen
+as `vSelectionColor` in `border.shader` (per draw, from the table entry), which also explains the
+first tests' colours mixing with the white border texture. A pattern id can ride in the table
+entry: the loader writes the floats, so for example alpha = 2 + id (vanilla saturates the pulse,
+showing the plain colour) is free for a mod's `border.shader` code to decode; `Input.uv.y` runs
+along the border (marching ants), `uv.x` across it.
+
+## M11: shader patterns (branch `shader-patterns`, 2026-11-13)
+
+Owner's request: modders supply the fill and outline looks as shaders, without the global-file
+conflict. Built on M9 (stripe texture), M10 (shader files can be patched as read) and the outline
+path note above.
+
+- **Files:** `<mod>/gfx/FX/hoi4_loader_patterns/fill/<name>.hlsl` defining
+  `float3 HL_Fill_<name>(float3 vColor, float2 vUV, float4 vMask)` and `.../outline/<name>.hlsl`
+  defining `float4 HL_Outline_<name>(float4 vColor, float3 vAreaColor, float2 vUV, float3 vPos)`.
+  Found through `dlc_load.json` (enabled mods in order) -> each `.mod` file's `path`. Same name in two
+  mods: the later wins (logged). Ids 1..32 per kind in name order. Files with `[[`/`]]` are refused.
+- **Fill:** `standardfuncsgfx.fxh` as read: vanilla `secondary_color_mask` renamed
+  `HL_vanilla_secondary_color_mask`; before the PixelShader block's last `]]` go the patterns,
+  `HL_FillDispatch` and a new `secondary_color_mask` that samples the mask, decodes
+  id = 255 - round(alpha * 255) and runs the pattern (else the vanilla function). The loader writes
+  the area's colour with alpha 255 - id through the stripe hook (M9). Vanilla, unpatched, shows such
+  provinces as near-full stripes.
+- **Outline:** `border.shader` as read: the pixel shader's `float4 main( VS_OUTPUT_BORDER Input ) :
+  PDX_COLOR` renamed `HL_VanillaBorderMain`; before that MainCode block's `]]` go the patterns,
+  `HL_OutlineDispatch` and a new `main` that calls the vanilla one and, when `vSelectionColor.a` > 2.5,
+  runs pattern round(a - 2). The loader puts alpha 2 + id into the outline's colour table slot.
+- **Script:** `fill_pattern`, `outline_pattern` (tokens, matched case-insensitively), `style = none`
+  (fill only). A fill pattern goes through the stripe texture whatever the style; an outline pattern
+  needs style = outline.
+- **Checked offline:** `shader_patterns_test` (37 checks, including the real vanilla files) and
+  `shader_patterns_test --splice`: the demo patterns spliced into every cached game shader variant
+  that has the fill function (171) or the border pixel shader (3) all compile with fxc ps_5_0.
+- **Demo:** example mod `matrix_rain` (fill: digital rain in the area's colour, map-anchored) and
+  `marching_ants` (outline), decisions "Follow the White Rabbit" (Shandong) and "Wake Up, Neo" (CHI).
+- **Untested in game:** whether the renderer passes the colour table alpha unchanged into
+  `vSelectionColor` (if not, outline patterns fall back to a plain outline); the rain's direction
+  (vUV.y may run upwards) and scale; edge pixels where the mask's filtering blends the alpha code.
+- **First in-game test (owner, 1.19.5.0): the rain works.** Log: both patterns found, standardfuncsgfx.fxh
+  and border.shader patched; 57 new cache entries carry the patterns; no shader errors. The rain rose:
+  the map's v grows southwards, so `matrix_rain` now uses -vUV.y (fixed in the example mod, recompiled
+  with fxc). Note for `--splice`: use a cache entry without `HL_vanilla` (entries from a patched run
+  are patched already).
+- **`state = this`** in an area block: the state scope's id (Int word, `Scope::stateId()`), so
+  script can pick areas with the game's random scopes. Example decision "Glitch in the Matrix":
+  `random_country` (owning a state) -> `random_owned_state` -> matrix rain on `state = this`, then
+  `focus_attention_area` from ROOT (the player's country). Repeatable; the same id replaces the
+  previous state.
+- **`random_provinces = <n>`** in an area block keeps n of the block's provinces, a partial
+  Fisher-Yates shuffle seeded by splitmix64 of a counter of add_attention_area runs (reset on game
+  entry). Every machine runs the same effects in order, so multiplayer agrees; a hot-joined player
+  has another counter. Example decision "Scorched Earth": a random country's provinces,
+  `owner = THIS random_provinces = 12`, fill pattern `inferno`.
+- **`inferno`** (example mod, fill): value-noise fbm; heat field at about province size (blazing and
+  smouldering patches), charred desaturated ground with ash, flames rising north (v decreases) with
+  flicker, embers, smoke billows drifting north-east; the area colour is the flames' middle colour.
+  Spliced into all 171 cached fill shader variants: compiles with fxc.
+- **Second in-game test (owner, Transjordan in rain): edge artefacts.** Green diagonal bands along
+  the area's edge: the mask's sampler is linear with mipmaps, so the alpha code blended with the
+  neighbour's (0) into codes outside the pattern range, which the vanilla function drew as strong
+  stripes (and codes of other patterns). Fixed: the dispatcher reads the exact top-level texel
+  (`TexMaskSampler._Texture.Load`, under `#ifdef PDX_DIRECTX_11`; filtered `tex2D` otherwise); the
+  vanilla fallback keeps its filtered read. All 171 variants compile. The rain read as checkered
+  noise at 4 map px per character: now 8 px, darker ground.
+
+## M12: every look a shader (branch `shader-patterns`, 2026-11-13)
+
+Owner's request: no hardcoded looks; use shaders for everything, a "line shader" for outlines.
+
+- **Script:** `add_attention_area = { id line = <shader> fill = <shader> color/red/green/blue/alpha
+  area = { ... } }`. `style`, `width`, `pulse`, `glow`, `fill_pattern`, `outline_pattern` are gone.
+  Neither line nor fill given: `line = solid`. Unknown names fall back to `solid` / `stripes` (logged).
+- **Built-ins** (`src/shader_builtins.cpp`, mods may replace them by name): lines `solid` (area colour
+  across the strip, soft sides, the vanilla alpha for the zoom fade), `pulse`, `dashed`; fills
+  `stripes` (`CalculateOccupationMask`, the vanilla stripes), `solid` (45 % wash), `band` (inside the
+  edge, 12 map px), `glow` (20 px, breathing).
+- **Folders:** `gfx/FX/hoi4_loader_patterns/line/` (`HL_Line_<name>`) and `fill/` (`HL_Fill_<name>`, now
+  with the mask sampler as fourth argument).
+- **`HL_EdgeDistance(Mask, vUV, max)`**, added before the fill shaders: map pixels to the nearest texel
+  with another code (8 rays x 6 radii, exact `Load`s; the mask is map-sized, so 1 texel = 1 map px).
+  Bands, glows and scorched edges are fills built on it; a line cannot be wider than the game's strip.
+- **Fallbacks:** the file patches set `Patched(kind)`; an unpatched kind gets plain values (fill alpha
+  255 = full vanilla stripes, line alpha = the area's alpha = plain outline), logged once.
+- **Removed:** the gradient-border injection (state, raw parts, the SetActiveLayers / RebuildAll /
+  Rebuild detours, ResolveBorders, ~340 lines) and its eleven signatures and two code shapes: 120
+  signatures and anchors remain. Camera, province data, outlines and the stripe hook are unchanged.
+- **Checked offline:** `shader_patterns_test` 53 checks (built-ins' shape, both real vanilla files);
+  all built-ins plus the example mod's shaders spliced into every unpatched cached variant (171 fill,
+  3 border) compile with fxc. Smoke, native script and signature checks pass on both executables.
+- **Owner's question (fire line):** a line shader only shades inside the game's border strip (its
+  width is the engine's border geometry; in the shader, `1 / fwidth( vUV.x )` gives it in screen
+  pixels). A fire line's scorched zone and glow are wider than that, so they belong in a fill shader
+  using `HL_EdgeDistance`, with a flickering line shader on top for the core.
+- **Untested in game:** all of M12.
+- **Third in-game test (owner, close zoom over Sichuan, matrix rain): staircase edges.** The single
+  exact texel (second-test fix) shows the stripe texture's texels as blocks at close zoom. Now the
+  dispatcher reads the 4 texels around the pixel exactly, picks the shader id covering most of the
+  pixel and blends its result by that bilinear coverage with the other side: the vanilla stripe look
+  rebuilt from the texels without a shader id (CalculateOccupationMask x their averaged alpha), so ids
+  never leak into vanilla stripes. Edges are as smooth as vanilla's filtered ones. All 171 variants
+  compile with the built-ins and the example shaders, no warnings in loader code. Still blocky at
+  close zoom by design: matrix_rain's glyph pixels; `HL_EdgeDistance` works in whole texels, so a
+  band's inner edge steps slightly (smoothing it is possible with fractional radii if it shows).
+- **Fire line example** (owner's Shadertoy shader, adapted): example mod `fill/fire_edge.hlsl`
+  (distance to the area's edge from `HL_EdgeDistance`, warped by moving fbm noise, in place of the
+  distance to a fixed segment: scorched zone, glow in the area's colour, flickering core near the
+  edge) and `line/fire_line.hlsl` (the border strip burning: noise along `vUV.y` varies its width and
+  brightness, white-hot centre, the area's colour at its sides). Decision "Line of Fire": a random
+  country's borders. Both compile in every variant with all other shaders (171 fill, 3 border).
+- **Fourth in-game test (owner, "Wake Up, Neo", oblique view): green stripes outside the area,
+  fading away from its border.** Pixels whose 4 exact texels carry no shader id went to the vanilla
+  function, which reads the filtered mask; its smaller mip levels (far or steep views) spread the
+  area's ids several texels out, and vanilla drew them as stripes in the area's colour. Fixed: when
+  the 4 exact texels' alpha is zero (no stripes there at all) the vanilla call is skipped; vanilla
+  would have drawn nothing there but blur. Residue: next to the game's own stripes (occupied land)
+  the blur of an area's ids can still tint them slightly. All 171 variants compile.
+- **Fifth in-game test (owner, "Fill Test: Red Glow"): lines work.** `line = dashed` drew red/black
+  dashes along Shandong's border: the patched border.shader, the id in the colour table alpha and
+  the dispatch all work in game (the open question of M11 is answered: the renderer passes the table
+  alpha unchanged into vSelectionColor). The `glow` fill was barely visible (red over the political
+  map's orange, breathing down to 20 %, squared falloff): made stronger (45-100 %, linear, bright
+  rim). The game's loader.log of that run was overwritten by the smoke test (its fake hoi4.exe writes
+  `Documents/.../loader.log` too) — to fix: the smoke run should log elsewhere.
+- **Smoke test no longer touches the game's log:** the loader takes its user folder (loader.log,
+  generated docs, dlc_load.json) from `HOI4_LOADER_USER_DIR` when set (main.cpp `GetUserDir`); the
+  smoke script sets it to `build/smoke/userdir` for every stand-in run and reads the log there.
+  Verified: a full smoke run left Documents' loader.log unchanged.
+- **DNA helix example** (owner's Shadertoy helix, adapted): example mod `line/dna_helix.hlsl`. The
+  strip's `vUV` replaces the shader's `lineCoords` (along = `vUV.y * BORDER_TILE`, across =
+  `vUV.x - 0.5`), radius and thicknesses rescaled to strip widths, no end fade (outlines are closed),
+  strand one in the area's colour, strand two magenta, depth-sorted, with rungs and glow; alpha 0
+  between the strands so the map shows through. Decision "Double Helix" (random country, cyan).
+  Compiles with all line shaders in the 3 border variants. Inside the strip it is small: best zoomed in.
+- **`alpha` reaches the shaders** (owner's request). Fills: the id stays in the alpha byte; the area's
+  alpha (6 bits) goes into the low 2 bits of red, green and blue (`FillTexel`), the colour rounded to
+  steps of 4; the dispatcher decodes it (`HL_DecodeMask`) and passes vMask = (colour, alpha). Lines:
+  slot alpha 2 + id + 0.9 a, decoded with floor; the dispatcher sets the static global `HL_LineAlpha`
+  before the line shader (a global, so line signatures stay unchanged). Built-ins fade with it (look
+  unchanged at the default 1). Found while doing this: border.shader includes standardfuncsgfx.fxh,
+  so its pixel shader holds the fill additions too; names must be unique across both kinds (now in
+  the docs), and the compile check now stacks fill + line in the 3 border variants: all compile, as
+  do the 171 fill variants. 56 unit checks.
+- **Fifth/sixth test residue, "stripes next to the border" (red boxes, after the blur fix):** the
+  vanilla path still ran where the exact texels carry the game's own stripes, and its filtered read
+  had the area's ids bled in (stripes tinted in the area's colour). Now, outside areas, the filtered
+  read is compared with the exact texels' bilinear value (alpha within 6/255, colour within 0.05);
+  if they disagree the vanilla look is built from the exact texels (none carries an id), else vanilla
+  runs (graphics mods keep working where nothing bled in). Untested in game.
+- **shader_variables** (owner's request). A shader declares up to 4 variables
+  (`// hoi4_loader_variables: name min max [default], ...`, parsed by `ParseVariables`: lowercase
+  names, not shader words, max > min, no duplicates). `EmitPattern` gives each a `static float
+  HL_V<F|L>_<shader>_<name>` and `#define <name>` around the shader's code, `#undef` after; the
+  dispatcher assigns them before the call. Channels: fills 4 x 6 bits (`FillTexelN`: v0..v2 the high
+  6 bits of r, g, b, v3 their low bits; colour + alpha are just the implicit 4 values), normalised over
+  min..max; lines v0..v2 = the slot's rgb as written (exact, any value), v3 the slot alpha's 0..1
+  part. Script: `shader_variables = { ... }`, a Block whose keys are the union of all declared names
+  plus `color` (`BuildVarKeys`, before the effect is registered, so the game's parser checks keys).
+  Values: the block, else red/green/blue/alpha from the area's colour, else the default. Examples:
+  `fire_edge` declares red, green, blue, reach (Line of Fire: `reach = 28`); `dna_helix` twist, speed,
+  radius (Double Helix: `twist = 6 speed = 8 radius = 0.35`). 54 unit checks; all fill variants and
+  the stacked border variants compile. Untested in game.
+
+## M13: examples in the test mod, branches and merge order (2026-11-13)
+
+**Status: experimental.** Script syntax, shader interface and built-in looks may change. Tested in
+game on 1.19.5: outlines, stripes, matrix rain (mod fill shader), dashed (line shader, so the
+colour table's alpha reaches `border.shader`). Not yet: `shader_variables`, alpha in shaders, the
+fill dispatcher's last edge fix (M12 residue), `fire_edge`/`fire_line`/`dna_helix`/`inferno`.
+
+**Examples moved into the test mod** (owner's call): the separate "HoI4Mod Loader: Attention
+Areas" mod's decisions, localisation and shaders now live in `mod/hoi4_loader_test`
+(`common/decisions/hoi4_loader_test_attention_decisions.txt`, category
+`hoi4_loader_attention_category`, `localisation/english/hoi4_loader_test_attention_l_english.yml`,
+`gfx/FX/hoi4_loader_patterns/{fill,line}/`). The test plans above that name the separate mod mean
+these files now. Rename: on `main` Part L is air scenarios, so this part became Part M (every
+commit of the stack was rewritten L -> M before the rebase, references in code included).
+
+**Branches** (a chain, each on the one before; PRs from `ni1saux` to `Builder-HD/main`):
+0. `feature/railway-badges` (not experimental, not attention): railway badges split by level, while
+   dismantling, removals kept visible (Part H, H6/H7). On `main` directly. It is first in the chain
+   only because it adds signatures too: with it underneath, the smoke test's signature count is right
+   at every tip and after every merge.
+1. `feature/attention-area`: the feature with gradient-border outlines, area selector, camera, the
+   native script API additions (`Number`, `Block`, `repeat`, 16 parameters). M1-M6.
+2. `feature/railway-hover-mark`: hovering a railway queue entry outlines the line (needs 1). M7.
+3. `feature/attention-shaders`: outline/band/stripes styles, then every look a shader, mod shaders,
+   `shader_variables`, these examples (needs 2). M8-M13.
+Independent of the chain: `notes/1.19.5-exe-diff` (docs only, merge any time).
+
+**Merge order: 0, 1, 2, 3.** Each PR's diff on GitHub includes the branches below it until those
+are merged (the PRs come from a fork, so they can't target each other's branches; review each PR
+by its own commits). Merge with a merge commit or rebase-merge, not squash: a squash gives the
+lower branch new commits, and the next PR then shows its commits again and conflicts. If one is
+squashed anyway, rebase the next branch: `git rebase --onto origin/main <old tip of the merged
+branch> <next branch>`. Stopping after any step leaves `main` consistent (built and smoke-tested at
+every tip); stopping after 0 leaves out all experimental work. Merging out of order (say 3 alone)
+pulls in everything below it.
+Signature counts in `tests/run_smoke.sh` per tip: 0: 118, 1: 134, 2: 139, 3: 129 (3 removes the
+eleven gradient-border signatures).
+
+**Not in the chain:** the local branch `area-selector` (a refactor of the old attention code into
+`area_select.cpp` and `engine_province_data.cpp`, M4) predates `state = this`, `random_provinces`
+and the shader parameters, so it no longer applies; it needs porting onto 3 by hand.
+
+## M15: the #19 review (2026-11-14, owner Builder-HD)
+
+The review held #17 to #20 open for two problems that affect every loader user, plus smaller
+points. All are fixed on `feature/attention-shaders` (#19), the formatting of #18 on #18's own
+branch. #17 and #18 are meant to be merged only together with #19: their behavioural points are
+fixed where their code ends up, in #19.
+
+**1. The map shaders were patched for everyone.** `AttentionAreaInit` registered the patches of
+`border.shader` and `standardfuncsgfx.fxh` whenever the feature was on (the default), so every
+player got the dispatcher and a shader recompile. Now `ShaderPatterns::Collect` also notes whether
+an enabled mod asks for the patch: it ships a shader in `gfx/FX/hoi4_loader_patterns/{fill,line}/`,
+or (a mod that uses only the built-in shaders) the marker file
+`gfx/FX/hoi4_loader_patterns/patch_map_shaders.txt`. Only then are the two patches registered;
+otherwise the log says so and areas show as plain outlines and stripes. One file check per mod;
+scanning every mod's script for `add_attention_area` would read every script file of big mods in
+DllMain. (A first version used the feature's guard stub
+`common/scripted_triggers/hoi4_loader_feature_attention_area.txt` as the signal; the owner asked
+for a name that says what it does, and the guard stays only a guard.)
+
+**2. A broken mod shader broke the map.** Mod shaders are now compile-checked once, in the first
+shader file patch call (the game's loading thread; not DllMain, as it loads a DLL; the vfs lock
+held there is only taken for patched paths, so `LoadLibrary`'s own file opens don't deadlock):
+- The compiler is the system's `d3dcompiler_47.dll` (`src/shader_check.cpp`, `D3DCompile`, ps_5_0).
+- The source is a harness of the documented interface (`CheckSourceFill` / `CheckSourceBorder` in
+  `shader_patterns.cpp`): the game's DX11 preamble as far as needed (`sampler2D`, `tex2D*`, `vec*`,
+  `mod`, `fmod_loop`, map size), `vGlobalTime`, `cam_distance`, `CalculateOccupationMask`,
+  `HL_EdgeDistance`; for the border source also `BORDER_TILE` and `HL_LineAlpha`. A `main` calls
+  every pattern (an uncalled function is not fully checked).
+- The built-ins first: if they fail, the harness does not fit the game and every mod shader is
+  left out. Then each mod shader on top of those that passed, fills (alone and in the border
+  source) then lines: a failure is that shader's. It is logged with the compiler's error and marked
+  not usable: no code and no dispatch case in the patched shaders, and `Redraw` draws `solid` /
+  `stripes` for its areas. A failing replacement of a built-in gives the built-in back. Ids never
+  shift (a rejected shader keeps its id), so machines with the same mods agree.
+- Not caught: a name clash with the game's own shader code (the harness doesn't hold it). MODDING
+  lists what a shader may use and says to prefix helpers.
+- `shader_patterns_test` runs it (now also in the smoke test): built-ins and the test mod's six
+  shaders pass; an undeclared name, a fill using `BORDER_TILE` and a fill/line helper clash fail.
+  The first run found that the built-in `stripes` calls `CalculateOccupationMask`, so it is part of
+  the interface.
+
+**Fill marker alpha 255 - id.** Whether the game itself ever writes alphas 223..254 into
+`secondary_color_mask` (occupation, claims, battle plans, supply) is not proven from the exe. The
+loader no longer depends on it: while the fill shader is patched (`SetStripeIdRange`, the number of
+fill ids), the paint hook moves a game alpha in 255 - n .. 254 of a province no area holds to the
+nearer value outside that range (at most n/255 of stripe strength) and logs each such value once
+("the game wrote stripe alpha ..."). An in-game session with those map modes shows whether it
+happens at all.
+
+**Smaller points:**
+- **One dlc_load.json parser.** `src/mod_list.h/.cpp` (`ModList`): `ParseDlcLoad`,
+  `ParseDescriptor` (a small tokenizer of its own: quoted and bare values, blocks skipped, `#`
+  comments) and `Enabled(userDir)` (descriptor paths and mod folders resolved). air_scenarios and
+  the shader collector use it; `ShaderPatterns::EnabledMods`/`ModPath` are gone. Tested in
+  `air_scenarios_test` (two new descriptor cases).
+- **`HOI4_LOADER_USER_DIR`** is honoured only when the exe exports `hoi4_loader_smoke_standin`
+  (`tests/smoke.cpp`); the game ignores it. DEVELOPING documents it.
+- **`has_attention_area` without a lock (#17).** The trigger now reads `g_marked`, a copy of the
+  marked ids under an SRW lock, refreshed after every change of `g_areas` (add, remove, game entry).
+- **Hot-join (#17).** MODDING warns that `has_attention_area` must not drive game logic in
+  multiplayer; the test mod's decisions dropped it from `available` (it stays in `visible`).
+- **Palette colour 14 stayed white (#18).** The hover mark no longer changes a vanilla colour: it
+  uses the last of the loader's 32 appended colour slots, reserved for white (`HoverWhiteId`;
+  areas get the other 31). `WhiteRaw` and the colour 14 overwrite are gone.
+- **Formatting (#18):** `SetAttentionDraw`'s comment on its own line, `kCodeBorderCtorLayer` back
+  under its comment, `gui_patch.cpp`'s final newline. Fixed on #18's branch; the branches above
+  were rebased onto it.
+
+**Checks:** Release build clean; smoke test (now with `shader_patterns_test`, 61 checks),
+`air_scenarios_test`, `native_script_test`. **Not run in game:** the use detection (the log line
+"... the map shaders will be patched" or "... left alone"), the compile check in the game process
+("compile check of N mod shader(s)"), the alpha guard, the hover mark's white slot.

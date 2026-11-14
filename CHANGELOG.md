@@ -29,22 +29,51 @@ A–F; NOTES.md has the findings and test results behind each.
 - **Fix:** an Alt+Shift+click on a badge right after its dismantle entry was cancelled (Shift+click,
   before the next in-game day) deepened the cancelled entry, so the click did nothing. Cancelled
   entries are now skipped, and the click queues a new one.
-- **New feature `attention_area`** (engine tier; guard `hoi4_loader_feature_attention_area`; script
-  version unchanged). NOTES.md Part M. First in-game test on 1.19.5.0: outlines work; fixed
-  then: zoom too close, camera moved for scattered areas, cleared provinces lost their country colour.
-  - `add_attention_area = { id color red green blue alpha width pulse glow area = { ... } }`
-    outlines provinces with the game's gradient borders, in every map mode. Each `area` block
-    selects provinces by `province`, `state`, `strategic_region` ids, then `owner`, `controller`,
-    `coastal`.
+- **New feature `attention_area` (experimental)** (engine tier; guard
+  `hoi4_loader_feature_attention_area`; script version unchanged). NOTES.md Part M. Mark any set of
+  provinces on the map, every look a shader. The script syntax, the shader interface and the
+  shaders' look may still change; only parts are tested in game (below).
+  - `add_attention_area = { id line fill color red green blue alpha area = { ... } }`: `line` is the
+    shader of the area's outline (the game's thin province group outline, drawn by `border.shader`),
+    `fill` the shader of its provinces (through the map's stripe texture, drawn by
+    `secondary_color_mask`); both show in every map mode. Built-ins: lines `solid`, `pulse`,
+    `dashed`; fills `stripes`, `solid`, `band`, `glow`. Each `area` block selects provinces by
+    `province`, `state` (or `state = this`), `strategic_region` ids, then `owner`, `controller`,
+    `coastal`, and `random_provinces = n`.
+  - Mods add or replace shaders as HLSL files in `gfx/FX/hoi4_loader_patterns/{line,fill}/`; the
+    loader finds them in the enabled mods (`dlc_load.json`) and stitches them, with a dispatcher, into
+    `border.shader` and `standardfuncsgfx.fxh` as the game reads them, so no game shader file is
+    replaced. The shader id rides in the outline colour's alpha (lines) and the stripe texture's alpha
+    byte (fills); 32 extra colour slots are appended to the renderer's outline colour table (no
+    vanilla colour is changed).
+  - **Only for mods that use it:** the two shader files are patched only when an enabled mod ships
+    shaders or the marker `gfx/FX/hoi4_loader_patterns/patch_map_shaders.txt`; every other player keeps the game's shaders and gets no
+    recompile. **Fail-safe:** every mod shader is compile-checked first (the system's DirectX
+    compiler, against the documented interface); one that fails is logged and left out (its areas
+    fall back to `solid` / `stripes`), so a broken mod shader can't break the map. While the fill
+    shader is patched, a game stripe alpha in the fill ids' range is moved out of it (logged).
+  - `shader_variables = { name = value ... }`: a shader declares up to 4 named values
+    (`// hoi4_loader_variables: name min max default, ...`), script sets them per area. The colour's
+    alpha reaches line and fill shaders.
   - `remove_attention_area = <id>|all`, `focus_attention_area = { id zoom }` (centre and zoom the
-    player's camera), trigger `has_attention_area = <id>`.
-  - Display only, not saved: mods add areas again after loading.
-  - Hooks three engine functions (DEVELOPING.md "Global hooks"); 16 new signatures (134 in all),
-    checked on 1.19.4.2 only.
-- **Railway queue hover mark** (needs `railway_queue` and `attention_area`): hovering a railway
+    player's camera), trigger `has_attention_area = <id>` (safe from any thread).
+  - Display only, not saved: mods add areas again after loading. A hot-joining player has none, so
+    `has_attention_area` must not drive game logic in multiplayer (MODDING.md).
+  - Hooks the stripe texture's paint and the outline colour table's build (DEVELOPING.md "Global
+    hooks"). New test `shader_patterns_test` (also splices shaders into the game's cached shader
+    sources for fxc). 129 signatures and anchors in all, checked on 1.19.4.2 and 1.19.5.
+  - Tested in game on 1.19.5 along the way: outlines, stripes, mod shaders (matrix rain), a line
+    shader. Not yet tested in game: `shader_variables`, alpha in shaders, the latest fill edge
+    fixes. Test mod: example decisions and shaders (matrix rain, inferno, fire line, DNA helix). An
+    earlier gradient-border `band` style (eleven signatures, three hooks) is gone: a band is now a
+    fill shader (NOTES.md M12).
+- **Railway queue hover mark** (needs `railway_queue` and `attention_area`; experimental with it): hovering a railway
   entry in the construction queue outlines its provinces with the game's thin province outline in white
-  (outline colour 14 is made white in the map renderer's colour table); a right-click on the entry
-  shows the whole line. UI only. Five new signatures (139 in all). NOTES.md M7.
+  (a colour slot of the loader's own; no vanilla colour changes); a right-click on the entry
+  shows the whole line. UI only. NOTES.md M7.
+- **Internal:** the launcher's mod list and descriptor reader (`src/mod_list.cpp`) is shared by
+  air_scenarios and attention_area's shaders. `HOI4_LOADER_USER_DIR` is honoured only by the smoke
+  test's stand-in executables.
 - **Native script API:** parameters of type `Number` (decimals) and `Block` (a nested
   `key = { ... }` read by the game's own clause reader), `ParamSpec::repeat` (a key written several
   times keeps every value), and up to 16 parameters per command (was 8).

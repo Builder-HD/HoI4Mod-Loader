@@ -44,18 +44,7 @@ void ParseFile(const std::string& text, const std::string& fileName, std::vector
 // earlier one. Order of first appearance is kept.
 void Merge(std::vector<Definition>* all, const std::vector<Definition>& later);
 
-// The launcher's dlc_load.json: the enabled mods' descriptor paths ("mod/<name>.mod"), in order.
-bool ParseDlcLoad(const std::string& json, std::vector<std::string>* modFiles);
-
-// A mod descriptor (.mod): its folder (`path`, or the legacy `archive` for zipped mods),
-// its name and its replace_path entries.
-struct ModDescriptor {
-    std::string name;
-    std::string path;
-    std::string archive;
-    std::vector<std::string> replacePaths;
-};
-bool ParseDescriptor(const std::string& text, ModDescriptor* out);
+// (The enabled mods and their descriptors: mod_list.h, shared with the other mod readers.)
 
 // One plane of a scenario side, as the loader read it from the game.
 struct Plane {

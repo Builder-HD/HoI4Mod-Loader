@@ -72,7 +72,7 @@ src/engine_scope.cpp          engine access for scope blocks (vanilla iterator t
 src/engine_army.cpp           engine access for armies (create army, set leader, characters)
 src/engine_conversion.cpp     engine access for equipment conversion (convert-from lists, generations)
 src/plugin_attention_area.cpp attention_area feature (outlines on the map, camera focus, the area selector)
-src/engine_attention.cpp      engine access for it (gradient borders, camera, province data) and its hooks
+src/engine_attention.cpp      engine access for it (outlines, stripe texture, camera, province data) and its hooks
 src/native_script.h, .cpp     native effect/trigger API: schemas, registration, parsing, docs
 src/native_script_engine.cpp  native API engine binding (vtable clones, registries, Scope)
 src/native_scope_engine.cpp   native API engine binding of scope blocks and iterators
@@ -153,7 +153,11 @@ Delete the file to force a rehash. The cache is a speed-up, not a security bound
 ## Logs and files
 
 - `<Documents>\Paradox Interactive\Hearts of Iron IV\loader.log`: rewritten on every launch. If
-  another hoi4.exe holds it open, the loader writes `loader.<pid>.log` instead.
+  another hoi4.exe holds it open, the loader writes `loader.<pid>.log` instead. The environment
+  variable `HOI4_LOADER_USER_DIR` replaces that folder (log, generated docs, `dlc_load.json`), but
+  only in the smoke test's stand-in executables: they export `hoi4_loader_smoke_standin`
+  (`tests/smoke.cpp`), and the loader ignores the variable in any exe without that export, the game
+  included.
 - `%TEMP%\hoi4_loader\`: generated virtual files (safe to delete).
 - `%LOCALAPPDATA%\hoi4_loader\hash_cache.ini`: hash cache (safe to delete).
 
@@ -338,9 +342,10 @@ once, and from then on the hooks do what the game does and the feature switches 
 | `equipment_conversion` | `RebuildSources(line, tag)` (0x1419c2c30) | a production line's update (its vtable) | with `hoi4_loader_conversion_role_mode` and the type in "same role only": marks the rebuild (thread-local) for `CanConvert` and stores the designs left out for the tooltip |
 | `equipment_conversion` | `CProductionLineMilitaryItem` convert click (0x141de8e30) | the production view, main thread | with the role-mode flag: Shift+click (single player) toggles the mode at the next safe point instead of the game's click |
 | `equipment_conversion` | the convert button's tooltip (0x1419c2fd0) | the production view, main thread | with the role-mode flag: appends the mode line and the left-out designs (the game's own `std::string::append`) |
-| `attention_area` | `CGradientBorderManager::SetActiveLayers(pair)` (0x140fb5fc0) | every map mode setup | records the manager; when the drawn layers change, moves the loader's borders to the new top layer (the old one is rebuilt by the game's own rebuild) |
-| `attention_area` | `CGradientBorderManager::RebuildAll(bool)` (0x140fbeef0) | map mode changes, refreshes | the loader's borders out of their layer before, back in after |
-| `attention_area` | `CGradientBorderManager::Rebuild(type, bool)` (0x140fb7ff0) | the frame update for dirty layers, map modes | the same, only for the layer holding the loader's borders; otherwise one compare |
+| `attention_area` | `CMapSecondaryMask` paint (0x141a6ecb0) | the gradient border update, throttled (main thread) | before the original: writes the areas' fill colours (and shader ids) into the stripe texture's colour per province; after an area change, gives back the game's colours and repaints everything |
+| `attention_area` | the outline owner's `SetHoveredProvince` (0x140bbff00) | the construction queue and map hover, main thread | with railway_queue's hover mark: drops the hovered railway line's end provinces, so the game's hovered-item mark does not cover the loader's outline |
+| `attention_area` | `CInGameIdler` centre-on-province (vtable slot after the id lookup, 0x140e3494b tail) | right-click on queue entries, goto_state | with the hover mark: a right-click on the hovered railway line fits the whole line instead (next frame) |
+| `attention_area` | the map renderer's outline colour table build (0x14130b730) | once, in the map graphics setup | after the original: colour 14 white, 32 extra slots appended for the areas' line colours |
 
 The loader's own speed request, unpause and date refresh run from `OnMainThreadFrame`, outside
 the tick. Each hook logs once which thread it runs on (`time_control: ... runs on thread`), the
@@ -381,6 +386,16 @@ Then `gui_patch_test`: the countrystateview.gui patch on hand-written GUI snippe
 button goes, files left alone, comments, CRLF). Given file paths as arguments it also patches real
 files, e.g. the game's `interface\countrystateview.gui`.
 
+Then `shader_patterns_test`: the shader pattern stitching (NOTES.md M11) on vanilla-shaped
+snippets, and the mod shaders' compile check (M15) with the system's `d3dcompiler_47.dll`: the
+built-ins and the test mod's shaders pass, a broken shader, a fill using `BORDER_TILE` and a helper
+name clash between a fill and a line fail. Given the game's `gfx\FX` folder as argument it also
+patches the real `standardfuncsgfx.fxh` and `border.shader`. As a developer aid,
+`shader_patterns_test --splice <fill|outline> <cached .scache> <pattern.hlsl> <name> <out.hlsl>`
+applies a pattern to one of the game's cached, fully assembled shader sources
+(`Documents\Paradox Interactive\Hearts of Iron IV\shadercache\dx11_win32\ps_5_0`), so it can be
+compiled with the Windows SDK's `fxc /T ps_5_0 /E main` before trying it in game.
+
 Next come repository checks:
 - the test mod's stub clears every feature flag;
 - MODDING.md's feature and stub tables list every feature, and the stub pack matches
@@ -395,7 +410,9 @@ Then it runs two stand-in `hoi4.exe` builds through nine scenarios:
 - cache hit/miss/mtime/size/corrupt.
 
 Each one checks the served content, including the lazily generated guard triggers, and the log
-lines. It overwrites `loader.log` unless the game is running.
+lines. The stand-ins run with `HOI4_LOADER_USER_DIR` set to `build\smoke\userdir` (and
+`LOCALAPPDATA` to `build\smoke\localappdata`), so the game's own `loader.log` is never touched; the
+smoke run's log is `build\smoke\userdir\loader.log`.
 
 ## Release process
 

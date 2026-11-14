@@ -11,6 +11,10 @@
 extern "C" void fake_openRead();
 #endif
 
+// Marks this exe as a smoke stand-in: only then does the loader honour HOI4_LOADER_USER_DIR
+// (src/main.cpp GetUserDir), so a run here never touches the game's own user folder.
+extern "C" __declspec(dllexport) int hoi4_loader_smoke_standin = 1;
+
 static int g_fail = 0;
 #define CHECK(cond, ...) do { if (cond) printf("  ok   " __VA_ARGS__); else { printf("  FAIL " __VA_ARGS__); ++g_fail; } printf("\n"); } while (0)
 

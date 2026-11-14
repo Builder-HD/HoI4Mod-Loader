@@ -65,3 +65,12 @@ hoi4_loader_ai_cost_category = {
 		hoi4_loader_present = yes
 	}
 }
+
+# attention_area examples (experimental; player only).
+hoi4_loader_attention_category = {
+	icon = generic_research
+	visible = {
+		is_ai = no
+		hoi4_loader_present = yes
+	}
+}
