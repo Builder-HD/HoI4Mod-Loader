@@ -15,7 +15,8 @@
 // needs its interface/equipmentdesigner layout, and No Step Back). The archetype keeps its real
 // type, which decides the production tab, the XP the design costs and how it is saved, all as the
 // game does it. UI only: designs are saved by the game's own command, so multiplayer and saves are
-// unaffected.
+// unaffected. The exception is the optional `xp`: it changes which pool that command pays from, so
+// with it every multiplayer player needs the loader (MODDING.md).
 #include <windows.h>
 
 #include <map>
@@ -25,6 +26,7 @@
 
 #include "engine.h"
 #include "equipment_designers.h"
+#include "lifecycle.h"
 #include "loader.h"
 #include "mod_list.h"
 
@@ -36,8 +38,11 @@ const char kFolder[] = "common/hoi4_loader_equipment_designers";
 std::vector<Eqd::Designer> g_defs;
 std::map<std::string, size_t> g_byName;  // archetype name (lower case) -> g_defs index
 
-// Resolved on the main thread at first use (the equipment database is loaded by then).
+// Resolved once on the main thread: before each game entry, or at an earlier first use there (the
+// equipment database is loaded by then). The experience hooks also run on worker threads; they
+// read the tables only after g_ready is set and never build them.
 bool g_resolved = false;
+volatile LONG g_ready = 0;
 std::unordered_map<const void*, size_t> g_byType;  // archetype -> g_defs index
 std::vector<const EngineString*> g_titles;          // per definition, localised once (null: none)
 std::vector<bool> g_titleTried;
@@ -148,9 +153,21 @@ void ResolveTypes() {
     if (!Engine::TankDesignerUnlocked()) Log("%s: the tank designer is not unlocked (No Step Back); designs open the old window", kFeature);
 }
 
+// Main thread only.
+void EnsureResolved() {
+    if (g_resolved) return;
+    ResolveTypes();
+    InterlockedExchange(&g_ready, 1);
+}
+
+void ResolveBeforeEntry() { EnsureResolved(); }
+
 const Eqd::Designer* DesignerOf(const void* type) {
     if (!type) return nullptr;
-    if (!g_resolved) ResolveTypes();
+    if (!InterlockedCompareExchange(&g_ready, 0, 0)) {
+        if (!IsMainThread()) return nullptr;  // not built yet: the game's own answer
+        EnsureResolved();
+    }
     auto it = g_byType.find(Engine::TypeArchetypeOf(type));
     return it == g_byType.end() ? nullptr : &g_defs[it->second];
 }
@@ -360,6 +377,7 @@ bool EquipmentDesignersInit() {
     if (xp && Engine::HaveDesignerXp())
         Log("%s: `xp` is used: designs pay from the chosen pool; in multiplayer every player needs the loader and these mods",
             kFeature);
+    OnGameEntering(&ResolveBeforeEntry);
     if (!register_file_patch(L"interface/tank_designer_view.gui", &PatchGui))
         Log("%s: tank_designer_view.gui patch could not be registered; only the GUI's own slot windows exist", kFeature);
     return true;

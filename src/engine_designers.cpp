@@ -650,7 +650,13 @@ bool IsTankDesigner(const void* view) { return view && Rd<int>(view, g_kind) == 
 
 void DesignerSetTitle(void* view, const EngineString* text) {
     void* e = Rd<void*>(view, g_title);
-    if (e && text) g_setText(e, text);
+    if (!e || !text) return;
+    // SetText takes the string's buffer (the game passes a temporary): give it a copy, so the
+    // caller's text stays intact for the next open (in-game 2026-11-15: blank title on reopening).
+    EngineString s;
+    ConstructEngineString(&s, text->c_str(), (size_t)text->size);
+    g_setText(e, &s);
+    FreeEngineString(&s);
 }
 
 void DesignerShowRoles(void* view, bool show) { SetElementVisible(Rd<void*>(view, g_roles), show); }
