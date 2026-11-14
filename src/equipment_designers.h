@@ -17,6 +17,12 @@ struct SlotPos {
     int y = 0;
 };
 
+// Which experience a design costs (the game's choice by type unless set).
+enum class Xp { Game, Army, Navy, Air };
+
+// The stat panels of the designer window, in order.
+enum StatPanel { kStatsBase = 0, kStatsCombat = 1, kStatsMisc = 2, kStatPanels = 3 };
+
 struct Designer {
     std::string name;                     // the entry's key
     std::vector<std::string> archetypes;  // archetype names (required)
@@ -24,6 +30,10 @@ struct Designer {
     std::string title;                    // loc key; empty = the window's own title
     bool hideRoles = true;                // hide the tank role dropdown
     std::vector<SlotPos> slots;
+    Xp xp = Xp::Game;
+    bool hasStats[kStatPanels] = {false, false, false};  // false: the window's own list
+    std::vector<std::string> stats[kStatPanels];          // stat script names, in order
+    std::vector<std::string> hide;                        // GUI element names to hide
     std::string file;  // for messages
     int line = 0;
 };
@@ -50,6 +60,12 @@ void Merge(std::vector<Designer>* all, const std::vector<Designer>& later);
 // Archetype name (lower case) -> index into `all`. An archetype claimed by two designers goes to
 // the later one; the clash is reported.
 std::map<std::string, size_t> ByArchetype(const std::vector<Designer>& all, std::vector<Problem>* problems);
+
+// The stats a designer may show: script name (as in add_stats) -> the game's stat loc key
+// (STAT_ARMY_SOFT_ATTACK). The engine finds the stat id by that key at runtime.
+const char* StatLocKey(const std::string& name);  // null if the loader doesn't know the name
+int StatNameCount();
+const char* StatName(int i);
 
 // The position for a slot, or null.
 const SlotPos* FindSlot(const Designer& d, const std::string& slot);

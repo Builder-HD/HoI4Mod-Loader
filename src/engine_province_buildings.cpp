@@ -659,6 +659,9 @@ bool HaveElementVisibility() { return g_hideDisp && g_showDisp && g_flags && g_h
 void SetElementVisible(void* element, bool visible) {
     if (element && HaveElementVisibility()) SetVisible(element, visible);
 }
+bool ElementVisible(const void* element) {
+    return element && HaveElementVisibility() && !(Rd<uint8_t>(element, g_flags) & g_hiddenBit);
+}
 
 bool HaveProvinceBuildingRemoval() {
     return g_updateFn && g_tooltipFn && g_dtorFn && g_itemWindow && g_itemType && g_tipSub && g_tipView &&

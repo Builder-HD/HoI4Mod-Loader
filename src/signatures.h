@@ -1052,6 +1052,41 @@ static const size_t kSigEqdSlotsVecDisp = 7, kSigEqdSlotsContainerDisp = 0x13, k
 ANCHOR(kAnchorEqdRoles, "dropdown_tank_roles")
 // The title's loc key by window kind; its error branch is the only lea of this string. (0x141813d5d)
 ANCHOR(kAnchorEqdTitle, "EQUIPMENT_DESIGNER_TITLE")
+// The tank window's stats: Fill(panel, &{begin, end}, a, &{b, 1}, view->[disp32 +0x38]) (E8 at
+// +0x5e) for the base, combat and misc panels (r9, then the stack), over static {int id; int8 kind}
+// arrays: base begin/end lea at +0x1e/+0x2a, combat +0x64/+0x70, misc +0xae/+0xba. Hooked.
+// (0x141823950)
+SIG(kSigEqdStats, "48 89 5C 24 08 48 89 74 24 10 57 48 81 EC 80 00 00 00 4D 8B D1 49 8B F8 48 8B F2 48 8B D9 48 8D 05 ?? ?? ?? ?? 48 89 44 24 30 48 8D 05 ?? ?? ?? ?? 48 89 44 24 38 8B 81 ?? ?? ?? ?? 41 0F 10 00")
+static const size_t kSigEqdStatsExtraDisp = 0x38, kSigEqdStatsFillCall = 0x5e;
+static const size_t kSigEqdStatsLea0 = 0x1e, kSigEqdStatsLea1 = 0x2a, kSigEqdStatsLea2 = 0x64, kSigEqdStatsLea3 = 0x70,
+                    kSigEqdStatsLea4 = 0xae, kSigEqdStatsLea5 = 0xba;
+// A stat row's label: Localize(table[id]); the table's lea rel32 at +0xc: one loc key per stat id
+// (STAT_ARMY_DEFAULT_MORALE ... STAT_COMMON_BUILD_COST_IC). (0x1414822a0)
+SIG(kSigEqdStatName, "40 53 48 83 EC 30 48 63 D2 48 8D 05 ?? ?? ?? ?? 45 33 C9 45 33 C0 48 8B D9 48 8B 14 D0 E8")
+static const size_t kSigEqdStatNameTableLea = 9;
+// The experience pool of a type: Pool(container, out, type): land (two tests) -> container +disp8 at
+// +0xd3 (kCodeEqdPoolArmy), naval (E8 at +0x3b) -> +disp8 +0x47, air (E8 at +0x50) -> +disp8 +0x5c.
+// Hooked. (0x141338880)
+SIG(kSigEqdPool, "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 30 48 8B F1 49 8B F8 49 8B C8 48 8B DA E8 ?? ?? ?? ?? 84 C0 0F 85 ?? ?? ?? ?? 48 8B CF E8 ?? ?? ?? ?? 84 C0 0F 85 ?? ?? ?? ?? 48 8B CF E8 ?? ?? ?? ?? 84 C0 74 ?? 48 8D 56 ?? E9 ?? ?? ?? ?? 48 8B CF E8 ?? ?? ?? ?? 84 C0 74 ?? 48 8D 56 ??")
+static const size_t kSigEqdPoolNavalCall = 0x3b, kSigEqdPoolNavyDisp = 0x47, kSigEqdPoolAirCall = 0x50, kSigEqdPoolAirDisp = 0x5c;
+// The tank kind's experience line: session->vt[disp32 +0xc]() -> Container(country) (E8 at +0x13)
+// -> +disp8 +0x1f (the army pool), shown on view->[disp32 +0x28]. The ship kind's twin reads +0x28.
+// (0x1418236fa)
+SIG(kSigEqdXpShown, "48 8B 0D ?? ?? ?? ?? 48 8B 01 FF 90 ?? ?? ?? ?? 48 8B C8 E8 ?? ?? ?? ?? 48 8D 4D ?? 48 8D 50 10 E8 ?? ?? ?? ?? 49 8B 9E ?? ?? ?? ??")
+static const size_t kSigEqdXpSessionRel = 3, kSigEqdXpCountrySlot = 0xc, kSigEqdXpContainerCall = 0x13,
+                    kSigEqdXpArmyDisp = 0x1f, kSigEqdXpTextDisp = 0x28;
+// The experience icon name for a type mask (army_experience / navy_experience / air_experience),
+// for the designer's and the module picker's cost texts ($XPICON$, $EXPERIENCE_TYPE$). Hooked.
+// (0x14100ea20)
+SIG(kSigEqdXpIcon, "48 83 EC 38 48 85 C9 75 ?? 38 0D ?? ?? ?? ?? 0F 84 ?? ?? ?? ?? 38 0D ?? ?? ?? ?? 0F 85 ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? 88 4C 24 40 48 89 44 24 28 48 8D 15")
+// The window's buttons update (view): shows or hides the historical design button and others; called
+// by open, refresh and other UI paths. Hooked (after) for `hide`; root container view->[disp32 +0x2e].
+// (0x141823230)
+SIG(kSigEqdButtons, "48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 48 83 EC 50 48 8B E9 33 C0 89 81 ?? ?? ?? ?? 48 8B 89 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B 8D ?? ?? ?? ??")
+static const size_t kSigEqdButtonsRootDisp = 0x2e;
+// The experience cost tooltip: Tooltip(?, typeMask, ?, ?, out) picks army / navy / air text by three
+// masks (kCodeEqdTooltipMask). Hooked. (0x1415c8470)
+SIG(kSigEqdTooltip, "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 55 48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? 48 8B FA C7 45 ?? 00 00 00 00 48 8D 55 ?? E8 ?? ?? ?? ?? 48 8B 5D ?? 48 85 DB 0F 84 ?? ?? ?? ?? 48 B8")
 // --- Equipment designers (NOTES.md Part N; addresses 1.19.5) ------------------------------------
 // designable(type) (kSigEqdCanOpen's first call): type->[disp8 +8] (slot count) != 0, then the DLC
 // designer mask (E8 at +0x14). Not hooked (gameplay callers). (0x140cf5670)
@@ -1108,9 +1143,35 @@ static const size_t kCodeEqdLookupSlotDisp = 6;
 // IsMissing(found) (E8 at +0x1a). (0x141820171)
 CODE(kCodeEqdSlotPlace, "48 8B 87 ?? ?? ?? ?? 48 89 45 ?? 48 8D 55 ?? 48 8B CB E8 ?? ?? ?? ?? 48 8B CE E8")
 static const size_t kCodeEqdPositionDisp = 3, kCodeEqdSetPositionCall = 0x12, kCodeEqdIsMissingCall = 0x1a;
-// After the roles anchor (SigFindIn 0x80): view->[disp32 +9] = found dropdown. (0x14181e031)
-CODE(kCodeEqdRolesStore, "FF 90 ?? ?? ?? ?? 48 89 86 ?? ?? ?? ??")
-static const size_t kCodeEqdRolesDisp = 9;
+// After the roles anchor (SigFindIn 0x80): root = view->[disp32 +3] (the window's root container),
+// view->[disp32 +0x46] = root->Find(&name, 0) (vtable slot [disp32 +0x3f]). (0x14181dff4)
+CODE(kCodeEqdRolesStore, "48 8B 9E ?? ?? ?? ?? 48 8B 8E ?? ?? ?? ?? 48 85 C9 74 ?? 48 8B 01 33 D2 FF 90 ?? ?? ?? ?? 48 8B 03 0F 28 85 ?? ?? ?? ?? 66 0F 7F 85 ?? ?? ?? ?? 45 33 C0 48 8D 95 ?? ?? ?? ?? 48 8B CB FF 90 ?? ?? ?? ?? 48 89 86 ?? ?? ?? ??")
+static const size_t kCodeEqdRootDisp = 3, kCodeEqdRootFindSlot = 0x3f, kCodeEqdRolesDisp = 0x46;
+// Setup's element lookups on the root (rbx): Find(root, &{name, len}, flag) through several vtable
+// slots, one per element class (a missing name gives that slot's placeholder object, not null). The
+// loader collects the slots from these calls (around the roles anchor) whose result the window
+// keeps (mov [rsi+disp32], rax next): the call (FF) at +0x1f, its slot disp8 (FF 50) or disp32
+// (FF 90) at +0x21. 1.19.5: 0x78, 0x88, 0x68, 0xa0, 0x1b0. (0x14181da50 ...)
+CODE(kCodeEqdRootFind, "48 8B 03 0F 28 85 ?? ?? ?? ?? 66 0F 7F 85 ?? ?? ?? ?? ?? ?? ?? 48 8D 95 ?? ?? ?? ?? 48 8B CB FF")
+static const size_t kCodeEqdRootFindCall = 0x1f;
+// Pool: the land branch (SigFindIn 0x100): container +disp8 at +3, Copy(out, pool) (E8 at +7).
+// (0x141338950)
+CODE(kCodeEqdPoolArmy, "48 8D 56 ?? 48 8B CB E8")
+static const size_t kCodeEqdPoolArmyDisp = 3, kCodeEqdPoolCopyCall = 7;
+// Tooltip: `mov rax, imm64; test rax, rdi` three times (SigFindIn 0x300 each): the army, navy and
+// air masks (imm64 at +2). (0x1415c84ac, 0x1415c85a4, 0x1415c869c)
+CODE(kCodeEqdTooltipMask, "48 B8 ?? ?? ?? ?? ?? ?? ?? ?? 48 85 F8")
+// The create command's execute (RTTI .?AVCCreateEquipmentVariantCommand@@ slot 10, SigFindIn
+// 0x1000): IsAir(command->[+0x28]->type) (E8 at +0xb) chooses the air deduction; later IsNaval
+// the same way (kCodeEqdCreateNaval). The loader answers them for listed designs by return address.
+// (0x141a38d0e, 0x141a38dde)
+CODE(kCodeEqdCreateAir, "48 8B 4F 28 48 8B 89 ?? ?? ?? ?? E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ?? 48 83 BF ?? ?? ?? ?? 00")
+CODE(kCodeEqdCreateNaval, "48 8B 4F 28 48 8B 89 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B 8F ?? ?? ?? ?? 84 C0 74")
+static const size_t kCodeEqdCreateCall = 0xb;
+// The update command's execute (.?AVCUpdateEquipmentVariantCommand@@ slot 10): the same two tests,
+// IsAir first, then IsNaval, both in this shape (E8 at +7). (0x141a3a930, 0x141a3a9cf)
+CODE(kCodeEqdUpdateTest, "48 8B 8F ?? ?? ?? ?? E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ?? 49 8B 95 ?? ?? ?? ?? 48 8D 8D ?? ?? ?? ?? E8")
+static const size_t kCodeEqdUpdateCall = 7;
 
 #undef CODE
 #undef SIG

@@ -128,6 +128,51 @@ int main(int argc, char** argv) {
     Check(HasProblem(problems, "expected an entry"), "problems: a loose value");
     Check(HasProblem(problems, "the rest of the file is ignored"), "problems: syntax error reported");
 
+    // --- stats, xp, hide ------------------------------------------------------------------------
+    problems.clear();
+    defs = Parse(
+        "full = {\n"
+        "\tarchetypes = { a }\n"
+        "\txp = NAVY\n"
+        "\tstats = { base = { reliability maximum_speed } combat = { Soft_Attack ap_attack armor_value } misc = { } }\n"
+        "\thide = { select3d_button historical_design_button }\n"
+        "}\n"
+        "bad_stat = { archetypes = { a } stats = { combat = { soft_attack laser_attack } } }\n"
+        "bad_panel = { archetypes = { a } stats = { extra = { soft_attack } } }\n"
+        "twice_panel = { archetypes = { a } stats = { base = { defense } base = { hardness } } }\n"
+        "bad_xp = { archetypes = { a } xp = research }\n",
+        &problems);
+    Check(defs.size() == 1 && defs[0].name == "full", "options: only the valid entry remains");
+    if (defs.size() == 1) {
+        const Designer& d = defs[0];
+        Check(d.xp == Xp::Navy, "options: xp = navy (any case)");
+        Check(d.hasStats[kStatsBase] && d.hasStats[kStatsCombat] && d.hasStats[kStatsMisc], "options: all three panels given");
+        Check(d.stats[kStatsBase].size() == 2 && d.stats[kStatsCombat].size() == 3 && d.stats[kStatsMisc].empty(),
+              "options: stat lists kept in order, misc empty");
+        Check(d.hide.size() == 2 && d.hide[1] == "historical_design_button", "options: hide list");
+    }
+    Check(HasProblem(problems, "unknown stat 'laser_attack'"), "options: unknown stat");
+    Check(HasProblem(problems, "must be base, combat or misc"), "options: unknown panel");
+    Check(HasProblem(problems, "base is listed twice"), "options: a panel twice");
+    Check(HasProblem(problems, "xp must be army, navy or air"), "options: xp value");
+    problems.clear();
+    defs = Parse("plain = { archetypes = { a } }\n", &problems);
+    Check(defs.size() == 1 && defs[0].xp == Xp::Game && !defs[0].hasStats[kStatsBase] && !defs[0].hasStats[kStatsCombat] &&
+              !defs[0].hasStats[kStatsMisc] && defs[0].hide.empty(),
+          "options: all optional (the game's experience, the window's stats, nothing hidden)");
+
+    // --- The stat names ---------------------------------------------------------------------------
+    Check(StatNameCount() == 78, "stats: 78 names (the game's table has ids 0..77)");
+    Check(std::string(StatLocKey("ap_attack")) == "STAT_COMMON_PIERCING" && std::string(StatLocKey("ARMOR_VALUE")) == "STAT_COMMON_ARMOR" &&
+              std::string(StatLocKey("suppression")) == "STAT_ARMY_SUPRESSION" && !StatLocKey("laser_attack"),
+          "stats: script names map to the game's loc keys");
+    bool unique = true;
+    for (int i = 0; i < StatNameCount(); ++i)
+        for (int j = i + 1; j < StatNameCount(); ++j)
+            unique = unique && std::string(StatName(i)) != StatName(j) &&
+                     std::string(StatLocKey(StatName(i))) != StatLocKey(StatName(j));
+    Check(unique, "stats: names and keys unique");
+
     // --- Merge and archetype owners -------------------------------------------------------------
     std::vector<Designer> all;
     problems.clear();

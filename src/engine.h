@@ -459,6 +459,7 @@ bool HaveProvinceBuildingRemoval();  // every function, field and vtable resolve
 // The engine's hide/show idiom for a GUI element (kSigGuiHideShow), shared with other UI features.
 bool HaveElementVisibility();
 void SetElementVisible(void* element, bool visible);
+bool ElementVisible(const void* element);  // its hidden flag is clear
 // UI thread. `allowed`: may the cross show at all (the plugin: single player only). `onClick`: the
 // player clicked the cross of `type` (a CBuildingType*) in `province` (a province object) of `state`;
 // must defer the change (RemoveProvinceBuildingLevel) and return true if it did.
@@ -620,6 +621,22 @@ using DesignerOpened_t = void (*)(void* view, const void* archetype);     // a d
 using DesignerRefreshed_t = void (*)(void* view, const void* archetype);  // after the slot windows were assigned
 using DesignerFault_t = void (*)(const char* where);                      // a contained fault; hooks idle from now on
 bool HookDesigners(DesignerFind_t find, DesignerOpened_t opened, DesignerRefreshed_t refreshed, DesignerFault_t fault);
+// Optional parts, hooked only when a definition uses them (call after HookDesigners):
+// statsFor(archetype, panel 0 base / 1 combat / 2 misc, &count): the panel's {int id; int8 kind}
+// entries (8 bytes each, kept alive by the plugin), or null for the window's own list.
+// xpFor(type): the experience pool of a listed type (0 army, 1 navy, 2 air) or -1 for the game's.
+// A game rule: the variant commands then pay from that pool on every machine.
+using DesignerStats_t = const uint64_t* (*)(const void* archetype, int panel, int* count);
+using DesignerXp_t = int (*)(const void* type);
+bool HaveDesignerStats();
+bool HaveDesignerXp();
+bool HaveDesignerButtons();  // `hide` can be kept up when the game updates the window's buttons
+// afterButtons(view, archetype): after the window updated its buttons (it may show elements again).
+bool HookDesignerExtras(DesignerStats_t statsFor, DesignerXp_t xpFor, DesignerRefreshed_t afterButtons);
+int StatIdByKey(const char* key);          // the game's stat id for a STAT_* loc key, -1 if unknown
+void DesignerSetShownXp(void* view, int pool);  // the tank window shows a design paying from this pool (-1: the game's)
+bool DesignerShowXp(void* view, int pool); // the window's experience line for that pool
+void* DesignerElement(void* view, const char* name);  // an element of the window by name (null: none)
 const void* TypeArchetypeOf(const void* type);  // the type itself for an archetype
 bool DesignerLandType(const void* type);        // the game's own test: the tank window serves this type
 bool TankDesignerUnlocked();                    // No Step Back

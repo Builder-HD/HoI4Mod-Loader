@@ -41,6 +41,8 @@ bool g_resolved = false;
 std::unordered_map<const void*, size_t> g_byType;  // archetype -> g_defs index
 std::vector<const EngineString*> g_titles;          // per definition, localised once (null: none)
 std::vector<bool> g_titleTried;
+// Per definition and panel: the stat rows as the game's arrays hold them ({int id; int8 kind}).
+std::vector<std::vector<uint64_t>> g_stats[Eqd::kStatPanels];
 
 // Slot windows the GUI file had before the loader's patch: windows past these are the loader's.
 volatile LONG g_customBefore = -1, g_fixedBefore = -1;
@@ -50,6 +52,7 @@ volatile LONG g_customBefore = -1, g_fixedBefore = -1;
 struct Touched {
     const void* view = nullptr;
     const void* archetype = nullptr;
+    std::vector<void*> hidden;  // elements the loader hid (`hide`)
 };
 Touched g_touched[8];
 
@@ -67,8 +70,31 @@ Touched* TouchedOf(const void* view, bool create) {
 
 bool StartsWithFixed(const char* s) { return strncmp(s, "fixed_", 6) == 0; }
 
+// The stat rows of each definition, by the game's ids (found by loc key at runtime).
+void BuildStats() {
+    for (int g = 0; g < Eqd::kStatPanels; ++g) g_stats[g].assign(g_defs.size(), std::vector<uint64_t>());
+    bool any = false;
+    for (const Eqd::Designer& d : g_defs)
+        for (int g = 0; g < Eqd::kStatPanels; ++g) any = any || d.hasStats[g];
+    if (any && !Engine::HaveDesignerStats()) {
+        Log("%s: the window's stats could not be resolved on this build; `stats` is ignored", kFeature);
+        return;
+    }
+    for (size_t i = 0; i < g_defs.size(); ++i)
+        for (int g = 0; g < Eqd::kStatPanels; ++g)
+            for (const std::string& name : g_defs[i].stats[g]) {
+                int id = Engine::StatIdByKey(Eqd::StatLocKey(name));
+                if (id < 0)
+                    Log("%s: %s: the game has no stat %s (%s); left out", kFeature, g_defs[i].name.c_str(), name.c_str(),
+                        Eqd::StatLocKey(name));
+                else
+                    g_stats[g][i].push_back((uint64_t)(uint32_t)id);  // kind 0: a stat
+            }
+}
+
 void ResolveTypes() {
     g_resolved = true;
+    BuildStats();
     std::vector<bool> served(g_defs.size(), false);
     for (const auto& e : g_byName) {
         const Eqd::Designer& d = g_defs[e.second];
@@ -131,6 +157,52 @@ const Eqd::Designer* DesignerOf(const void* type) {
 
 const void* Find(const void* type) { return DesignerOf(type); }
 
+const uint64_t* StatsFor(const void* archetype, int panel, int* count) {
+    const Eqd::Designer* d = DesignerOf(archetype);
+    if (!d || panel < 0 || panel >= Eqd::kStatPanels || !d->hasStats[panel]) return nullptr;
+    const std::vector<uint64_t>& v = g_stats[panel][(size_t)(d - &g_defs[0])];
+    static const uint64_t kNone = 0;
+    *count = (int)v.size();
+    return v.empty() ? &kNone : v.data();  // an empty panel: begin == end
+}
+
+int XpFor(const void* type) {
+    const Eqd::Designer* d = DesignerOf(type);
+    if (!d) return -1;
+    switch (d->xp) {
+        case Eqd::Xp::Army: return 0;
+        case Eqd::Xp::Navy: return 1;
+        case Eqd::Xp::Air: return 2;
+        default: return -1;
+    }
+}
+
+// `hide`: the definition's elements hidden (and remembered); everything hidden before shown again.
+void ShowHidden(Touched* t) {
+    for (void* e : t->hidden) Engine::SetElementVisible(e, true);
+    t->hidden.clear();
+}
+void HideElements(void* view, const Eqd::Designer& d, Touched* t) {
+    for (const std::string& name : d.hide) {
+        void* e = Engine::DesignerElement(view, name.c_str());
+        if (!e) {
+            static std::vector<std::string> logged;
+            std::string key = d.name + "/" + name;
+            bool seen = false;
+            for (const std::string& s : logged) seen = seen || s == key;
+            if (!seen) {
+                logged.push_back(key);
+                Log("%s: %s: the tank window has no element %s to hide", kFeature, d.name.c_str(), name.c_str());
+            }
+            continue;
+        }
+        Engine::SetElementVisible(e, false);
+        bool known = false;
+        for (void* h : t->hidden) known = known || h == e;
+        if (!known) t->hidden.push_back(e);
+    }
+}
+
 const EngineString* TitleOf(const Eqd::Designer& d) {
     size_t i = (size_t)(&d - &g_defs[0]);
     if (!g_titleTried[i]) {
@@ -154,9 +226,19 @@ void ResetGroup(void* view, bool fixed) {
     for (int i = 0; i < n; ++i) Engine::DesignerResetSlot(view, fixed, i);
 }
 
+// The window updated its buttons: hide the listed design's elements again.
+void AfterButtons(void* view, const void* archetype) {
+    if (!Engine::IsTankDesigner(view) || !archetype) return;
+    const Eqd::Designer* d = DesignerOf(archetype);
+    Touched* t = d ? TouchedOf(view, false) : nullptr;
+    if (t && t->archetype == archetype) HideElements(view, *d, t);
+}
+
 void Refreshed(void* view, const void* archetype) {
     if (!Engine::IsTankDesigner(view) || !archetype) return;
     const Eqd::Designer* d = DesignerOf(archetype);
+    int xp = d ? XpFor(archetype) : -1;
+    Engine::DesignerSetShownXp(view, xp);
     if (d) {
         int slots = Engine::TypeSlotCount(archetype);
         Touched* t = TouchedOf(view, true);
@@ -164,8 +246,13 @@ void Refreshed(void* view, const void* archetype) {
         if (t && t->archetype && t->archetype != archetype) {  // another listed design was shown: start from the GUI's positions
             ResetGroup(view, false);
             ResetGroup(view, true);
+            ShowHidden(t);
         }
-        if (t) t->archetype = archetype;
+        if (t) {
+            t->archetype = archetype;
+            HideElements(view, *d, t);
+        }
+        if (xp >= 0) Engine::DesignerShowXp(view, xp);
         int next[2] = {0, 0};
         for (int i = 0; i < slots; ++i) {
             const char* name = Engine::TypeSlotName(archetype, i);
@@ -184,6 +271,7 @@ void Refreshed(void* view, const void* archetype) {
         Engine::DesignerShowRoles(view, true);
         ResetGroup(view, false);
         ResetGroup(view, true);
+        ShowHidden(t);
         *t = Touched();
     }
     // Every other design sees the GUI file's own windows (locked where unused, as vanilla draws
@@ -257,6 +345,21 @@ bool EquipmentDesignersInit() {
         Log("%s: hooks could not be queued", kFeature);
         return false;
     }
+    bool stats = false, xp = false, hide = false;
+    for (const Eqd::Designer& d : g_defs) {
+        for (int g = 0; g < Eqd::kStatPanels; ++g) stats = stats || d.hasStats[g];
+        xp = xp || d.xp != Eqd::Xp::Game;
+        hide = hide || !d.hide.empty();
+    }
+    if (hide && !Engine::HaveDesignerButtons())
+        Log("%s: the window's buttons update was not found; `hide` holds only until the game shows an element again", kFeature);
+    if (stats && !Engine::HaveDesignerStats()) Log("%s: the window's stats are unavailable on this build; `stats` is ignored", kFeature);
+    if (xp && !Engine::HaveDesignerXp()) Log("%s: the experience hooks are unavailable on this build; `xp` is ignored", kFeature);
+    if ((stats || xp || hide) && !Engine::HookDesignerExtras(stats ? &StatsFor : nullptr, xp ? &XpFor : nullptr, hide ? &AfterButtons : nullptr))
+        Log("%s: the stats / experience hooks could not be queued; `stats` and `xp` are ignored", kFeature);
+    if (xp && Engine::HaveDesignerXp())
+        Log("%s: `xp` is used: designs pay from the chosen pool; in multiplayer every player needs the loader and these mods",
+            kFeature);
     if (!register_file_patch(L"interface/tank_designer_view.gui", &PatchGui))
         Log("%s: tank_designer_view.gui patch could not be registered; only the GUI's own slot windows exist", kFeature);
     return true;

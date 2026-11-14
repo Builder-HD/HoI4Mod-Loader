@@ -2,9 +2,11 @@
 // window, the window's title, role dropdown and slot windows. UI only: the save goes through the
 // game's own variant commands, which don't look at the window.
 #include <windows.h>
+#include <intrin.h>
 #include <string.h>
 
 #include <string>
+#include <vector>
 
 #include "engine.h"
 #include "loader.h"
@@ -35,6 +37,25 @@ using Find_t = void*(__fastcall*)(void* container, const NameView* name, int fla
 using IsMissing_t = bool(__fastcall*)(const void* found);
 using SetPosition_t = void(__fastcall*)(void* window, const int64_t* position);
 
+using StatsFn_t = void(__fastcall*)(void* view, void* a, const void* b, void* basePanel, void* combatPanel, void* miscPanel);
+struct StatRange {
+    const uint64_t* begin;
+    const uint64_t* end;
+};
+struct StatContext {  // b's 16 bytes and a flag, as the game passes them to Fill
+    uint8_t b[16];
+    uint8_t one;
+    uint8_t pad[7];
+};
+using Fill_t = void(__fastcall*)(void* panel, const StatRange* range, void* a, const StatContext* ctx, int extra);
+using Pool_t = int64_t*(__fastcall*)(void* container, int64_t* out, const void* type);
+using Copy_t = void(__fastcall*)(int64_t* out, const void* pool);
+using Tooltip_t = void(__fastcall*)(void* a, uint64_t mask, void* c, void* d, void* out);
+using Session_t = void*(__fastcall*)(void* session);
+using Container_t = void*(__fastcall*)(void* country);
+using ElementFind_t = void*(__fastcall*)(void* root, const void* name, int flags);
+using XpIcon_t = const char*(__fastcall*)(uint64_t mask);
+
 // Hooked functions and their originals.
 uint8_t* g_canOpenFn = nullptr;
 CanOpen_t g_canOpenOrig = nullptr;
@@ -42,6 +63,49 @@ uint8_t* g_openFn = nullptr;
 ViewFn_t g_openOrig = nullptr;
 uint8_t* g_refreshFn = nullptr;
 ViewFn_t g_refreshOrig = nullptr;
+uint8_t* g_statsFn = nullptr;
+StatsFn_t g_statsOrig = nullptr;
+uint8_t* g_poolFn = nullptr;
+Pool_t g_poolOrig = nullptr;
+uint8_t* g_isAirFn = nullptr;
+TypeTest_t g_isAirOrig = nullptr;
+uint8_t* g_isNavalFn = nullptr;
+TypeTest_t g_isNavalOrig = nullptr;
+uint8_t* g_tooltipFn = nullptr;
+Tooltip_t g_tooltipOrig = nullptr;
+uint8_t* g_xpIconFn = nullptr;
+XpIcon_t g_xpIconOrig = nullptr;
+uint8_t* g_buttonsFn = nullptr;
+ViewFn_t g_buttonsOrig = nullptr;
+DesignerRefreshed_t g_afterButtons = nullptr;
+
+// Stats.
+Fill_t g_fill = nullptr;
+uint32_t g_statsExtra = 0;
+StatRange g_vanillaStats[3] = {};
+const char* const* g_statKeys = nullptr;  // the game's id -> loc key table
+int g_statCount = 0;
+
+// Experience.
+Copy_t g_copy = nullptr;
+uint32_t g_pool[3] = {0, 0, 0};       // army, navy, air: container offsets
+uint64_t g_poolMask[3] = {0, 0, 0};   // the tooltip's army, navy and air masks
+void** g_session = nullptr;           // the global the window asks for the player's country
+uint32_t g_countrySlot = 0, g_xpText = 0;
+Container_t g_container_ = nullptr;
+const uint8_t* g_airRet[2] = {nullptr, nullptr};    // create, update: after their IsAir call
+const uint8_t* g_navalRet[2] = {nullptr, nullptr};  // after their IsNaval call
+volatile LONG g_shownXp = -1;  // the tank window shows a listed design paying from this pool (UI thread)
+void* volatile g_shownView = nullptr;
+
+uint8_t* g_pickWindow = nullptr;
+
+// Window elements.
+uint32_t g_root = 0, g_rootFindSlot = 0;
+uint32_t g_findSlots[8] = {};  // the root's lookup slots (one per element class)
+int g_findSlotCount = 0;
+void* g_findRoot = nullptr;       // the root the placeholders below belong to
+void* g_findMissing[8] = {};      // per slot: what a missing name gives
 
 // Called.
 TypeTest_t g_designable = nullptr, g_landA = nullptr, g_landB = nullptr;
@@ -63,6 +127,8 @@ int g_viewDelta = 0;         // refresh argument -> view
 const int kTankKind = 1;     // TitleText: kind 1 is the tank designer (checked in Resolve)
 
 DesignerFind_t g_find = nullptr;
+DesignerStats_t g_statsFor = nullptr;
+DesignerXp_t g_xpFor = nullptr;
 DesignerOpened_t g_opened = nullptr;
 DesignerRefreshed_t g_refreshed = nullptr;
 DesignerFault_t g_fault = nullptr;
@@ -93,6 +159,7 @@ bool ResolveAll() {
     if (!g_tankBit || (g_tankBit & (g_tankBit - 1))) return Fail("the tank designer's DLC bit is not a single bit");
 
     if (!(p = SigFindUnique("eqd_pick_window", kSigEqdPickWindow))) return false;
+    g_pickWindow = p;
     uint32_t designType = Rd<uint32_t>(p, kSigEqdPickTypeDisp);
     if (EquipmentTypeOffset() && designType != EquipmentTypeOffset())
         return Fail("the window picker's design type differs from production_data's");
@@ -163,6 +230,138 @@ bool ResolveAll() {
     uint8_t* store = roles ? SigFindIn(roles, 0x80, kCodeEqdRolesStore) : nullptr;
     if (!store) return Fail("the role dropdown's member was not found");
     g_roles = Rd<uint32_t>(store, kCodeEqdRolesDisp);
+    g_root = Rd<uint32_t>(store, kCodeEqdRootDisp);
+    g_rootFindSlot = Rd<uint32_t>(store, kCodeEqdRootFindSlot);
+    if (g_rootFindSlot % 8 || g_rootFindSlot >= 0x800) return Fail("the window's find slot is implausible");
+    // The root's lookup slots, from setup's calls around the roles anchor.
+    for (uint8_t* c = roles - 0x800; c && c < roles + 0x2000 && g_findSlotCount < 8; ++c) {
+        if (!SigMatchAt(c, kCodeEqdRootFind)) continue;
+        uint8_t* call = c + kCodeEqdRootFindCall;
+        uint32_t slot = call[1] == 0x50 ? call[2] : call[1] == 0x90 ? Rd<uint32_t>(call, 2) : 0;
+        uint8_t* after = call + (call[1] == 0x50 ? 3 : 6);
+        // A lookup: the window keeps what it returns (mov [rsi+disp32], rax).
+        if (!slot || slot % 8 || slot >= 0x800 || after[0] != 0x48 || after[1] != 0x89 || after[2] != 0x86) continue;
+        bool known = false;
+        for (int i = 0; i < g_findSlotCount; ++i) known = known || g_findSlots[i] == slot;
+        if (!known) g_findSlots[g_findSlotCount++] = slot;
+    }
+    bool rolesSlot = false;
+    for (int i = 0; i < g_findSlotCount; ++i) rolesSlot = rolesSlot || g_findSlots[i] == g_rootFindSlot;
+    if (!rolesSlot) g_findSlotCount = 0;  // `hide` unavailable: the idiom didn't match the roles lookup
+    if ((g_buttonsFn = SigFindUnique("eqd_buttons", kSigEqdButtons)) != nullptr && Rd<uint32_t>(g_buttonsFn, kSigEqdButtonsRootDisp) != g_root) {
+        Log("equipment_designers: the buttons update reads another root; `hide` is unavailable");
+        g_buttonsFn = nullptr;
+    }
+    return true;
+}
+
+// Stats, experience: resolved apart, so a mismatch there leaves the designers working without them.
+bool ResolveStats() {
+    uint8_t* p = SigFindUnique("eqd_stats", kSigEqdStats);
+    uint8_t* name = SigFindUnique("eqd_stat_name", kSigEqdStatName);
+    if (!p || !name) return false;
+    const size_t kSigEqdStatsLeas[6] = {kSigEqdStatsLea0, kSigEqdStatsLea1, kSigEqdStatsLea2, kSigEqdStatsLea3, kSigEqdStatsLea4, kSigEqdStatsLea5};
+    for (size_t i = 0; i < 6; ++i)
+        if (p[kSigEqdStatsLeas[i]] != 0x48 || p[kSigEqdStatsLeas[i] + 1] != 0x8D || p[kSigEqdStatsLeas[i] + 2] != 0x05)
+            return Fail("the stats function's arrays have an unexpected shape");
+    for (int g = 0; g < 3; ++g) {
+        g_vanillaStats[g].begin = (const uint64_t*)SigRipTarget(p + kSigEqdStatsLeas[2 * g], 3, 7);
+        g_vanillaStats[g].end = (const uint64_t*)SigRipTarget(p + kSigEqdStatsLeas[2 * g + 1], 3, 7);
+        size_t n = (size_t)(g_vanillaStats[g].end - g_vanillaStats[g].begin);
+        if (g_vanillaStats[g].end < g_vanillaStats[g].begin || n == 0 || n > 64) return Fail("the stats arrays are implausible");
+    }
+    if (p[kSigEqdStatsFillCall] != 0xE8) return Fail("the stats function's fill call moved");
+    g_fill = (Fill_t)SigFollowRel32(p + kSigEqdStatsFillCall);
+    g_statsExtra = Rd<uint32_t>(p, kSigEqdStatsExtraDisp);
+    g_statKeys = (const char* const*)SigRipTarget(name + kSigEqdStatNameTableLea, 3, 7);
+    uint8_t* rdata = nullptr;
+    size_t rsize = 0;
+    if (!ImageSection(".rdata", &rdata, &rsize)) return false;
+    g_statCount = 0;
+    while (g_statCount < 256) {
+        const char* k = g_statKeys[g_statCount];
+        if ((const uint8_t*)k < rdata || (const uint8_t*)k + 6 > rdata + rsize || strncmp(k, "STAT_", 5) != 0) break;
+        ++g_statCount;
+    }
+    if (g_statCount < 8) return Fail("the stat loc key table is implausible");
+    for (int g = 0; g < 3; ++g)  // the game's own entries must be stats of that table
+        for (const uint64_t* e = g_vanillaStats[g].begin; e < g_vanillaStats[g].end; ++e)
+            if ((int8_t)(*e >> 32) == 0 && (int)(uint32_t)*e >= g_statCount) return Fail("a stats array names an unknown stat");
+    g_statsFn = p;
+    return true;
+}
+
+bool ResolveXp(uint8_t* pickWindow) {
+    uint8_t* pool = SigFindUnique("eqd_pool", kSigEqdPool);
+    uint8_t* shown = SigFindUnique("eqd_xp_shown", kSigEqdXpShown);
+    uint8_t* tip = SigFindUnique("eqd_tooltip", kSigEqdTooltip);
+    if (!pool || !shown || !tip) return false;
+    uint8_t* army = SigFindIn(pool, 0x100, kCodeEqdPoolArmy);
+    if (!army) return Fail("the pool's land branch was not found");
+    g_pool[0] = Rd<uint8_t>(army, kCodeEqdPoolArmyDisp);
+    g_pool[1] = Rd<uint8_t>(pool, kSigEqdPoolNavyDisp);
+    g_pool[2] = Rd<uint8_t>(pool, kSigEqdPoolAirDisp);
+    g_copy = (Copy_t)SigFollowRel32(army + kCodeEqdPoolCopyCall);
+    // IsNaval / IsAir: the window picker's calls (+0x23, +0x68) must be the pool's.
+    g_isNavalFn = SigFollowRel32(pickWindow + 0x23);
+    g_isAirFn = pickWindow[0x68] == 0xE8 ? SigFollowRel32(pickWindow + 0x68) : nullptr;
+    if (!g_isAirFn || SigFollowRel32(pool + kSigEqdPoolNavalCall) != g_isNavalFn || SigFollowRel32(pool + kSigEqdPoolAirCall) != g_isAirFn)
+        return Fail("the pool's naval and air tests are not the window picker's");
+    if (Rd<uint8_t>(shown, kSigEqdXpArmyDisp) != g_pool[0]) return Fail("the window's experience line reads another pool");
+    g_session = (void**)SigRipTarget(shown, kSigEqdXpSessionRel, kSigEqdXpSessionRel + 4);
+    g_countrySlot = Rd<uint32_t>(shown, kSigEqdXpCountrySlot);
+    g_container_ = (Container_t)SigFollowRel32(shown + kSigEqdXpContainerCall);
+    g_xpText = Rd<uint32_t>(shown, kSigEqdXpTextDisp);
+    uint8_t* m = tip;
+    for (int i = 0; i < 3; ++i) {
+        m = SigFindIn(m, 0x300, kCodeEqdTooltipMask);
+        if (!m) return Fail("the tooltip's masks were not found");
+        g_poolMask[i] = Rd<uint64_t>(m, 2);
+        m += 10;
+    }
+    if (!g_poolMask[0] || !g_poolMask[1] || !g_poolMask[2] || (g_poolMask[0] & g_poolMask[1]) || (g_poolMask[0] & g_poolMask[2]) ||
+        (g_poolMask[1] & g_poolMask[2]))
+        return Fail("the tooltip's masks are implausible");
+    // The icon name function: its three names must be the experience icons.
+    uint8_t* icon = SigFindUnique("eqd_xp_icon", kSigEqdXpIcon);
+    if (!icon) return false;
+    int names = 0;
+    for (uint8_t* c = icon; c < icon + 0x120; ++c)
+        if ((c[0] == 0x48 || c[0] == 0x4C) && c[1] == 0x8D && (c[2] & 0xC7) == 0x05) {
+            const char* s = (const char*)SigRipTarget(c, 3, 7);
+            uint8_t* rdata = nullptr;
+            size_t rsize = 0;
+            if (ImageSection(".rdata", &rdata, &rsize) && (const uint8_t*)s >= rdata && (const uint8_t*)s + 16 < rdata + rsize &&
+                (!strcmp(s, "army_experience") || !strcmp(s, "navy_experience") || !strcmp(s, "air_experience")))
+                ++names;
+        }
+    if (names < 3) return Fail("the experience icon function has an unexpected shape");
+    g_xpIconFn = icon;
+    // The commands' execute: their IsAir / IsNaval calls.
+    const char* const classes[2] = {".?AVCCreateEquipmentVariantCommand@@", ".?AVCUpdateEquipmentVariantCommand@@"};
+    for (int k = 0; k < 2; ++k) {
+        size_t slots = 0;
+        void** vt = FindVtableByRtti(classes[k], &slots);
+        uint8_t* exec = vt && slots > 10 ? (uint8_t*)vt[10] : nullptr;
+        if (!exec) return Fail("a variant command's execute was not found");
+        uint8_t *air = nullptr, *naval = nullptr;
+        size_t call = 0;
+        if (k == 0) {
+            air = SigFindIn(exec, 0x1000, kCodeEqdCreateAir);
+            naval = SigFindIn(exec, 0x1000, kCodeEqdCreateNaval);
+            call = kCodeEqdCreateCall;
+        } else {
+            air = SigFindIn(exec, 0x1000, kCodeEqdUpdateTest);
+            naval = air ? SigFindIn(air + 1, 0x200, kCodeEqdUpdateTest) : nullptr;
+            call = kCodeEqdUpdateCall;
+        }
+        if (!air || !naval || SigFollowRel32(air + call) != g_isAirFn || SigFollowRel32(naval + call) != g_isNavalFn || naval < air)
+            return Fail("a variant command's experience tests have an unexpected shape");
+        g_airRet[k] = air + call + 5;
+        g_navalRet[k] = naval + call + 5;
+    }
+    g_poolFn = pool;
+    g_tooltipFn = tip;
     return true;
 }
 
@@ -237,6 +436,116 @@ void __fastcall RefreshDetour(void* a, void* b, void* c, void* d) {
     if (!g_off && a) AfterRefresh((uint8_t*)a + g_viewDelta);
 }
 
+void AfterButtons(void* view) {
+    __try {
+        g_afterButtons(view, Rd<const void*>(view, g_archetype));
+    } __except (FaultFilter(GetExceptionInformation())) {
+        LogFaultOnce("buttons hook");
+    }
+}
+void __fastcall ButtonsDetour(void* view, void* b, void* c, void* d) {
+    g_buttonsOrig(view, b, c, d);
+    if (!g_off && g_afterButtons && view) AfterButtons(view);
+}
+
+// Stats: the definition's lists for a listed archetype, the game's arrays for the other panels.
+bool StatsCustom(void* view, void* a, const void* b, void* const panels[3]) {
+    __try {
+        const void* arch = Rd<const void*>(view, g_archetype);
+        if (!arch) return false;
+        StatRange r[3];
+        bool any = false;
+        for (int g = 0; g < 3; ++g) {
+            int n = 0;
+            const uint64_t* e = g_statsFor(arch, g, &n);
+            if (e) {
+                r[g] = StatRange{e, e + n};
+                any = true;
+            } else {
+                r[g] = g_vanillaStats[g];
+            }
+        }
+        if (!any) return false;
+        int extra = Rd<int>(view, g_statsExtra);
+        for (int g = 0; g < 3; ++g) {
+            StatContext ctx{};
+            memcpy(ctx.b, b, sizeof ctx.b);
+            ctx.one = 1;
+            g_fill(panels[g], &r[g], a, &ctx, extra);
+        }
+        return true;
+    } __except (FaultFilter(GetExceptionInformation())) {
+        LogFaultOnce("stats hook");
+        return false;
+    }
+}
+void __fastcall StatsDetour(void* view, void* a, const void* b, void* basePanel, void* combatPanel, void* miscPanel) {
+    void* const panels[3] = {basePanel, combatPanel, miscPanel};
+    if (!g_off && g_statsFor && view && b && StatsCustom(view, a, b, panels)) return;
+    g_statsOrig(view, a, b, basePanel, combatPanel, miscPanel);
+}
+
+// Experience: the definition's pool for listed archetypes, wherever the game asks for the pool, and
+// in the two commands' deduction tests (by return address; every other caller gets the game's answer).
+int XpSafe(const void* type) {
+    __try {
+        return type ? g_xpFor(type) : -1;
+    } __except (FaultFilter(GetExceptionInformation())) {
+        LogFaultOnce("experience hook");
+        return -1;
+    }
+}
+int64_t* __fastcall PoolDetour(void* container, int64_t* out, const void* type) {
+    if (!g_off && g_xpFor && container && out) {
+        int x = XpSafe(type);
+        if (x >= 0 && x < 3) {
+            g_copy(out, (const uint8_t*)container + g_pool[x]);
+            return out;
+        }
+    }
+    return g_poolOrig(container, out, type);
+}
+bool __fastcall IsAirDetour(const void* type) {
+    const uint8_t* ra = (const uint8_t*)_ReturnAddress();
+    if ((ra == g_airRet[0] || ra == g_airRet[1]) && !g_off && g_xpFor) {
+        int x = XpSafe(type);
+        if (x >= 0) return x == 2;
+    }
+    return g_isAirOrig(type);
+}
+bool __fastcall IsNavalDetour(const void* type) {
+    const uint8_t* ra = (const uint8_t*)_ReturnAddress();
+    if ((ra == g_navalRet[0] || ra == g_navalRet[1]) && !g_off && g_xpFor) {
+        int x = XpSafe(type);
+        if (x >= 0) return x == 1;
+    }
+    return g_isNavalOrig(type);
+}
+// While the tank window is open on a listed design with `xp`, the cost texts (tooltip and icon,
+// called only by the designer and its module picker) get one bit of that pool's mask.
+bool ShownPoolMask(uint64_t* mask) {
+    LONG x = g_shownXp;
+    void* view = g_shownView;
+    if (x < 0 || x > 2 || !view || g_off) return false;
+    __try {
+        void* root = Rd<void*>(view, g_root);
+        if (!root || !ElementVisible(root)) return false;
+    } __except (FaultFilter(GetExceptionInformation())) {
+        LogFaultOnce("experience text hook");
+        return false;
+    }
+    *mask = g_poolMask[x] & (0 - g_poolMask[x]);
+    return true;
+}
+void __fastcall TooltipDetour(void* a, uint64_t mask, void* c, void* d, void* out) {
+    ShownPoolMask(&mask);
+    g_tooltipOrig(a, mask, c, d, out);
+}
+const char* __fastcall XpIconDetour(uint64_t mask) {
+    ShownPoolMask(&mask);
+    return g_xpIconOrig(mask);
+}
+
 }  // namespace
 
 void ResolveDesigners() {
@@ -244,6 +553,13 @@ void ResolveDesigners() {
         g_canOpenFn = nullptr;
         return;
     }
+    if (!ResolveStats()) g_statsFn = nullptr;
+    if (!ResolveXp(g_pickWindow)) g_poolFn = nullptr;
+    Log("equipment_designers: element lookups %d (root +0x%x)", g_findSlotCount, g_root);
+    Log("equipment_designers: stats %s (%d stat keys, fill %s), experience %s (pools +0x%x/+0x%x/+0x%x, icon %s), buttons %s",
+        g_statsFn ? SigDescribe(g_statsFn).c_str() : "unavailable", g_statCount, g_fill ? SigDescribe((void*)g_fill).c_str() : "-",
+        g_poolFn ? SigDescribe(g_poolFn).c_str() : "unavailable", g_pool[0], g_pool[1], g_pool[2],
+        g_xpIconFn ? SigDescribe(g_xpIconFn).c_str() : "-", g_buttonsFn ? SigDescribe(g_buttonsFn).c_str() : "unavailable");
     Log("equipment_designers: can-open %s, open %s, refresh %s (view %d), kind +0x%x, title +0x%x, archetype +0x%x, roles "
         "+0x%x, slot windows +0x%x/+0x%x (slot +0x%x, element +0x%x, GUI object +0x%x), positions +0x%x (find slot +0x%x, position +0x%x), type slots +0x%x/+0x%x "
         "(name +0x%x), tank DLC bit 0x%llx",
@@ -257,6 +573,41 @@ bool HaveDesigners() {
            g_kind && g_title && g_refreshFn && g_archetype && g_typeSlots && g_typeSlotCount && g_slotToken && g_slotOfWindow && g_windowElement && g_guiBase &&
            g_vec[0] && g_vec[1] && g_container && g_lookupSlot && g_position && g_setPosition && g_isMissing && g_roles &&
            HaveTokens() && HaveProduction() && TypeArchetypeOffset() && HaveElementVisibility();
+}
+
+bool HaveDesignerButtons() { return g_buttonsFn != nullptr && g_findSlotCount > 0; }
+bool HaveDesignerStats() { return g_statsFn && g_fill && g_statKeys && g_statCount; }
+bool HaveDesignerXp() {
+    return g_poolFn && g_copy && g_isAirFn && g_isNavalFn && g_tooltipFn && g_xpIconFn && g_session && g_container_ && g_xpText && g_airRet[0] &&
+           g_airRet[1] && g_navalRet[0] && g_navalRet[1];
+}
+
+bool HookDesignerExtras(DesignerStats_t statsFor, DesignerXp_t xpFor, DesignerRefreshed_t afterButtons) {
+    struct One {
+        uint8_t* target;
+        void* detour;
+        void** orig;
+        const char* name;
+    };
+    std::vector<One> hooks;
+    if (statsFor && HaveDesignerStats()) hooks.push_back({g_statsFn, (void*)&StatsDetour, (void**)&g_statsOrig, "eqd_stats"});
+    if (xpFor && HaveDesignerXp()) {
+        hooks.push_back({g_poolFn, (void*)&PoolDetour, (void**)&g_poolOrig, "eqd_pool"});
+        hooks.push_back({g_isAirFn, (void*)&IsAirDetour, (void**)&g_isAirOrig, "eqd_is_air"});
+        hooks.push_back({g_isNavalFn, (void*)&IsNavalDetour, (void**)&g_isNavalOrig, "eqd_is_naval"});
+        hooks.push_back({g_tooltipFn, (void*)&TooltipDetour, (void**)&g_tooltipOrig, "eqd_tooltip"});
+        hooks.push_back({g_xpIconFn, (void*)&XpIconDetour, (void**)&g_xpIconOrig, "eqd_xp_icon"});
+    }
+    if (afterButtons && g_buttonsFn) hooks.push_back({g_buttonsFn, (void*)&ButtonsDetour, (void**)&g_buttonsOrig, "eqd_buttons"});
+    for (size_t i = 0; i < hooks.size(); ++i)
+        if (!HookQueue(hooks[i].target, hooks[i].detour, hooks[i].orig, hooks[i].name)) {
+            for (size_t j = 0; j < i; ++j) HookUnqueue(hooks[j].target);
+            return false;
+        }
+    if (statsFor && HaveDesignerStats()) g_statsFor = statsFor;
+    if (xpFor && HaveDesignerXp()) g_xpFor = xpFor;
+    if (afterButtons && g_buttonsFn) g_afterButtons = afterButtons;
+    return true;
 }
 
 bool HookDesigners(DesignerFind_t find, DesignerOpened_t opened, DesignerRefreshed_t refreshed, DesignerFault_t fault) {
@@ -330,6 +681,57 @@ bool DesignerResetSlot(void* view, bool fixed, int i) {
     int64_t pos = Rd<int64_t>(found, g_position);
     g_setPosition(w, &pos);
     return true;
+}
+
+int StatIdByKey(const char* key) {
+    for (int i = 0; key && i < g_statCount; ++i)
+        if (strcmp(g_statKeys[i], key) == 0) return i;
+    return -1;
+}
+
+void DesignerSetShownXp(void* view, int pool) {
+    g_shownView = view;
+    InterlockedExchange(&g_shownXp, pool >= 0 && pool < 3 ? pool : -1);
+}
+
+bool DesignerShowXp(void* view, int pool) {
+    static const char* const kKeys[3] = {"DESIGNER_ARMY_EXPERIENCE", "DESIGNER_NAVY_EXPERIENCE", "DESIGNER_AIR_EXPERIENCE"};
+    if (pool < 0 || pool > 2 || !HaveDesignerXp() || !*g_session) return false;
+    void* session = *g_session;
+    void* country = ((Session_t)(*(void***)session)[g_countrySlot / 8])(session);
+    void* container = country ? g_container_(country) : nullptr;
+    void* element = Rd<void*>(view, g_xpText);
+    if (!container || !element) return false;
+    int64_t amount = 0;
+    g_copy(&amount, (const uint8_t*)container + g_pool[pool]);
+    char value[32];
+    snprintf(value, sizeof value, "%lld", (long long)(amount / 100000));
+    LocalizeArg arg{"VALUE", value};
+    std::string text;
+    if (!LocalizeWithArgs(kKeys[pool], &arg, 1, &text)) return false;
+    EngineString s;
+    ConstructEngineString(&s, text.data(), text.size());
+    g_setText(element, &s);
+    FreeEngineString(&s);
+    return true;
+}
+
+void* DesignerElement(void* view, const char* name) {
+    void* root = view ? Rd<void*>(view, g_root) : nullptr;
+    if (!root || !name || !*name || !g_findSlotCount) return nullptr;
+    void** vt = *(void***)root;
+    if (root != g_findRoot) {  // each slot's placeholder for a name the window can't have
+        static const char kNone[] = "hoi4_loader_no_such_element";
+        NameView none{kNone, sizeof kNone - 1};
+        for (int i = 0; i < g_findSlotCount; ++i) g_findMissing[i] = ((ElementFind_t)vt[g_findSlots[i] / 8])(root, &none, 0);
+        g_findRoot = root;
+    }
+    NameView nv{name, strlen(name)};
+    for (int i = 0; i < g_findSlotCount; ++i) {
+        void* e = ((ElementFind_t)vt[g_findSlots[i] / 8])(root, &nv, 0);
+        if (e && e != g_findMissing[i]) return e;
+    }
+    return nullptr;
 }
 
 bool DesignerSlotAssigned(const void* view, bool fixed, int i) {
