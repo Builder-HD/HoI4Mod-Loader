@@ -6207,3 +6207,103 @@ UI only, no game rules:
 1. Approve the script side in N5 (file name, keys, `window`, `title`, `hide_roles`, `stats`)?
 2. Part 2 (stats) in the first version, or after part 1 works?
 3. `window = air | naval` for non-air/naval types: allow, or land only at first (smaller risk)?
+
+## N9: owner's decisions (2026-11-14) and the second round of findings
+
+**Owner:** N5 approved, plus more customisation: which XP the designer uses, how many slots there
+are, what they are called and where they sit. Order: part 1 first, stats (part 2) after; land
+first, air and naval afterwards.
+
+### Findings (1.19.5; same bytes at the same addresses on 1.19.4.2)
+
+**Production list (`FUN_141e3c020`, refreshed by `FUN_141e3fb00`).** The add-line list ignores
+`interface_category`. It shows a variant when `variant+0x408` (its type mask: archetype type plus
+the modules' `add_equipment_type`, `FUN_140c29730`) shares a bit with the tab's mask
+(`view+0x1120`, test at `0x141e3c29b`): armor `4`, inf/art `0x80000038`, air `0x1f0037fc00`,
+naval `0x80004003c1`. `interface_category` (`CEquipmentType+0x440`) only groups existing lines.
+- Probe C (armor) is in the armor tab because of bit 2. Probe B (infantry) is in inf/art.
+- Vanilla towed artillery is `type = { artillery infantry }`; the **infantry** bit lists it.
+  Pure `artillery` (bit 28) / `anti_tank` (bit 29) match no tab: probes A and D.
+
+**Old window or designer (`FUN_141820c00(ctx, type)`, 9 callers, all UI).** True only if
+`FUN_140cf5670` (the type has slots and its normalised mask meets `FUN_14100bfe0`, the DLC mask:
+MtG `0x80004001c0`, NSB `4`, BBA `0x1d0026fc00`) and `FUN_141e58dc0` (an
+`equipment_designer_<type|archetype>[_TAG]` layout exists). No Step Back unlocks only bit 2, so
+infantry can never pass. `FUN_140cf5670` has gameplay callers: not hooked.
+
+**Which window (`FUN_140bbf870`, N2).** Land predicates `FUN_140cf4fe0` (mask `0x408000003c`) or
+`FUN_140cf55e0` (bit 19) pick the tank window. The inf/art bits 3/4/5/31 are inside that mask, so
+an archetype with `infantry` in its type already routes to the tank window once
+`FUN_141820c00` lets it through.
+
+**Saving (`CCreateEquipmentVariantCommand` / `CUpdateEquipmentVariantCommand`, vtables
+`0x142a9d1f0` / `0x142a9d2b0`).** Validate (slot 9) checks the XP pool through `FUN_141338880`:
+land predicates → army, naval → navy, air → air, none → 0 (the save fails if it costs XP); and the
+modules against the type's slots. Execute (slot 10) deducts air / navy / else army XP. **Neither
+checks the designer, the DLC or the layout**, so a machine without the loader executes these
+commands like any other.
+
+**Inside the window (`CEquipmentDesignerView`).**
+- Kind `view+0x3ce0` (0 ship, 1 tank, 2 plane), shown archetype `view+0x5448`.
+- Title: `FUN_14181ce00(view, variant)` ("open this variant") sets `*(view+0xf878)` to
+  `FUN_141813d40(kind)` (SHIP / TANK / PLANE / EQUIPMENT_DESIGNER_TITLE) through `FUN_142347db0`.
+- Slots: setup (`FUN_141820330` → `FUN_14181fe50`) creates one slot window per positionType
+  `pos_custom_module_slot_window_%i` / `pos_fixed_module_slot_window_%i`, i = 0..19, stopping at
+  the first missing one, looked up in `*(view+0xf2c0)` (vtable `+0xc0`), placed at
+  `positionType+0xf0` (`{int x; int y}`) by `FUN_141e5d6c0`. Vanilla's tank GUI has 9 custom and
+  no fixed positions. The refresh `FUN_141821be0(view+0x28)` first calls `FUN_14181bb90`, which
+  gives the archetype's slots (`+0x70`, stride 0x50, count `+0x7c`, name token `+8`) the windows
+  in definition order: `fixed_*` to the next fixed window, others to the next custom one; extra
+  slots are dropped silently, unused windows hidden.
+- Slot names: vanilla, loc key `EQ_MOD_SLOT_<slot>_TITLE`.
+- Roles: the dropdown `*(view+0x134f8)`; its label comes from the type mask. For a type that isn't
+  a tank role (infantry) it reads "unknown" (no crash).
+- Stats (part 2): `FUN_141823950` fills the three panels from fixed `{int id; int8 kind}` arrays.
+- XP shown: by window kind (tank = army). The cost tooltip `FUN_1415c8470` picks army/navy/air by
+  the type mask; with the inf/art bits it says army.
+
+### Decisions
+
+1. **Feature `equipment_designers`**, engine tier, after `lifecycle`. Files
+   `common/hoi4_loader_equipment_designers/*.txt` from the game folder and the enabled mods, in load
+   order (as air_scenarios; a later entry of the same name replaces an earlier one).
+2. **Keys:**
+   ```
+   small_arms_designer = {
+       archetypes = { infantry_equipment }   # required
+       window = land                         # optional; only land for now (air/naval: logged, entry skipped)
+       title = SMALL_ARMS_DESIGNER_TITLE     # optional loc key; default: the window's own title
+       hide_roles = yes                      # optional, default yes: hides the tank role dropdown
+       slots = {                             # optional: position of a slot window, by slot name
+           small_arms_slot = { x = 1 y = 1 }
+           fixed_sight_slot = { x = 180 y = 300 }
+       }
+   }
+   ```
+3. **The archetype keeps its real type,** which must include a type the land window serves
+   (e.g. `infantry`, as vanilla towed artillery has). That type decides the production tab
+   (inf/art), the XP pool (army) and the save path, all vanilla. An archetype without one is
+   logged ("its type has no land type; add e.g. infantry") and skipped.
+4. **Opening:** a hook on `FUN_141820c00`: if the game says no and the type (or its archetype) is
+   listed, return true when the archetype has slots, the tank designer is unlocked (No Step
+   Back: the DLC mask's armor bit) and the game's own layout check passes. Everything after that
+   is the game's own path.
+5. **Title and roles:** a post-hook on `FUN_14181ce00` sets the title; a post-hook on the refresh
+   hides (or shows again) the role dropdown.
+6. **Slots:**
+   - Count: up to 20 normal plus 20 `fixed_` slots per archetype. The loader adds the missing
+     positionTypes (custom 9..19, fixed 0..19) to `interface/tank_designer_view.gui` when the game
+     reads it (whichever copy: vanilla's or a mod's), placed far off screen, so nothing changes
+     for other designs.
+   - Names: vanilla (`EQ_MOD_SLOT_<slot>_TITLE`); documented, no loader key.
+   - Positions: the refresh post-hook moves each listed archetype's slot windows to `slots`, and
+     puts windows back at their positionType for every other design.
+7. **XP: not in this version.** Land archetypes pay army XP through the game's own command. Paying
+   navy or air XP for them means changing the save command's validate and execute, which run on
+   every machine (a game rule; out of sync with a machine without the loader). **Owner to decide**
+   whether it is wanted with that limit (it would come with the air/naval step).
+8. **Stats** (part 2) next, then air and naval windows.
+9. **Fail safe:** each hook has its own pattern and CODE checks; any mismatch leaves the feature
+   off (vanilla behaviour). Problems in definitions are logged per entry. Multiplayer: UI only.
+   Saves: designs are normal variants; without the loader they stay producible, and editing them
+   opens the old window.
