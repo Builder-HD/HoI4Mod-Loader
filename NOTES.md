@@ -3898,6 +3898,7 @@ and the upgrade entry stayed in the queue.
 6. Supply in the area is unchanged by the split (only the badges change).
    - **Result (2026-11-12):** passed for items 1, 2 and 5: after the dismantle and the upgrade, the
      upgraded stretch has its own badge at 4 next to the level-1 stretch; the log is clean.
+   - **Result (2026-11-14, 1.19.5, China):** passed for every item.
 
 ## H7: segments being dismantled on the badge (requested 2026-11-12)
 
@@ -3979,6 +3980,10 @@ upgrading ... to level N") when a segment is being dismantled.
    vanilla.
 5. `loader.log`: "dismantling shown (mark +0x670, tooltip yes), right click changes the dismantle
    entry".
+   - **Result (2026-11-14, 1.19.5, China):** passed for every item. The log showed one bug: an
+     Alt+Shift+click right after a Shift+click cancel logged "one level deeper", because
+     `QueueOrDeepenRailwayDismantle` still found the cancelled entry (it stays in the list until the
+     next daily update). It now skips cancelled entries, as `LessenRailwayDismantle` does.
 
 # Part I: province building removal (supply hubs first)
 

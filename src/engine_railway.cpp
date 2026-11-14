@@ -1406,7 +1406,8 @@ int QueueOrDeepenRailwayDismantle(int tag, const std::vector<int>& path) {
     // was queued): that entry goes a level deeper on its own stretch.
     void* match = nullptr;
     for (int i = 0; lines && i < n && i < 10000 && !match; ++i)
-        if (IsDismantleLine(lines[i]) && SamePath(lines[i], path)) match = lines[i];
+        if (IsDismantleLine(lines[i]) && !Rd<uint8_t>(lines[i], g_lineCancelled) && SamePath(lines[i], path))
+            match = lines[i];
     if (!match) {  // one already going down to nothing leaves the rest of the segment to a new entry
         match = OverlappingLine(tag, path.data(), (int)path.size(), true);
         if (match && LineTarget(match) <= 0) match = nullptr;
