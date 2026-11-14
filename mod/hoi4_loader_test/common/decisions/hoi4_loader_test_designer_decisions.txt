@@ -1,12 +1,14 @@
 # Test decision for hoi4_loader's equipment_designers (MODDING.md "Equipment designers", NOTES.md
 # Part N). Play any country with No Step Back active.
 # 1. "Unlock the test small arms": researches the test archetype (type infantry, eleven slots)
-#    and gives 50 army experience for the designs.
+#    and gives 50 army and 50 navy experience for the designs.
 # 2. Production > infantry/artillery: "Test Small Arms" is listed with the designer icon; it opens
-#    a window titled "Small Arms Designer", without the role dropdown, with eleven slots in two
-#    rows (six and five); the cost tooltip says army experience.
-# 3. Save a design (army XP is paid) and produce it; open a tank design: "Tank Designer", the role
-#    dropdown and vanilla's slot places are back.
+#    a window titled "Small Arms Designer", without the role dropdown, the "Select Model" and
+#    historical design buttons, with eleven slots in two rows (six and five), the definition's
+#    stats (3 base, 5 combat, no misc) and navy experience shown; module costs show navy experience.
+# 3. Save a design (navy XP is paid, army XP unchanged) and produce it; open a tank design: "Tank
+#    Designer", the role dropdown, the buttons, the tank stats, army experience and vanilla's slot
+#    places are back.
 # Without the loader the decision is hidden; the equipment, if unlocked, opens the old window.
 
 hoi4_loader_test_category = {
@@ -20,6 +22,7 @@ hoi4_loader_test_category = {
 		complete_effect = {
 			set_technology = { hoi4_loader_test_small_arms_tech = 1 popup = no }
 			army_experience = 50
+			navy_experience = 50
 			log = "hoi4_loader_test: test small arms unlocked"
 		}
 		ai_will_do = { base = 0 }

@@ -7,6 +7,13 @@ hoi4_loader_test_small_arms_designer = {
 	window = land
 	title = HOI4_LOADER_TEST_SMALL_ARMS_DESIGNER
 	hide_roles = yes
+	xp = navy                               # designs cost navy experience (a game rule)
+	stats = {                               # the stat rows shown, per panel
+		base = { reliability maximum_speed build_cost_ic }
+		combat = { soft_attack hard_attack ap_attack defense breakthrough }
+		misc = { }
+	}
+	hide = { select3d_button historical_design_button }   # elements of the tank window
 	slots = {
 		sa_main_slot = { x = 1 y = 1 }
 		sa_extra_slot_1 = { x = 74 y = 1 }

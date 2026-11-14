@@ -1,6 +1,6 @@
 ﻿l_english:
  hoi4_loader_designer_unlock:0 "Unlock the test small arms"
- hoi4_loader_designer_unlock_desc:0 "Researches the hoi4_loader test small arms (equipment_designers) and gives 50 army experience."
+ hoi4_loader_designer_unlock_desc:0 "Researches the hoi4_loader test small arms (equipment_designers) and gives 50 army and 50 navy experience."
  hoi4_loader_test_small_arms:0 "Test Small Arms"
  hoi4_loader_test_small_arms_1:0 "Test Small Arms"
  hoi4_loader_test_small_arms_tech:0 "Test Small Arms"
