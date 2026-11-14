@@ -72,7 +72,9 @@ src/engine_scope.cpp          engine access for scope blocks (vanilla iterator t
 src/engine_army.cpp           engine access for armies (create army, set leader, characters)
 src/engine_conversion.cpp     engine access for equipment conversion (convert-from lists, generations)
 src/plugin_attention_area.cpp attention_area feature (outlines on the map, camera focus, the area selector)
-src/engine_attention.cpp      engine access for it (outlines, stripe texture, camera, province data) and its hooks
+src/engine_attention.cpp      engine access for it (outlines, stripe texture, camera) and its hooks
+src/area_select.h, .cpp       the area block (ids, state = this, owner/controller/coastal, random_provinces) and selection
+src/engine_province_data.cpp  province data for selection (ids, rects, coastal, controller, state owner)
 src/native_script.h, .cpp     native effect/trigger API: schemas, registration, parsing, docs
 src/native_script_engine.cpp  native API engine binding (vtable clones, registries, Scope)
 src/native_scope_engine.cpp   native API engine binding of scope blocks and iterators

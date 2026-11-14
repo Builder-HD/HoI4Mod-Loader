@@ -284,17 +284,22 @@ int StateCount();
 // area does not exist or the list layout is unresolved.
 bool AreaProvinceObjects(AreaKind kind, int id, std::vector<void*>* out);
 
-// --- Attention areas (attention_area; engine_attention.cpp, NOTES.md Part M) -------------------
-void ResolveAttention();
-bool HaveAttentionCamera();   // UI, camera, centre on province, look-at, target height
-bool HaveProvinceData();      // province objects, ids, rects, controller, coastal, state owner
-// Province data (main thread or trigger reads; ids 1 .. ProvinceCount()-1).
+// --- Province data (area selection; engine_province_data.cpp, NOTES.md M14) ---------------------
+// Resolved on its own: attention_area uses it, and a general area selector can.
+void ResolveProvinceData();  // after ResolveRailways (the controller offset)
+bool HaveProvinceIds();      // CProvince -> id (from goto_state)
+bool HaveProvinceData();     // province objects, ids, rects, controller, coastal, state owner
+// Main thread or trigger reads; ids 1 .. ProvinceCount()-1.
 int ProvinceCount();
 int ProvinceIdOf(const void* province);      // CProvince -> id, 0 if unreadable
 bool ProvinceIsCoastal(int id);
 int ProvinceController(int id);              // tag, 0 if unknown
 int StateOwner(int stateId);                 // tag, 0 if unknown
 bool ProvinceRect(int id, int rect[4]);      // map pixels {x, y, width, height}
+
+// --- Attention areas (attention_area; engine_attention.cpp, NOTES.md Part M) -------------------
+void ResolveAttention();     // after ResolveProvinceData
+bool HaveAttentionCamera();  // UI, camera, centre on province, look-at, target height
 // Stripes (NOTES.md M9): the diagonal stripes the map draws for occupation and battle-plan orders,
 // in a chosen colour per province set, in every map mode. Colour bytes b, g, r, a (a: stripe strength).
 struct StripeArea {

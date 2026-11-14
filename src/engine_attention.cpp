@@ -1,5 +1,6 @@
-// Engine access for attention areas (NOTES.md Part M): the camera, the province data the area
-// selector reads, and the two drawing surfaces areas use, both shaded by shaders (M11):
+// Engine access for attention areas (NOTES.md Part M): the camera and the two drawing surfaces
+// areas use, both shaded by shaders (M11). (The province data the area selector reads is in
+// engine_province_data.cpp, M14.)
 //   - lines: the game's province group outlines (CProvinceGroupHighlight), drawn by border.shader
 //     with the area's colour table entry as vSelectionColor;
 //   - fills: the map's stripe texture (CMapSecondaryMask), read by secondary_color_mask.
@@ -93,23 +94,6 @@ bool FocusRaw(const FocusIn* in, float out[6]) {
     }
 }
 
-// --- Province data ---------------------------------------------------------------------------------
-using GetProvince_t = void*(__fastcall*)(void* container, int id);
-uint32_t g_provContainer = 0;  // gamestate -> provinces container (vtable slot 0 = Get(id))
-uint32_t g_provId = 0;         // CProvince -> id
-uint32_t g_provGfx = 0, g_provRect = 0;
-void** g_ppMapData = nullptr;  // static map data: per-province flags
-uint32_t g_mapCount = 0, g_mapArray = 0, g_mapFlags = 0;
-uint8_t g_coastalBit = 0;
-uint32_t g_stateOwner = 0;
-
-void* ProvinceObject(int id) {
-    void* gs = GameState();
-    if (!gs || !g_provContainer || id <= 0 || id >= ProvinceCount()) return nullptr;
-    void* c = (uint8_t*)gs + g_provContainer;
-    return ((GetProvince_t)(*(void***)c)[0])(c, id);
-}
-
 // --- Resolution --------------------------------------------------------------------------------------
 void ResolveCamera() {
     uint8_t* go = SigFindUnique("goto_state_tail", kSigGotoStateTail);
@@ -131,37 +115,8 @@ void ResolveCamera() {
     g_lookAt = (LookAt_t)look;
     g_heightMin = mn;
     g_heightMax = mx;
-    g_provId = Rd<uint32_t>(go, kSigGotoProvinceIdDisp);
-    Log("Attention areas: UI %s, centre slot %u, camera slot %u, height limits +0x%x/+0x%x, province id +0x%x",
-        SigDescribe(g_ppUi).c_str(), g_centreSlot, g_cameraSlot, g_heightMin, g_heightMax, g_provId);
-}
-
-void ResolveProvinces() {
-    uint8_t* coast = SigFindUnique("state_coastal", kSigStateCoastal);
-    uint8_t* rect = SigFindUnique("province_rect", kSigProvinceRect);
-    uint8_t* rail = SigFindUnique("rail_controller", kSigRailController);
-    uint8_t* owner = SigFindUnique("state_owner_check", kSigStateOwnerCheck);
-    if (!coast || !rect || !rail || !owner) return;
-    uint8_t bit = Rd<uint8_t>(coast, kSigCoastalBit);
-    uint32_t gfx = Rd<uint32_t>(rect, kSigRectGfxDisp), r = Rd<uint32_t>(rect, kSigRectDisp);
-    bool agree = bit && (bit & (bit - 1)) == 0 && gfx < 0x1000 && r < 0x1000 && g_provId && g_provId < 0x1000;
-    if (!agree) {
-        Log("ERROR: attention_area: province data call sites look different; area selection off");
-        return;
-    }
-    g_ppMapData = (void**)SigRipTarget(coast, kSigCoastalMapRel, kSigCoastalMapRel + 4);
-    g_mapCount = Rd<uint32_t>(coast, kSigCoastalCountDisp);
-    g_mapArray = Rd<uint32_t>(coast, kSigCoastalArrayDisp);
-    g_mapFlags = Rd<uint32_t>(coast, kSigCoastalFlagsDisp);
-    g_coastalBit = bit;
-    g_provGfx = gfx;
-    g_provRect = r;
-    g_provContainer = Rd<uint8_t>(rail, kSigRailProvincesDisp);
-    g_stateOwner = Rd<uint32_t>(owner, kSigOwnerStateOwnerDisp);
-    Log("Attention areas: map data %s (provinces +0x%x/+0x%x, flags +0x%x bit 0x%x), province rect +0x%x/+0x%x, "
-        "provinces +0x%x, state owner +0x%x",
-        SigDescribe(g_ppMapData).c_str(), g_mapArray, g_mapCount, g_mapFlags, g_coastalBit, g_provGfx, g_provRect,
-        g_provContainer, g_stateOwner);
+    Log("Attention areas: UI %s, centre slot %u, camera slot %u, height limits +0x%x/+0x%x", SigDescribe(g_ppUi).c_str(),
+        g_centreSlot, g_cameraSlot, g_heightMin, g_heightMax);
 }
 
 // --- Province group outlines (CProvinceGroupHighlight) ---------------------------------------------
@@ -463,8 +418,7 @@ void ForgetStripes() {
 }
 
 void ResolveAttention() {
-    ResolveCamera();  // before ResolveProvinces: the province id offset comes from goto_state
-    ResolveProvinces();
+    ResolveCamera();
     ResolveHighlight();  // after ResolveCamera: cross-checks the UI global
     ResolveStripes();
 }
@@ -527,7 +481,7 @@ bool ClearHoveredRaw(void* owner, int (*idOf)(const void*), HoverFilter_t filter
 
 bool HookHoveredProvince(HoverFilter_t filter) {
     uint8_t* p = SigFindUnique("hover_setters", kSigHoverSetters);
-    if (!p || !g_provId) return false;
+    if (!p || !HaveProvinceIds()) return false;
     uint32_t type = Rd<uint32_t>(p, kSigHoverTypeDisp), item = Rd<uint32_t>(p, kSigHoverItemDisp);
     if (type != Rd<uint32_t>(p, kSigHoverStateTypeDisp) || item != Rd<uint32_t>(p, kSigHoverStateItemDisp) || item != type + 8 ||
         type > 0x2000) {
@@ -609,44 +563,6 @@ bool ShowHighlight(const std::vector<int>& provinces, int colourId) {
 }
 
 bool HaveAttentionCamera() { return g_ppUi && g_centreSlot && g_cameraSlot && g_setHeight && g_lookAt && g_heightMin; }
-bool HaveProvinceData() {
-    return g_ppMapData && g_mapCount && g_mapArray && g_mapFlags && g_coastalBit && g_provGfx && g_provRect && g_provContainer &&
-           g_provId && g_stateOwner && ProvinceControllerOffset();
-}
-
-int ProvinceCount() {
-    void* map = g_ppMapData ? *g_ppMapData : nullptr;
-    int n = map ? Rd<int>(map, g_mapCount) : 0;
-    return n > 0 && n < 1000000 ? n : 0;
-}
-
-int ProvinceIdOf(const void* province) { return province && g_provId ? Rd<int>(province, g_provId) : 0; }
-
-bool ProvinceIsCoastal(int id) {
-    void* map = g_ppMapData ? *g_ppMapData : nullptr;
-    if (!map || id <= 0 || id >= ProvinceCount()) return false;
-    void* const* arr = Rd<void* const*>(map, g_mapArray);
-    const uint8_t* p = arr ? (const uint8_t*)arr[id] : nullptr;
-    return p && (p[g_mapFlags] & g_coastalBit) != 0;
-}
-
-int ProvinceController(int id) {
-    void* p = ProvinceObject(id);
-    return p && ProvinceControllerOffset() ? Rd<int>(p, ProvinceControllerOffset()) : 0;
-}
-
-int StateOwner(int stateId) {
-    void* s = StateById(stateId);
-    return s && g_stateOwner ? Rd<int>(s, g_stateOwner) : 0;
-}
-
-bool ProvinceRect(int id, int rect[4]) {
-    void* p = ProvinceObject(id);
-    const uint8_t* gfx = p ? Rd<const uint8_t*>(p, g_provGfx) : nullptr;
-    if (!gfx) return false;
-    memcpy(rect, gfx + g_provRect, 4 * sizeof(int));
-    return rect[2] >= 0 && rect[3] >= 0;
-}
 
 // --- The UI's centre-on-province (right-click on a queue entry, goto_state, ...) -------------------
 namespace {
@@ -675,7 +591,7 @@ void __fastcall CentreObjDetour(void* ui, void* province) {
 }  // namespace
 
 bool HookCentreOnProvince(CentreFilter_t filter) {
-    if (!HaveAttentionCamera() || !g_provId) return false;
+    if (!HaveAttentionCamera() || !HaveProvinceIds()) return false;
     size_t n = 0;
     void** vt = FindVtableByRtti(".?AVCInGameIdler@@", &n);
     uint8_t* tail = vt && n > g_centreSlot ? SigFindIn((uint8_t*)vt[g_centreSlot], 0x200, kCodeIdlerCentreTail) : nullptr;

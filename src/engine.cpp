@@ -475,7 +475,8 @@ bool Resolve() {
     ResolveProvinceBuildings();
     ResolveConversion();  // after ResolveData: cross-checks production_data's offsets
     ResolveAirScenarios();  // after ResolveData: cross-checks production_data's design type
-    ResolveAttention();   // after ResolveRailways: the province controller offset
+    ResolveProvinceData();  // after ResolveRailways: the province controller offset
+    ResolveAttention();
 
     Log("Engine: gamestate %s, flags +0x%x, regions +0x%x/+0x%x", g_ppGameState ? SigDescribe(g_ppGameState).c_str() : "-",
         g_flagsOffset, g_regionArrayOffset, g_regionCountOffset);

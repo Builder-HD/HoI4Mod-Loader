@@ -15,7 +15,8 @@
 // An area block selects provinces: the listed ones (province, state, strategic_region; any number
 // of each) or, without a list, every land province; then the filters (owner, controller, coastal)
 // keep those that match all of them. Several area blocks add up. The selection is made when the
-// effect runs, from game state only, in province id order: the same on every machine.
+// effect runs, from game state only, in province id order: the same on every machine. The block
+// and the selection are the shared area selector (area_select.h, NOTES.md M14).
 //
 // Areas are display state of this session: not saved, dropped when another game is entered (mods
 // add them again from on_startup / on_game_loaded). The drawing happens on the main thread at the
@@ -27,6 +28,7 @@
 #include <string>
 #include <vector>
 
+#include "area_select.h"
 #include "engine.h"
 #include "lifecycle.h"
 #include "loader.h"
@@ -156,40 +158,6 @@ const float kRgb[][3] = {{1, 0.9f, 0.1f}, {1, 1, 1},  {0, 0, 0},       {0.9f, 0.
 
 // --- Parameters -------------------------------------------------------------------------------------
 enum AddParam { kId, kLine, kFill, kColor, kRed, kGreen, kBlue, kAlpha, kVars, kArea };
-enum AreaKey { kProvince, kState, kRegion, kOwner, kController, kCoastal, kRandomProvinces };
-
-ParamSpec Repeat(const char* name) {
-    ParamSpec p{name, ParamType::Int, false};
-    p.repeat = true;
-    return p;
-}
-
-ParamSpec RepeatState() {
-    ParamSpec p = Repeat("state");
-    p.choices = "this";  // the state in scope (random_owned_state = { add_attention_area = { ... state = this } })
-    return p;
-}
-
-const std::vector<ParamSpec> kAreaKeys = {
-    Repeat("province"),
-    RepeatState(),
-    Repeat("strategic_region"),
-    {"owner", ParamType::Country, false},
-    {"controller", ParamType::Country, false},
-    {"coastal", ParamType::Bool, false},
-    {"random_provinces", ParamType::Int, false},  // keep this many of the block's provinces, picked at random
-};
-
-// The random picks of random_provinces must come out the same on every machine in multiplayer, so
-// they come from a counter of add_attention_area runs (every machine runs the same effects in the
-// same order), not from the clock. Areas are not saved, so a fresh start needs no stored state.
-uint64_t g_addCount = 0;
-uint64_t Mix(uint64_t x) {  // splitmix64
-    x += 0x9E3779B97F4A7C15ull;
-    x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
-    x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
-    return x ^ (x >> 31);
-}
 
 // shader_variables = { <name> = <number> ... color = <name> }: the keys are every variable the
 // collected shaders declare (known before the effect is registered, so the game's own parser checks
@@ -226,79 +194,6 @@ float VarValue(const Area& a, const ShaderPatterns::Var& v) {
     return v.def;
 }
 float VarNorm(const Area& a, const ShaderPatterns::Var& v) { return (VarValue(a, v) - v.min) / (v.max - v.min); }
-
-ParamSpec AreaParam() {
-    ParamSpec p{"area", ParamType::Block, true};
-    p.repeat = true;
-    p.block = &kAreaKeys;
-    return p;
-}
-
-// --- The area selector (kept apart from the drawing: NOTES.md M4) -----------------------------------
-// province -> state id (0: not in a state, i.e. sea or wasteland outside states).
-std::vector<int> ProvinceStates() {
-    std::vector<int> of((size_t)std::max(Engine::ProvinceCount(), 0), 0);
-    std::vector<void*> list;
-    for (int s = 1; s < Engine::StateCount(); ++s) {
-        if (!Engine::AreaProvinceObjects(Engine::AreaKind::State, s, &list)) continue;
-        for (void* p : list) {
-            int id = Engine::ProvinceIdOf(p);
-            if (id > 0 && id < (int)of.size()) of[id] = s;
-        }
-    }
-    return of;
-}
-
-void AddIds(Engine::AreaKind kind, int id, std::vector<char>* in) {
-    std::vector<void*> list;
-    if (!Engine::AreaProvinceObjects(kind, id, &list)) return;
-    for (void* p : list) {
-        int pid = Engine::ProvinceIdOf(p);
-        if (pid > 0 && pid < (int)in->size()) (*in)[pid] = 1;
-    }
-}
-
-// The provinces one area block selects, added to *out (a flag per province id).
-void SelectArea(const Args& a, const Scope& scope, const std::vector<int>& stateOf, std::vector<char>* out) {
-    size_t n = stateOf.size();
-    std::vector<char> in(n, 0);
-    bool listed = a.has(kProvince) || a.has(kState) || a.has(kRegion);
-    if (!listed) {
-        for (size_t p = 1; p < n; ++p) in[p] = stateOf[p] != 0;
-    } else {
-        for (size_t k = 0; k < a.count(kProvince); ++k) {
-            int p = a.at(kProvince, k);
-            if (p > 0 && p < (int)n) in[p] = 1;
-        }
-        for (size_t k = 0; k < a.count(kState); ++k) {
-            int st = a.at(kState, k);
-            if (IntWordIndex(st) == 0) st = scope.stateId();  // `this`: 0 outside a state scope, which selects nothing
-            if (st > 0) AddIds(Engine::AreaKind::State, st, &in);
-        }
-        for (size_t k = 0; k < a.count(kRegion); ++k) AddIds(Engine::AreaKind::StrategicRegion, a.at(kRegion, k), &in);
-    }
-    int owner = a.has(kOwner) ? native_country(a.i(kOwner), scope) : 0;
-    int controller = a.has(kController) ? native_country(a.i(kController), scope) : 0;
-    if ((a.has(kOwner) && owner <= 0) || (a.has(kController) && controller <= 0)) return;  // names no country here
-    std::vector<int> kept;
-    for (size_t p = 1; p < n; ++p) {
-        if (!in[p]) continue;
-        if (owner && !Engine::IsSameCountry(Engine::StateOwner(stateOf[p]), owner)) continue;
-        if (controller && !Engine::IsSameCountry(Engine::ProvinceController((int)p), controller)) continue;
-        if (a.has(kCoastal) && Engine::ProvinceIsCoastal((int)p) != a.b(kCoastal)) continue;
-        kept.push_back((int)p);
-    }
-    if (a.has(kRandomProvinces)) {  // a partial Fisher-Yates shuffle: the first `want` are the picks
-        size_t want = (size_t)std::max(0, a.i(kRandomProvinces));
-        uint64_t r = Mix(g_addCount * 0x100000001B3ull + kept.size());
-        for (size_t i = 0; i < want && i + 1 < kept.size(); ++i) {
-            r = Mix(r);
-            std::swap(kept[i], kept[i + (size_t)(r % (kept.size() - i))]);
-        }
-        if (want < kept.size()) kept.resize(want);
-    }
-    for (int p : kept) (*out)[p] = 1;
-}
 
 // Bounding box and the two calibration provinces: the one nearest the box centre, and the one
 // farthest from it vertically (so the camera's z direction can be measured).
@@ -377,12 +272,7 @@ void ExecAdd(const Args& a, const Scope& s) {
         for (size_t i = 0; i < g_varNames.size(); ++i)
             if (v.has((int)i + 1)) area.vars.push_back({g_varNames[i], (float)v.num((int)i + 1)});
     }
-    ++g_addCount;
-    std::vector<int> stateOf = ProvinceStates();
-    std::vector<char> pick(stateOf.size(), 0);
-    for (size_t k = 0; k < a.count(kArea); ++k) SelectArea(a.block(kArea, k), s, stateOf, &pick);
-    for (size_t p = 1; p < pick.size(); ++p)
-        if (pick[p]) area.provinces.push_back((int)p);
+    area.provinces = AreaSelect::Select(a, kArea, s);  // the shared area selector (NOTES.md M14)
     Measure(&area);
     Log("attention_area: '%s' marks %zu provinces (box %d,%d %dx%d)", area.name.c_str(), area.provinces.size(), area.box[0],
         area.box[1], area.box[2], area.box[3]);
@@ -561,7 +451,7 @@ void Frame() {
 void OnEntering() {
     g_areas.clear();
     SyncMarked();
-    g_addCount = 0;  // every machine of a multiplayer game enters it fresh
+    AreaSelect::ResetSession();  // random_provinces: every machine of a multiplayer game enters it fresh
     g_dirty = false;
     g_focusPending = false;
     g_hoverPath.clear();
@@ -597,9 +487,9 @@ static std::string PatchLineFile(const std::string& original) {
 }
 
 bool AttentionAreaInit() {
-    if (!Engine::HaveAttentionCamera() || !Engine::HaveProvinceData() || !Engine::HaveRegionData() || !Engine::HaveCountries()) {
-        Log("attention_area: engine pieces missing (camera %d, provinces %d, regions %d)", Engine::HaveAttentionCamera(),
-            Engine::HaveProvinceData(), Engine::HaveRegionData());
+    if (!Engine::HaveAttentionCamera() || !AreaSelect::Available()) {
+        Log("attention_area: engine pieces missing (camera %d, provinces %d, regions %d, countries %d)", Engine::HaveAttentionCamera(),
+            Engine::HaveProvinceData(), Engine::HaveRegionData(), Engine::HaveCountries());
         return false;
     }
     if (!MainThreadQueueAvailable()) {
@@ -634,7 +524,7 @@ bool AttentionAreaInit() {
         {"blue", ParamType::Number, false},
         {"alpha", ParamType::Number, false},
         VarsParam(),
-        AreaParam(),
+        AreaSelect::BlockParam(),
     };
     bool ok = register_native_effect(
         {"add_attention_area",
