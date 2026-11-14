@@ -305,14 +305,19 @@ bool HookStripes();   // queues the stripe paint hook; false if its signature wa
 bool HaveStripes();   // the hook is in place
 void SetStripes(const std::vector<StripeArea>& areas);  // replaces the set; applied at the next paint
 void ForgetStripes();  // a new game is entered
+// The fill ids the patched fill shader decodes (alpha 255 - n for n = 1 .. ids; 0: not patched).
+// While set, a game alpha in that range in a province no area holds is moved just outside it at
+// each paint (and logged once per value), so the game's stripes never read as a loader fill.
+void SetStripeIdRange(int ids);
 // Province group outlines (the thin lines construction mode draws around build targets): one
 // outline at a time for the UI. Main thread. Palette index: BORDER_COLOR_CUSTOM_HIGHLIGHTS.
 bool HaveHighlight();
-int HighlightPaletteSize();          // colours in the palette (0 if unknown)
-int HighlightWhiteIndex();           // the colour made white in the renderer's table, else -1
-// Queues the hook that makes one outline colour white when the renderer builds its colour table
-// (once, at the map's graphics setup). Call from a feature's init.
-bool HookHighlightWhite();
+int HighlightPaletteSize();               // colours in the palette (0 if unknown)
+int HighlightPaletteColourId(int index);  // the colour id of palette colour `index`
+// Queues the hook that appends the loader's colour slots to the renderer's outline colour table
+// when it is built (once, at the map's graphics setup); no vanilla colour is changed. Call from a
+// feature's init.
+bool HookOutlineColourTable();
 // The outline owner's hovered item (a hovered queue entry's province): drawn before every outline,
 // so it covers an outline's edges. The filter sees each province the game sets (UI, main thread)
 // and returns true to set nothing instead. Queues a hook.
@@ -320,7 +325,7 @@ using HoverFilter_t = bool (*)(int provinceId);
 bool HookHoveredProvince(HoverFilter_t filter);
 // Main thread: clears the hovered item now if it is a province the filter accepts. True if cleared.
 bool ClearHoveredProvinceIf(HoverFilter_t filter);
-bool ShowHighlight(const std::vector<int>& provinces, int paletteIndex);  // replaces the previous one
+bool ShowHighlight(const std::vector<int>& provinces, int colourId);  // replaces the previous one
 // Any number of outlines (script areas): one game outline per handle, shown while it is held.
 struct OutlineRef {
     void* obj = nullptr;
@@ -328,11 +333,12 @@ struct OutlineRef {
 };
 bool CreateOutline(const std::vector<int>& provinces, int colourId, int priority, OutlineRef* out);  // replaces *out
 void ReleaseOutline(OutlineRef* ref);
-// Colour ids: the white slot (-1 before the colour table is built), and an extra slot holding
-// this colour (-1 if none is free or the table could not be extended). Main thread.
-int OutlineWhiteId();
+// Colour ids in the loader's own slots: the hover mark's white (a slot of its own, never handed
+// out; -1 before the colour table is built or if it could not be extended), and a slot holding this
+// colour (-1 if none is free or the table could not be extended). Main thread.
+int HoverWhiteId();
 int OutlineColourId(float r, float g, float b, float a);
-void ResetOutlineColours();  // the extra slots may be handed out again
+void ResetOutlineColours();  // the colour slots may be handed out again (not the hover's white)
 void HideHighlight();
 // Main thread, at a safe point: centre the camera on the box (map pixels) and set the target
 // height (height <= 0: fit the box, times fitFactor). `ref` and `ref2` are provinces of the area

@@ -124,12 +124,6 @@ int main(int argc, char** argv) {
         Check((h >> 16 & 3) == 2 && (h >> 8 & 3) == 0 && (h & 3) == 0, "fill texel, alpha 0.5");
     }
 
-    auto mods = EnabledMods("{\n  \"enabled_mods\": [\n    \"mod/ugc_1.mod\",\n    \"mod/local.mod\"\n  ],\n  \"disabled_dlcs\": [ \"x\" ]\n}");
-    Check(mods.size() == 2 && mods[0] == "mod/ugc_1.mod" && mods[1] == "mod/local.mod", "EnabledMods");
-    Check(EnabledMods("{}").empty() && EnabledMods("{\"enabled_mods\": []}").empty(), "EnabledMods empty");
-    Check(ModPath("version=\"1.0\"\nname=\"x\"\npath=\"C:/a b/mod/x\"\n") == "C:/a b/mod/x", "ModPath");
-    Check(ModPath("name=\"x\"\nreplace_path=\"gfx\"\n").empty(), "ModPath: replace_path is not path");
-
     std::vector<Pattern> two = {{"alpha", "\tfloat3 HL_Fill_alpha( float3 vColor, float2 vUV, float4 vMask, in sampler2D Mask ) { return vMask.rgb; }\n", "t"},
                                 {"beta", "\tfloat3 HL_Fill_beta( float3 vColor, float2 vUV, float4 vMask, in sampler2D Mask ) { return vColor; }\n", "t"}};
     Check(PatchFillShader(kFxh, {}).empty(), "fill: no patterns, no patch");
@@ -177,6 +171,81 @@ int main(int argc, char** argv) {
     CheckBorder(border, "border");
     Check(PatchLineShader("PixelShader = { MainCode PixelShader [[ float4 main() { } ]] }", one).empty(),
           "border: unexpected shape, no patch");
+
+    // --- Not usable (failed the compile check): no code, no dispatch case; the ids stay -----------
+    {
+        std::vector<Pattern> mixed = two;
+        mixed[0].usable = false;
+        std::string out = PatchFillShader(kFxh, mixed);
+        Check(out.find("HL_Fill_alpha(") == std::string::npos && out.find("if ( nId == 2 )") != std::string::npos &&
+                  out.find("if ( nId == 1 )") == std::string::npos && out.find("nK <= 2") != std::string::npos,
+              "fill: an unusable pattern is left out, the others keep their ids");
+        std::vector<Pattern> lines = one;
+        lines[0].usable = false;
+        Check(PatchLineShader(kBorder, lines).find("HL_Line_ants(") == std::string::npos, "border: an unusable pattern is left out");
+    }
+
+    // --- The compile check (NOTES.md M15) ----------------------------------------------------------
+    {
+        std::string src = CheckSourceBorder(two, one);
+        Check(src.find("HL_Fill_beta( float3( vHlUV, 0.5f )") != std::string::npos && src.find("HL_Line_ants(") != std::string::npos &&
+                  src.find("float4 main(") != std::string::npos && src.find("BORDER_TILE") != std::string::npos,
+              "check source: every pattern called from main");
+        Check(CheckSourceFill(two).find("BORDER_TILE") == std::string::npos, "check source: fills do not see BORDER_TILE");
+        std::string errors;
+        bool available = false;
+        bool builtinsOk = CompileCheck(CheckSourceFill(Builtins(Kind::Fill)), &errors, &available);
+        if (!available) {
+            printf("  note: no d3dcompiler_47.dll here; the compile checks are skipped\n");
+        } else {
+            Check(builtinsOk, "compile check: built-in fills");
+            if (!builtinsOk) printf("    %s\n", errors.c_str());
+            Check(CompileCheck(CheckSourceBorder(Builtins(Kind::Fill), Builtins(Kind::Line)), &errors, &available),
+                  "compile check: built-in fills and lines together");
+            std::vector<Pattern> broken = Builtins(Kind::Fill);
+            broken.push_back({"broken", "\tfloat3 HL_Fill_broken( float3 vColor, float2 vUV, float4 vMask, in sampler2D Mask ) { return vColor * nope; }\n", "t"});
+            Check(!CompileCheck(CheckSourceFill(broken), &errors, &available) && errors.find("nope") != std::string::npos,
+                  "compile check: an undeclared name fails, the error names it");
+            std::vector<Pattern> border = {{"edge", "\tfloat3 HL_Fill_edge( float3 vColor, float2 vUV, float4 vMask, in sampler2D Mask ) { return vColor * BORDER_TILE; }\n", "t"}};
+            Check(!CompileCheck(CheckSourceFill(border), &errors, &available), "compile check: a fill using BORDER_TILE fails");
+            std::vector<Pattern> f1 = {{"a", "\tfloat HL_Twice( float x ) { return 2 * x; }\n\tfloat3 HL_Fill_a( float3 vColor, float2 vUV, float4 vMask, in sampler2D Mask ) { return vColor * HL_Twice( 1 ); }\n", "t"}};
+            std::vector<Pattern> l1 = {{"b", "\tfloat HL_Twice( float x ) { return 2 * x; }\n\tfloat4 HL_Line_b( float4 vColor, float3 vAreaColor, float2 vUV, float3 vPos ) { return vColor * HL_Twice( 1 ); }\n", "t"}};
+            Check(CompileCheck(CheckSourceFill(f1), &errors, &available) && !CompileCheck(CheckSourceBorder(f1, l1), &errors, &available),
+                  "compile check: a helper name used by a fill and a line fails together");
+#ifdef HL_SRC_DIR
+            // The test mod's shaders (the examples a modder starts from) pass.
+            std::vector<Pattern> fills = Builtins(Kind::Fill), lns = Builtins(Kind::Line);
+            for (const char* name : {"fire_edge", "inferno", "matrix_rain"}) {
+                std::string code;
+                if (!ReadFile(std::string(HL_SRC_DIR) + "/mod/hoi4_loader_test/gfx/FX/hoi4_loader_patterns/fill/" + name + ".hlsl", &code)) {
+                    Check(false, "read a test mod fill shader");
+                    continue;
+                }
+                std::vector<Var> v;
+                std::string why;
+                ParseVariables(code, &v, &why);
+                fills.push_back({name, code, "test mod", v});
+            }
+            for (const char* name : {"dna_helix", "fire_line", "marching_ants"}) {
+                std::string code;
+                if (!ReadFile(std::string(HL_SRC_DIR) + "/mod/hoi4_loader_test/gfx/FX/hoi4_loader_patterns/line/" + name + ".hlsl", &code)) {
+                    Check(false, "read a test mod line shader");
+                    continue;
+                }
+                std::vector<Var> v;
+                std::string why;
+                ParseVariables(code, &v, &why);
+                lns.push_back({name, code, "test mod", v});
+            }
+            bool fillOk = CompileCheck(CheckSourceFill(fills), &errors, &available);
+            Check(fillOk, "compile check: the test mod's fills");
+            if (!fillOk) printf("    %s\n", errors.c_str());
+            bool borderOk = CompileCheck(CheckSourceBorder(fills, lns), &errors, &available);
+            Check(borderOk, "compile check: the test mod's fills and lines together");
+            if (!borderOk) printf("    %s\n", errors.c_str());
+#endif
+        }
+    }
 
     if (argc > 1) {  // the real files
         std::string dir = argv[1], fxh, shader;

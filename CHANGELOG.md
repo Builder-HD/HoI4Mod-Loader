@@ -40,13 +40,21 @@ A–F; NOTES.md has the findings and test results behind each.
     loader finds them in the enabled mods (`dlc_load.json`) and stitches them, with a dispatcher, into
     `border.shader` and `standardfuncsgfx.fxh` as the game reads them, so no game shader file is
     replaced. The shader id rides in the outline colour's alpha (lines) and the stripe texture's alpha
-    byte (fills); 32 extra colour slots are appended to the renderer's outline colour table.
+    byte (fills); 32 extra colour slots are appended to the renderer's outline colour table (no
+    vanilla colour is changed).
+  - **Only for mods that use it:** the two shader files are patched only when an enabled mod ships
+    shaders or the marker `gfx/FX/hoi4_loader_patterns/patch_map_shaders.txt`; every other player keeps the game's shaders and gets no
+    recompile. **Fail-safe:** every mod shader is compile-checked first (the system's DirectX
+    compiler, against the documented interface); one that fails is logged and left out (its areas
+    fall back to `solid` / `stripes`), so a broken mod shader can't break the map. While the fill
+    shader is patched, a game stripe alpha in the fill ids' range is moved out of it (logged).
   - `shader_variables = { name = value ... }`: a shader declares up to 4 named values
     (`// hoi4_loader_variables: name min max default, ...`), script sets them per area. The colour's
     alpha reaches line and fill shaders.
   - `remove_attention_area = <id>|all`, `focus_attention_area = { id zoom }` (centre and zoom the
-    player's camera), trigger `has_attention_area = <id>`.
-  - Display only, not saved: mods add areas again after loading.
+    player's camera), trigger `has_attention_area = <id>` (safe from any thread).
+  - Display only, not saved: mods add areas again after loading. A hot-joining player has none, so
+    `has_attention_area` must not drive game logic in multiplayer (MODDING.md).
   - Hooks the stripe texture's paint and the outline colour table's build (DEVELOPING.md "Global
     hooks"). New test `shader_patterns_test` (also splices shaders into the game's cached shader
     sources for fxc). 129 signatures and anchors in all, checked on 1.19.4.2 and 1.19.5.
@@ -57,8 +65,11 @@ A–F; NOTES.md has the findings and test results behind each.
     fill shader (NOTES.md M12).
 - **Railway queue hover mark** (needs `railway_queue` and `attention_area`; experimental with it): hovering a railway
   entry in the construction queue outlines its provinces with the game's thin province outline in white
-  (outline colour 14 is made white in the map renderer's colour table); a right-click on the entry
+  (a colour slot of the loader's own; no vanilla colour changes); a right-click on the entry
   shows the whole line. UI only. NOTES.md M7.
+- **Internal:** the launcher's mod list and descriptor reader (`src/mod_list.cpp`) is shared by
+  air_scenarios and attention_area's shaders. `HOI4_LOADER_USER_DIR` is honoured only by the smoke
+  test's stand-in executables.
 - **Native script API:** parameters of type `Number` (decimals) and `Block` (a nested
   `key = { ... }` read by the game's own clause reader), `ParamSpec::repeat` (a key written several
   times keeps every value), and up to 16 parameters per command (was 8).

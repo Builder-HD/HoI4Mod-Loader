@@ -51,7 +51,20 @@ struct Area {
     float refDist = 0;      // map pixels from the box centre to the nearest province centre
 };
 
-std::vector<Area> g_areas;  // written by effects (main thread), read by the trigger
+std::vector<Area> g_areas;  // main thread only (effects, the frame)
+// What has_attention_area reads: the marked ids, a copy kept under its own lock. Native triggers can
+// run on other threads than the effects that change g_areas (#17 review), so the trigger never
+// touches g_areas. SyncMarked() runs after every change.
+SRWLOCK g_markedLock = SRWLOCK_INIT;
+std::vector<int> g_marked;  // guarded by g_markedLock
+void SyncMarked() {
+    std::vector<int> ids;
+    ids.reserve(g_areas.size());
+    for (const Area& a : g_areas) ids.push_back(a.token);
+    AcquireSRWLockExclusive(&g_markedLock);
+    g_marked.swap(ids);
+    ReleaseSRWLockExclusive(&g_markedLock);
+}
 std::vector<Engine::OutlineRef> g_outlines;  // the outlines shown for areas with a line
 const int kAreaPriority = 90;                // below the railway hover mark (100)
 volatile long g_noColourLogged = 0, g_noOutlineLogged = 0, g_noStripesLogged = 0, g_unpatchedLogged = 0;
@@ -113,15 +126,16 @@ void HoverFrame() {
     if (g_hoverChanged) {
         g_hoverChanged = false;
         g_hoverShown = true;
-        // The game's thin province group outline (as construction mode draws build targets), in the
-        // palette's white (the loader's defines patch), else the palette's first colour.
+        // The game's thin province group outline (as construction mode draws build targets), in white:
+        // the loader's own colour slot appended to the renderer's table (no vanilla colour changes),
+        // else the palette's first colour.
         Engine::ClearHoveredProvinceIf(&IsHoveredLineEnd);  // set before the first tooltip of this hover
-        int white = Engine::HighlightWhiteIndex();
-        if (!Engine::ShowHighlight(g_hoverPath, white >= 0 ? white : 0) && g_hoverLogs < 5)
+        int white = Engine::HoverWhiteId();
+        if (!Engine::ShowHighlight(g_hoverPath, white >= 0 ? white : Engine::HighlightPaletteColourId(0)) && g_hoverLogs < 5)
             Log("attention_area: the railway hover outline could not be created");
         if (white < 0 && InterlockedExchange(&g_whiteMissingLogged, 1) == 0)
-            Log("attention_area: no white outline colour (the renderer's colour table was not changed): hover "
-                "outlines use colour 0");
+            Log("attention_area: no white outline colour (the renderer's colour table was not extended): hover "
+                "outlines use palette colour 0");
     } else if (g_hoverShown && now - g_hoverLast > kHoverHoldMs) {
         g_hoverShown = false;
         if (g_hoverLogs < 5) {
@@ -375,18 +389,21 @@ void ExecAdd(const Args& a, const Scope& s) {
     if (Area* old = FindArea(area.token)) *old = std::move(area);
     else g_areas.push_back(std::move(area));
     g_dirty = true;
+    SyncMarked();
 }
 
 void ExecRemove(const Args& a, const Scope&) {
     if (strcmp(a.key(0), "all") == 0) {
         g_dirty = !g_areas.empty();
         g_areas.clear();
+        SyncMarked();
         return;
     }
     for (size_t i = 0; i < g_areas.size(); ++i)
         if (g_areas[i].token == a.i(0)) {
             g_areas.erase(g_areas.begin() + (long long)i);
             g_dirty = true;
+            SyncMarked();
             return;
         }
 }
@@ -401,12 +418,28 @@ void ExecFocus(const Args& a, const Scope& s) {
 }
 
 bool EvalHas(const Args& a, const Scope&) {
-    for (const Area& area : g_areas)
-        if (area.token == a.i(0)) return true;
-    return false;
+    AcquireSRWLockShared(&g_markedLock);
+    bool found = std::find(g_marked.begin(), g_marked.end(), a.i(0)) != g_marked.end();
+    ReleaseSRWLockShared(&g_markedLock);
+    return found;
 }
 
 // --- Frame, game entry ------------------------------------------------------------------------------
+// The id to draw: a shader that is not usable (failed the compile check) gives the built-in solid
+// line or stripes fill; logged once per shader.
+int Fallback(ShaderPatterns::Kind kind, int id) {
+    if (!id || ShaderPatterns::Usable(kind, id)) return id;
+    bool line = kind == ShaderPatterns::Kind::Line;
+    static std::vector<std::string> logged;
+    const std::string& name = ShaderPatterns::Patterns(kind)[(size_t)id - 1].name;
+    if (std::find(logged.begin(), logged.end(), name) == logged.end()) {
+        logged.push_back(name);
+        Log("attention_area: the %s shader '%s' failed the compile check (see the shader_patterns lines): '%s' is drawn instead",
+            line ? "line" : "fill", name.c_str(), line ? "solid" : "stripes");
+    }
+    return ShaderPatterns::Id(kind, line ? "solid" : "stripes");
+}
+
 void ReleaseOutlines() {
     for (Engine::OutlineRef& o : g_outlines) Engine::ReleaseOutline(&o);
     g_outlines.clear();
@@ -425,33 +458,36 @@ void Redraw() {
     for (size_t i = 0; i < g_areas.size(); ++i) {
         const Area& a = g_areas[i];
         if (a.provinces.empty()) continue;
-        if ((a.fillId && !fillPatched) || (a.lineId && !linePatched)) {
+        // A shader that failed the compile check (NOTES.md M15) is not in the game's shaders: the
+        // built-in solid line or stripes fill is drawn in its place.
+        int fillId = Fallback(ShaderPatterns::Kind::Fill, a.fillId);
+        int lineId = Fallback(ShaderPatterns::Kind::Line, a.lineId);
+        if ((fillId && !fillPatched) || (lineId && !linePatched)) {
             if (InterlockedExchange(&g_unpatchedLogged, 1) == 0)
                 Log("attention_area: a shader file was not patched (fill %d, line %d): such areas show plain stripes and a plain "
                     "outline (logged once)", fillPatched, linePatched);
         }
         // Fill: the area's colour in the stripe texture, the fill shader's id in the alpha byte
         // (unpatched: full-strength vanilla stripes). The texture is BGRA (byte 0 blue, byte 2 red).
-        if (a.fillId && Engine::HaveStripes()) {
+        if (fillId && Engine::HaveStripes()) {
             Engine::StripeArea s;
-            // Patched: the fill id in the alpha byte, the area's alpha in the colour's low bits
-            // (ShaderPatterns::FillTexel). Unpatched: the plain colour at full vanilla strength.
             // Patched: the fill id in the alpha byte, the shader's four values in the colour bytes
             // (its declared variables normalised, else the colour and alpha; FillTexelN).
-            const ShaderPatterns::Pattern& fp = ShaderPatterns::Patterns(ShaderPatterns::Kind::Fill)[(size_t)a.fillId - 1];
+            // Unpatched: the plain colour at full vanilla strength.
+            const ShaderPatterns::Pattern& fp = ShaderPatterns::Patterns(ShaderPatterns::Kind::Fill)[(size_t)fillId - 1];
             float n[4] = {a.r, a.g, a.b, a.a};
             if (!fp.vars.empty())
                 for (int k = 0; k < 4; ++k) n[k] = k < (int)fp.vars.size() ? VarNorm(a, fp.vars[(size_t)k]) : 0.0f;
-            s.rgba = fillPatched ? ShaderPatterns::FillTexelN(a.fillId, n)
+            s.rgba = fillPatched ? ShaderPatterns::FillTexelN(fillId, n)
                                  : byte(a.b) | byte(a.g) << 8 | byte(a.r) << 16 | 255u << 24;
             s.provinces = a.provinces;
             stripes.push_back(std::move(s));
-        } else if (a.fillId && InterlockedExchange(&g_noStripesLogged, 1) == 0) {
+        } else if (fillId && InterlockedExchange(&g_noStripesLogged, 1) == 0) {
             Log("attention_area: the stripe hook is not there: fills are not drawn");
         }
         // Line: one game outline in the area's colour, the line shader's id in the colour's alpha
         // (unpatched: the plain outline in the area's colour).
-        if (!a.lineId) continue;
+        if (!lineId) continue;
         if (!Engine::HaveHighlight()) {
             if (InterlockedExchange(&g_noOutlineLogged, 1) == 0)
                 Log("attention_area: the game's outline functions are not there: lines are not drawn");
@@ -459,19 +495,18 @@ void Redraw() {
         }
         // Patched: the line id and the 4th value in the slot alpha; the first three values in rgb as
         // they are (the declared variables, else the colour).
-        const ShaderPatterns::Pattern& lp = ShaderPatterns::Patterns(ShaderPatterns::Kind::Line)[(size_t)a.lineId - 1];
+        const ShaderPatterns::Pattern& lp = ShaderPatterns::Patterns(ShaderPatterns::Kind::Line)[(size_t)lineId - 1];
         float lv[3] = {a.r, a.g, a.b}, l4 = a.a;
         if (linePatched && !lp.vars.empty()) {
             for (int k = 0; k < 3; ++k) lv[k] = k < (int)lp.vars.size() ? VarValue(a, lp.vars[(size_t)k]) : 0.0f;
             l4 = lp.vars.size() > 3 ? VarNorm(a, lp.vars[3]) : 1.0f;
         }
-        float alpha = linePatched ? ShaderPatterns::LineAlpha(a.lineId, l4) : a.a;
+        float alpha = linePatched ? ShaderPatterns::LineAlpha(lineId, l4) : a.a;
         int colour = Engine::OutlineColourId(lv[0], lv[1], lv[2], alpha);
         if (colour < 0) {
-            colour = Engine::OutlineWhiteId();
-            if (colour < 0) colour = 10;  // palette colour 0
+            colour = Engine::HighlightPaletteColourId(0);
             if (InterlockedExchange(&g_noColourLogged, 1) == 0)
-                Log("attention_area: no free outline colour (the renderer's colour table was not extended, or more than 32 "
+                Log("attention_area: no free outline colour (the renderer's colour table was not extended, or more than 31 "
                     "colours are in use): such outlines use colour %d (logged once)", colour);
         }
         Engine::OutlineRef ref;
@@ -525,6 +560,7 @@ void Frame() {
 
 void OnEntering() {
     g_areas.clear();
+    SyncMarked();
     g_addCount = 0;  // every machine of a multiplayer game enters it fresh
     g_dirty = false;
     g_focusPending = false;
@@ -540,14 +576,18 @@ void OnEntering() {
 
 // The game's shader files as they are read (NOTES.md M10-M12): the line and fill shaders stitched in.
 static std::string PatchFillFile(const std::string& original) {
+    ShaderPatterns::Validate();  // once, before the first patch: the mod shaders' compile check
     std::string out = ShaderPatterns::PatchFillShader(original, ShaderPatterns::Patterns(ShaderPatterns::Kind::Fill));
     ShaderPatterns::SetPatched(ShaderPatterns::Kind::Fill, !out.empty());
+    // From now on the game's own stripe alphas are kept out of the fill ids' range (NOTES.md M15).
+    Engine::SetStripeIdRange(out.empty() ? 0 : (int)ShaderPatterns::Patterns(ShaderPatterns::Kind::Fill).size());
     Log("shader_patterns: standardfuncsgfx.fxh %s", out.empty() ? "NOT patched (secondary_color_mask not found as expected): fills show as plain stripes"
                                                                  : "patched with the fill shaders");
     g_dirty = true;  // areas drawn before this (none in practice: the map shaders load first) are redone
     return out;
 }
 static std::string PatchLineFile(const std::string& original) {
+    ShaderPatterns::Validate();
     std::string out = ShaderPatterns::PatchLineShader(original, ShaderPatterns::Patterns(ShaderPatterns::Kind::Line));
     ShaderPatterns::SetPatched(ShaderPatterns::Kind::Line, !out.empty());
     Log("shader_patterns: border.shader %s", out.empty() ? "NOT patched (its pixel shader main not found as expected): lines show as plain outlines"
@@ -566,12 +606,24 @@ bool AttentionAreaInit() {
         Log("attention_area: needs the main-thread frame hook; off");
         return false;
     }
-    ShaderPatterns::Collect();  // the built-ins at least, so both patches always apply
+    ShaderPatterns::Collect();  // the built-ins at least
     BuildVarKeys();
-    if (!register_file_patch(L"gfx/FX/standardfuncsgfx.fxh", &PatchFillFile))
-        Log("shader_patterns: the standardfuncsgfx.fxh patch could not be registered: fills show as plain stripes");
-    if (!register_file_patch(L"gfx/FX/border.shader", &PatchLineFile))
-        Log("shader_patterns: the border.shader patch could not be registered: lines show as plain outlines");
+    // The game's map shaders are patched only when an enabled mod uses attention areas (ships
+    // shaders or the marker patch_map_shaders.txt): every other player keeps the game's own shaders and
+    // has no shader recompile (NOTES.md M15). Without the patch, areas show as plain outlines and
+    // stripes.
+    std::string usedBy;
+    if (!ShaderPatterns::UsedByMods(&usedBy)) {
+        Log("shader_patterns: no enabled mod asks for attention area shaders (none ships files in "
+            "gfx/FX/hoi4_loader_patterns, such as its own shaders or patch_map_shaders.txt): the game's map shaders are "
+            "left alone; areas show as plain outlines and stripes");
+    } else {
+        Log("shader_patterns: %s: the map shaders will be patched", usedBy.c_str());
+        if (!register_file_patch(L"gfx/FX/standardfuncsgfx.fxh", &PatchFillFile))
+            Log("shader_patterns: the standardfuncsgfx.fxh patch could not be registered: fills show as plain stripes");
+        if (!register_file_patch(L"gfx/FX/border.shader", &PatchLineFile))
+            Log("shader_patterns: the border.shader patch could not be registered: lines show as plain outlines");
+    }
     std::vector<ParamSpec> add = {
         {"id", ParamType::Token, true},
         {"line", ParamType::Token, false},
@@ -622,9 +674,9 @@ bool AttentionAreaInit() {
     OnGameEntering(&OnEntering);
     // Optional: the hovered railway queue entry is marked (railway_queue's tooltip hook).
     bool hover = Engine::HaveHighlight() && FeatureActive("railway_queue") && Engine::SetRailwayHoverHandler(&OnRailwayHover);
-    // The outline colours: white (colour 14) and the extra colours of the areas' lines, written into
-    // the renderer's outline colour table when it is built.
-    if (Engine::HaveHighlight() && !Engine::HookHighlightWhite())
+    // The outline colours: the loader's slots (the areas' line colours and the hover mark's white),
+    // appended to the renderer's outline colour table when it is built.
+    if (Engine::HaveHighlight() && !Engine::HookOutlineColourTable())
         Log("attention_area: the outline colour hook is not there; lines use the game's palette colours");
     bool rightClick = hover && Engine::HookCentreOnProvince(&OnCentre);
     if (hover && !Engine::HookHoveredProvince(&IsHoveredLineEnd))

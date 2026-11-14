@@ -14,9 +14,10 @@
 // Fill: vColor is the map colour there, vUV the map position (0..1 over the whole map, v growing
 // southwards), vMask the area's colour (rgb) and alpha (a), Mask the stripe texture, for HL_EdgeDistance( Mask, vUV, fMaxPixels ): map pixels to the area's edge (up to the
 // maximum). Returns the new map colour.
-// Both may use the game's shader globals and helpers (vGlobalTime, cam_distance, ...). border.shader
-// includes standardfuncsgfx.fxh, so its pixel shader holds the fill code as well as the line code:
-// helper names must be unique across both kinds.
+// Both may use the documented interface only (see CheckSourceFill below); a mod's shader is
+// compile-checked against it before it goes into the game's shaders. border.shader includes
+// standardfuncsgfx.fxh, so its pixel shader holds the fill code as well as the line code: helper
+// names must be unique across both kinds.
 //
 // Ids are 1-based, in name order of the built-ins and all enabled mods' files (a name in several
 // places: the later mod in the load order wins over earlier ones and over the built-in), so every
@@ -48,6 +49,8 @@ struct Pattern {
     std::string code;    // the HLSL
     std::string source;  // where it came from (for the log)
     std::vector<Var> vars;  // declared variables (empty: the implicit colour)
+    bool fromMod = false;   // a mod's file (checked by Validate), not a built-in
+    bool usable = true;     // false: failed the compile check; left out of the game's shaders
 };
 
 // The // hoi4_loader_variables: line of a shader's code: false (with the reason) if it is malformed.
@@ -84,23 +87,44 @@ const std::vector<Pattern>& Builtins(Kind kind);
 
 // Pure text work (tested by tests/shader_patterns_test.cpp):
 bool ValidName(const std::string& name);
-// The enabled mods' .mod paths ("mod/x.mod") from dlc_load.json's text, in order.
-std::vector<std::string> EnabledMods(const std::string& dlcLoadJson);
-// The `path="..."` of a .mod descriptor's text, or "".
-std::string ModPath(const std::string& descriptor);
 // standardfuncsgfx.fxh with HL_EdgeDistance, the fill patterns and the dispatcher added (vanilla
 // secondary_color_mask renamed and called for everything else), or "" if the file is not shaped as
-// expected.
+// expected. Patterns that are not usable are left out (their ids have no case: the area falls back).
 std::string PatchFillShader(const std::string& fxh, const std::vector<Pattern>& fills);
 // border.shader with the line patterns and the dispatcher added (the vanilla pixel shader main
 // renamed and called first), or "" if the file is not shaped as expected.
 std::string PatchLineShader(const std::string& shader, const std::vector<Pattern>& lines);
 
-// Reads dlc_load.json and the enabled mods' pattern folders once (later calls return the same).
+// The compile check (NOTES.md M15). A mod's shader may use only the documented interface: HLSL
+// intrinsics, sampler2D / tex2D / tex2Dlod (the game's DX11 macros), vGlobalTime, MAP_SIZE_X /
+// MAP_SIZE_Y, vec2/vec3/vec4, mod, fmod_loop, CalculateOccupationMask (the game's stripe pattern),
+// cam_distance; fills also HL_EdgeDistance; lines also BORDER_TILE and HL_LineAlpha. CheckSourceFill: the fill patterns alone, as every map shader including
+// standardfuncsgfx.fxh sees them; CheckSourceBorder: fills and lines together, as border.shader
+// holds both (so helper names must be unique across the two kinds). Each has a ps_5_0 `main` that
+// calls every usable pattern (an uncalled function is not fully checked).
+std::string CheckSourceFill(const std::vector<Pattern>& fills);
+std::string CheckSourceBorder(const std::vector<Pattern>& fills, const std::vector<Pattern>& lines);
+// Compiles HLSL with the system's d3dcompiler_47.dll (loaded on first use; ps_5_0, entry main).
+// False with the compiler's first error lines in *errors; *available = false if there is no
+// compiler. Not for DllMain (it loads a DLL).
+bool CompileCheck(const std::string& hlsl, std::string* errors, bool* available);
+
+// Reads the enabled mods (mod_list.h) and their pattern folders once (later calls return the same).
+// Also notes whether any enabled mod wants the map shaders patched: it ships shaders, or the marker
+// gfx/FX/hoi4_loader_patterns/patch_map_shaders.txt (a mod that uses only the built-in shaders).
 void Collect();
+// Whether an enabled mod uses the feature (why: which mod and how, for the log).
+bool UsedByMods(std::string* why);
+// Once, before the shader files are patched (the first file patch call; not in DllMain): compile-
+// checks every mod's shader (CheckSource*, CompileCheck); one that fails is logged and marked not
+// usable, a failing replacement of a built-in gives the built-in back. Without a compiler, or if the
+// built-ins themselves fail the check, every mod shader is left out (built-ins only).
+void Validate();
 const std::vector<Pattern>& Patterns(Kind kind);
 // 1-based id of a pattern name (any case), 0 if there is none by that name.
 int Id(Kind kind, const std::string& name);
+// Whether the pattern with this id may be drawn (exists and passed the check).
+bool Usable(Kind kind, int id);
 // Whether the game's shader file for this kind was patched (set by the file patch when the game
 // reads it; until then, and if the patch failed, the dispatch is not there).
 void SetPatched(Kind kind, bool patched);

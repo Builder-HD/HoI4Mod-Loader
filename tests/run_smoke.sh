@@ -32,6 +32,11 @@ out=$("$BUILD/tests/air_scenarios_test.exe"); trc=$?
 echo "$out" | grep -E 'FAIL|air_scenarios_test:'
 [ "$trc" = 0 ] || rc=1
 
+echo "===== 0a3) shader patterns: stitching, the mod shaders' compile check (attention_area)"
+out=$("$BUILD/tests/shader_patterns_test.exe"); trc=$?
+echo "$out" | grep -E 'FAIL|note:|shader_patterns_test:'
+[ "$trc" = 0 ] || rc=1
+
 echo "===== 0b) test mod stub clears every feature flag; MODDING.md lists every feature; docs links"
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 STUB="$SRC/mod/hoi4_loader_test/common/scripted_effects/hoi4_loader_detect.txt"

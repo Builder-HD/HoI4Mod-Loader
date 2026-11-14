@@ -5928,3 +5928,76 @@ eleven gradient-border signatures).
 **Not in the chain:** the local branch `area-selector` (a refactor of the old attention code into
 `area_select.cpp` and `engine_province_data.cpp`, M4) predates `state = this`, `random_provinces`
 and the shader parameters, so it no longer applies; it needs porting onto 3 by hand.
+
+## M15: the #19 review (2026-11-14, owner Builder-HD)
+
+The review held #17 to #20 open for two problems that affect every loader user, plus smaller
+points. All are fixed on `feature/attention-shaders` (#19), the formatting of #18 on #18's own
+branch. #17 and #18 are meant to be merged only together with #19: their behavioural points are
+fixed where their code ends up, in #19.
+
+**1. The map shaders were patched for everyone.** `AttentionAreaInit` registered the patches of
+`border.shader` and `standardfuncsgfx.fxh` whenever the feature was on (the default), so every
+player got the dispatcher and a shader recompile. Now `ShaderPatterns::Collect` also notes whether
+an enabled mod asks for the patch: it ships a shader in `gfx/FX/hoi4_loader_patterns/{fill,line}/`,
+or (a mod that uses only the built-in shaders) the marker file
+`gfx/FX/hoi4_loader_patterns/patch_map_shaders.txt`. Only then are the two patches registered;
+otherwise the log says so and areas show as plain outlines and stripes. One file check per mod;
+scanning every mod's script for `add_attention_area` would read every script file of big mods in
+DllMain. (A first version used the feature's guard stub
+`common/scripted_triggers/hoi4_loader_feature_attention_area.txt` as the signal; the owner asked
+for a name that says what it does, and the guard stays only a guard.)
+
+**2. A broken mod shader broke the map.** Mod shaders are now compile-checked once, in the first
+shader file patch call (the game's loading thread; not DllMain, as it loads a DLL; the vfs lock
+held there is only taken for patched paths, so `LoadLibrary`'s own file opens don't deadlock):
+- The compiler is the system's `d3dcompiler_47.dll` (`src/shader_check.cpp`, `D3DCompile`, ps_5_0).
+- The source is a harness of the documented interface (`CheckSourceFill` / `CheckSourceBorder` in
+  `shader_patterns.cpp`): the game's DX11 preamble as far as needed (`sampler2D`, `tex2D*`, `vec*`,
+  `mod`, `fmod_loop`, map size), `vGlobalTime`, `cam_distance`, `CalculateOccupationMask`,
+  `HL_EdgeDistance`; for the border source also `BORDER_TILE` and `HL_LineAlpha`. A `main` calls
+  every pattern (an uncalled function is not fully checked).
+- The built-ins first: if they fail, the harness does not fit the game and every mod shader is
+  left out. Then each mod shader on top of those that passed, fills (alone and in the border
+  source) then lines: a failure is that shader's. It is logged with the compiler's error and marked
+  not usable: no code and no dispatch case in the patched shaders, and `Redraw` draws `solid` /
+  `stripes` for its areas. A failing replacement of a built-in gives the built-in back. Ids never
+  shift (a rejected shader keeps its id), so machines with the same mods agree.
+- Not caught: a name clash with the game's own shader code (the harness doesn't hold it). MODDING
+  lists what a shader may use and says to prefix helpers.
+- `shader_patterns_test` runs it (now also in the smoke test): built-ins and the test mod's six
+  shaders pass; an undeclared name, a fill using `BORDER_TILE` and a fill/line helper clash fail.
+  The first run found that the built-in `stripes` calls `CalculateOccupationMask`, so it is part of
+  the interface.
+
+**Fill marker alpha 255 - id.** Whether the game itself ever writes alphas 223..254 into
+`secondary_color_mask` (occupation, claims, battle plans, supply) is not proven from the exe. The
+loader no longer depends on it: while the fill shader is patched (`SetStripeIdRange`, the number of
+fill ids), the paint hook moves a game alpha in 255 - n .. 254 of a province no area holds to the
+nearer value outside that range (at most n/255 of stripe strength) and logs each such value once
+("the game wrote stripe alpha ..."). An in-game session with those map modes shows whether it
+happens at all.
+
+**Smaller points:**
+- **One dlc_load.json parser.** `src/mod_list.h/.cpp` (`ModList`): `ParseDlcLoad`,
+  `ParseDescriptor` (a small tokenizer of its own: quoted and bare values, blocks skipped, `#`
+  comments) and `Enabled(userDir)` (descriptor paths and mod folders resolved). air_scenarios and
+  the shader collector use it; `ShaderPatterns::EnabledMods`/`ModPath` are gone. Tested in
+  `air_scenarios_test` (two new descriptor cases).
+- **`HOI4_LOADER_USER_DIR`** is honoured only when the exe exports `hoi4_loader_smoke_standin`
+  (`tests/smoke.cpp`); the game ignores it. DEVELOPING documents it.
+- **`has_attention_area` without a lock (#17).** The trigger now reads `g_marked`, a copy of the
+  marked ids under an SRW lock, refreshed after every change of `g_areas` (add, remove, game entry).
+- **Hot-join (#17).** MODDING warns that `has_attention_area` must not drive game logic in
+  multiplayer; the test mod's decisions dropped it from `available` (it stays in `visible`).
+- **Palette colour 14 stayed white (#18).** The hover mark no longer changes a vanilla colour: it
+  uses the last of the loader's 32 appended colour slots, reserved for white (`HoverWhiteId`;
+  areas get the other 31). `WhiteRaw` and the colour 14 overwrite are gone.
+- **Formatting (#18):** `SetAttentionDraw`'s comment on its own line, `kCodeBorderCtorLayer` back
+  under its comment, `gui_patch.cpp`'s final newline. Fixed on #18's branch; the branches above
+  were rebased onto it.
+
+**Checks:** Release build clean; smoke test (now with `shader_patterns_test`, 61 checks),
+`air_scenarios_test`, `native_script_test`. **Not run in game:** the use detection (the log line
+"... the map shaders will be patched" or "... left alone"), the compile check in the game process
+("compile check of N mod shader(s)"), the alpha guard, the hover mark's white slot.

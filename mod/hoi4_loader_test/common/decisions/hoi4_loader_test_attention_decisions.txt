@@ -3,7 +3,8 @@
 # they stay hidden. Every look is a shader: line = <shader> for the outline, fill = <shader> for the
 # provinces. Built-ins: lines solid, pulse, dashed; fills stripes, solid, band, glow. The test mod
 # adds matrix_rain, inferno and fire_edge (fills) and marching_ants, fire_line and dna_helix (lines)
-# in gfx/FX/hoi4_loader_patterns.
+# in gfx/FX/hoi4_loader_patterns. has_attention_area appears only in `visible` (display): areas are
+# not saved, so a player who hot-joins has none, and game logic must not depend on them (MODDING.md).
 hoi4_loader_attention_category = {
 
 	# The coastal provinces China owns: a cyan outline (line = solid, the default when neither line
@@ -13,7 +14,6 @@ hoi4_loader_attention_category = {
 		cost = 0
 		fire_only_once = no
 		visible = { hoi4_loader_feature_attention_area = yes }
-		available = { NOT = { has_attention_area = chi_coast } }
 		complete_effect = {
 			add_attention_area = {
 				id = chi_coast
@@ -32,7 +32,6 @@ hoi4_loader_attention_category = {
 		cost = 0
 		fire_only_once = no
 		visible = { hoi4_loader_feature_attention_area = yes }
-		available = { NOT = { has_attention_area = swe_coast } }
 		complete_effect = {
 			add_attention_area = {
 				id = swe_coast
@@ -53,7 +52,6 @@ hoi4_loader_attention_category = {
 		cost = 0
 		fire_only_once = no
 		visible = { hoi4_loader_feature_attention_area = yes }
-		available = { NOT = { has_attention_area = by_ids } }
 		complete_effect = {
 			add_attention_area = {
 				id = by_ids
@@ -110,7 +108,6 @@ hoi4_loader_attention_category = {
 		cost = 0
 		fire_only_once = no
 		visible = { hoi4_loader_feature_attention_area = yes }
-		available = { NOT = { has_attention_area = stripes_test } }
 		complete_effect = {
 			add_attention_area = {
 				id = stripes_test
@@ -131,7 +128,6 @@ hoi4_loader_attention_category = {
 		cost = 0
 		fire_only_once = no
 		visible = { hoi4_loader_feature_attention_area = yes }
-		available = { NOT = { has_attention_area = matrix_test } }
 		complete_effect = {
 			add_attention_area = {
 				id = matrix_test
@@ -151,7 +147,6 @@ hoi4_loader_attention_category = {
 		cost = 0
 		fire_only_once = no
 		visible = { hoi4_loader_feature_attention_area = yes }
-		available = { NOT = { has_attention_area = matrix_china } }
 		complete_effect = {
 			add_attention_area = {
 				id = matrix_china

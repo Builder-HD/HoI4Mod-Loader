@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "../src/air_scenarios.h"
+#include "../src/mod_list.h"
 
 static int g_checks = 0, g_failed = 0;
 static void Check(bool ok, const char* what) {
@@ -92,20 +93,25 @@ int main() {
     Merge(&all, later);
     Check(all.size() == 3 && all[0].entity == "two_entity" && all[2].name == "c", "merge: replace by name, append new");
 
-    // --- dlc_load.json and descriptors ---------------------------------------------------------
+    // --- dlc_load.json and descriptors (src/mod_list.cpp, shared with the shader collector) -----
     std::vector<std::string> mods;
-    Check(ParseDlcLoad("{\n  \"enabled_mods\": [\n    \"mod/a.mod\",\n    \"mod/ugc_1.mod\"\n  ],\n  \"disabled_dlcs\": []\n}", &mods) &&
+    Check(ModList::ParseDlcLoad("{\n  \"enabled_mods\": [\n    \"mod/a.mod\",\n    \"mod/ugc_1.mod\"\n  ],\n  \"disabled_dlcs\": []\n}", &mods) &&
               mods.size() == 2 && mods[1] == "mod/ugc_1.mod",
           "dlc_load.json: two mods in order");
-    Check(ParseDlcLoad("{ \"enabled_mods\": [] }", &mods) && mods.empty(), "dlc_load.json: none");
-    Check(!ParseDlcLoad("{}", &mods), "dlc_load.json: no enabled_mods");
-    ModDescriptor md;
-    Check(ParseDescriptor("version=\"1.0\"\ntags={\n\t\"Graphics\"\n}\nname=\"Air Test\"\nreplace_path=\"common/x\"\n"
-                          "path=\"C:/test/air\"\n",
-                          &md) &&
+    Check(ModList::ParseDlcLoad("{ \"enabled_mods\": [] }", &mods) && mods.empty(), "dlc_load.json: none");
+    Check(!ModList::ParseDlcLoad("{}", &mods), "dlc_load.json: no enabled_mods");
+    ModList::ModDescriptor md;
+    Check(ModList::ParseDescriptor("version=\"1.0\"\ntags={\n\t\"Graphics\"\n}\nname=\"Air Test\"\nreplace_path=\"common/x\"\n"
+                                   "path=\"C:/test/air\"\n",
+                                   &md) &&
               md.path == "C:/test/air" && md.name == "Air Test" && md.replacePaths.size() == 1,
           "descriptor: path, name, replace_path");
-    Check(!ParseDescriptor("name=\"no path\"\n", &md), "descriptor: no path");
+    Check(!ModList::ParseDescriptor("name=\"no path\"\n", &md), "descriptor: no path");
+    Check(ModList::ParseDescriptor("# path=\"commented\"\nname = \"Zip\" archive = \"mod/zip.zip\"\n", &md) && md.path.empty() &&
+              md.archive == "mod/zip.zip" && md.name == "Zip",
+          "descriptor: archive, comment ignored");
+    Check(ModList::ParseDescriptor("tags = { path = \"inner\" }\npath = mod/plain\n", &md) && md.path == "mod/plain",
+          "descriptor: path in a block ignored, bare value read");
 
     // --- Matching -----------------------------------------------------------------------------
     Side side;

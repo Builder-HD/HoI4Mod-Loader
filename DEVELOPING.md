@@ -154,8 +154,10 @@ Delete the file to force a rehash. The cache is a speed-up, not a security bound
 
 - `<Documents>\Paradox Interactive\Hearts of Iron IV\loader.log`: rewritten on every launch. If
   another hoi4.exe holds it open, the loader writes `loader.<pid>.log` instead. The environment
-  variable `HOI4_LOADER_USER_DIR` replaces that folder (log, generated docs, `dlc_load.json`); it
-  exists for the smoke test.
+  variable `HOI4_LOADER_USER_DIR` replaces that folder (log, generated docs, `dlc_load.json`), but
+  only in the smoke test's stand-in executables: they export `hoi4_loader_smoke_standin`
+  (`tests/smoke.cpp`), and the loader ignores the variable in any exe without that export, the game
+  included.
 - `%TEMP%\hoi4_loader\`: generated virtual files (safe to delete).
 - `%LOCALAPPDATA%\hoi4_loader\hash_cache.ini`: hash cache (safe to delete).
 
@@ -385,8 +387,10 @@ button goes, files left alone, comments, CRLF). Given file paths as arguments it
 files, e.g. the game's `interface\countrystateview.gui`.
 
 Then `shader_patterns_test`: the shader pattern stitching (NOTES.md M11) on vanilla-shaped
-snippets; given the game's `gfx\FX` folder as argument it also patches the real
-`standardfuncsgfx.fxh` and `border.shader`. As a developer aid,
+snippets, and the mod shaders' compile check (M15) with the system's `d3dcompiler_47.dll`: the
+built-ins and the test mod's shaders pass, a broken shader, a fill using `BORDER_TILE` and a helper
+name clash between a fill and a line fail. Given the game's `gfx\FX` folder as argument it also
+patches the real `standardfuncsgfx.fxh` and `border.shader`. As a developer aid,
 `shader_patterns_test --splice <fill|outline> <cached .scache> <pattern.hlsl> <name> <out.hlsl>`
 applies a pattern to one of the game's cached, fully assembled shader sources
 (`Documents\Paradox Interactive\Hearts of Iron IV\shadercache\dx11_win32\ps_5_0`), so it can be

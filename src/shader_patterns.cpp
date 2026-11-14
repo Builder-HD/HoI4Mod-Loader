@@ -126,28 +126,73 @@ bool ValidName(const std::string& name) {
     return true;
 }
 
-std::vector<std::string> EnabledMods(const std::string& json) {
-    std::vector<std::string> out;
-    size_t key = json.find("\"enabled_mods\"");
-    if (key == std::string::npos) return out;
-    size_t open = json.find('[', key), close = json.find(']', key);
-    if (open == std::string::npos || close == std::string::npos || close < open) return out;
-    size_t i = open;
-    while (true) {
-        size_t a = json.find('"', i + 1);
-        if (a == std::string::npos || a > close) break;
-        size_t b = json.find('"', a + 1);
-        if (b == std::string::npos || b > close) break;
-        out.push_back(json.substr(a + 1, b - a - 1));
-        i = b;
-    }
-    return out;
+// --- The compile check's sources (NOTES.md M15) ------------------------------------------------------
+namespace {
+
+// The game's DX11 shader preamble, as far as the documented interface needs it (taken from the
+// game's assembled shader sources in its shader cache), plus the loader's own globals.
+const char kCheckPreamble[] =
+    "#define PDX_DIRECTX_11\n"
+    "#define PIXEL_SHADER\n"
+    "#define MAP_SIZE_X 5632.000\n"
+    "#define MAP_SIZE_Y 2048.000\n"
+    "#define mod( X, Y ) ( X % Y )\n"
+    "float2 vec2(float vValue) { return float2(vValue, vValue); }\n"
+    "float3 vec3(float vValue) { return float3(vValue, vValue, vValue); }\n"
+    "float4 vec4(float vValue) { return float4(vValue, vValue, vValue, vValue); }\n"
+    "struct STextureSampler2D { Texture2D _Texture; SamplerState _Sampler; };\n"
+    "STextureSampler2D CreateSampler2D( Texture2D Texture, SamplerState Sampler ) { STextureSampler2D ret = { Texture, Sampler }; return ret; }\n"
+    "#define sampler2D STextureSampler2D\n"
+    "#define tex2D(samp,uv) samp._Texture.Sample(samp._Sampler, uv)\n"
+    "#define tex2Dlod(samp,uv_lod) samp._Texture.SampleLevel(samp._Sampler, (uv_lod).xy, (uv_lod).w)\n"
+    "#define tex2Dlod0(samp,uv_lod) samp._Texture.SampleLevel(samp._Sampler, (uv_lod).xy, 0)\n"
+    "#define tex2Dbias(samp,uv_bias) samp._Texture.SampleBias(samp._Sampler, (uv_bias).xy, (uv_bias).w)\n"
+    "#define tex2Dgrad(samp,uv,ddx,ddy) samp._Texture.SampleGrad(samp._Sampler, uv, ddx, ddy)\n"
+    "float fmod_loop( float x, float y ) { return x - y * floor( x / y ); }\n"
+    "Texture2D HL_CheckMask_Texture : register(t0);\n"
+    "SamplerState HL_CheckMask_Sampler : register(s0);\n"
+    "#define HL_CheckMask CreateSampler2D(HL_CheckMask_Texture, HL_CheckMask_Sampler)\n"
+    "cbuffer HL_CheckConstants : register(b0) { float vGlobalTime; };\n"
+    // standardfuncsgfx.fxh's own helpers before secondary_color_mask (same signatures; the bodies
+    // only have to compile here).
+    "float cam_distance( float vMin, float vMax ) { return saturate( ( vMax - vMin ) * 0.0f ); }\n"
+    "float CalculateOccupationMask( in float2 uv ) { return cos( uv.x + uv.y ); }\n";
+
+std::string CheckFillPart(const std::vector<Pattern>& fills) {
+    std::string s = kEdgeHelper;
+    for (const Pattern& p : fills)
+        if (p.usable) s += EmitPattern(p, "F", "\t");
+    return s;
 }
 
-std::string ModPath(const std::string& descriptor) {
-    static const std::regex kPath("(^|\\n)\\s*path\\s*=\\s*\"([^\"]*)\"");
-    std::smatch m;
-    return std::regex_search(descriptor, m, kPath) ? m[2].str() : std::string();
+std::string CheckLinePart(const std::vector<Pattern>& lines) {
+    std::string s = "static const float BORDER_TILE = 0.4f;\nstatic float HL_LineAlpha = 1.0f;\n";
+    for (const Pattern& p : lines)
+        if (p.usable) s += EmitPattern(p, "L", "\t");
+    return s;
+}
+
+std::string CheckMain(const std::vector<Pattern>& fills, const std::vector<Pattern>* lines) {
+    std::string s = "float4 main( float4 vHlPos : SV_POSITION, float2 vHlUV : TEXCOORD0 ) : SV_TARGET\n{\n";
+    s += "\tfloat4 vHlSum = float4( 0.0f, 0.0f, 0.0f, 0.0f );\n";
+    for (const Pattern& p : fills)
+        if (p.usable)
+            s += "\tvHlSum.rgb += HL_Fill_" + p.name + "( float3( vHlUV, 0.5f ), vHlUV, float4( vHlUV, vHlUV ), HL_CheckMask );\n";
+    if (lines)
+        for (const Pattern& p : *lines)
+            if (p.usable)
+                s += "\tvHlSum += HL_Line_" + p.name + "( float4( vHlUV, 0.5f, 1.0f ), float3( vHlUV, 0.5f ), vHlUV, vHlPos.xyz );\n";
+    return s + "\treturn vHlSum;\n}\n";
+}
+
+}  // namespace
+
+std::string CheckSourceFill(const std::vector<Pattern>& fills) {
+    return std::string(kCheckPreamble) + CheckFillPart(fills) + CheckMain(fills, nullptr);
+}
+
+std::string CheckSourceBorder(const std::vector<Pattern>& fills, const std::vector<Pattern>& lines) {
+    return std::string(kCheckPreamble) + CheckFillPart(fills) + CheckLinePart(lines) + CheckMain(fills, &lines);
 }
 
 std::string PatchFillShader(const std::string& fxh, const std::vector<Pattern>& fills) {
@@ -168,14 +213,18 @@ std::string PatchFillShader(const std::string& fxh, const std::vector<Pattern>& 
     add += Line("\t\tint3 nLo = nB & 3;");
     add += Line("\t\treturn float4( float3( nB >> 2 ), (float)( nLo.r * 16 + nLo.g * 4 + nLo.b ) ) / 63.0f;");
     add += Line("\t}");
-    for (const Pattern& p : fills) add += EmitPattern(p, "F", "\t");
+    for (const Pattern& p : fills)
+        if (p.usable) add += EmitPattern(p, "F", "\t");
     add += Line("\tfloat3 HL_FillDispatch( int nId, float3 vColor, float2 vUV, float4 vMask, in sampler2D Mask )");
     add += Line("\t{");
     add += Line("\t\tfloat3 vHlOut = vColor;");
     const std::string kFillSrc[4] = {"vMask.r", "vMask.g", "vMask.b", "vMask.a"};
     const bool kFillNorm[4] = {true, true, true, true};
+    bool first = true;
     for (size_t i = 0; i < fills.size(); ++i) {
-        add += Line(std::string("\t\t") + (i ? "else " : "") + "if ( nId == " + std::to_string(i + 1) + " )");
+        if (!fills[i].usable) continue;  // its id has no case: the plugin draws a fallback instead
+        add += Line(std::string("\t\t") + (first ? "" : "else ") + "if ( nId == " + std::to_string(i + 1) + " )");
+        first = false;
         add += Line("\t\t{");
         add += AssignVars(fills[i], "F", kFillSrc, kFillNorm, "\t\t\t");
         add += Line("\t\t\tvHlOut = HL_Fill_" + fills[i].name + "( vColor, vUV, vMask, Mask );");
@@ -286,7 +335,8 @@ std::string PatchLineShader(const std::string& shader, const std::vector<Pattern
 
     std::string add = Line("\t\t// --- hoi4_loader line shaders (NOTES.md M11/M12) ---");
     add += Line("\t\tstatic float HL_LineAlpha = 1.0f;  // the area's alpha, set before each line shader runs");
-    for (const Pattern& p : lines) add += EmitPattern(p, "L", "\t\t");
+    for (const Pattern& p : lines)
+        if (p.usable) add += EmitPattern(p, "L", "\t\t");
     add += Line("\t\tfloat4 HL_LineDispatch( int nId, float4 vColor, float3 vAreaColor, float2 vUV, float3 vPos )");
     add += Line("\t\t{");
     add += Line("\t\t\tfloat4 vHlRes = vColor;");
@@ -294,8 +344,11 @@ std::string PatchLineShader(const std::string& shader, const std::vector<Pattern
     // fourth the slot alpha's 0..1 part.
     const std::string kLineSrc[4] = {"vAreaColor.r", "vAreaColor.g", "vAreaColor.b", "HL_LineAlpha"};
     const bool kLineNorm[4] = {false, false, false, true};
+    bool first = true;
     for (size_t i = 0; i < lines.size(); ++i) {
-        add += Line(std::string("\t\t\t") + (i ? "else " : "") + "if ( nId == " + std::to_string(i + 1) + " )");
+        if (!lines[i].usable) continue;
+        add += Line(std::string("\t\t\t") + (first ? "" : "else ") + "if ( nId == " + std::to_string(i + 1) + " )");
+        first = false;
         add += Line("\t\t\t{");
         add += AssignVars(lines[i], "L", kLineSrc, kLineNorm, "\t\t\t\t");
         add += Line("\t\t\t\tvHlRes = HL_Line_" + lines[i].name + "( vColor, vAreaColor, vUV, vPos );");

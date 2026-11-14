@@ -1425,6 +1425,16 @@ scenarios play. The mod's extra entities are unused. Guard: `hoi4_loader_feature
 > game (outlines, stripes, mod fill and line shaders); `shader_variables` and alpha in shaders are
 > not yet. Don't build a released mod on it yet.
 
+**The game's map shaders are only touched for mods that ask for it.** The loader patches
+`border.shader` and `standardfuncsgfx.fxh` only when an enabled mod ships something in
+`gfx/FX/hoi4_loader_patterns/`:
+- its own shaders (`line/*.hlsl`, `fill/*.hlsl`, see **Your own shaders** below), or
+- if it uses only the built-in shaders, the marker file
+  `gfx/FX/hoi4_loader_patterns/patch_map_shaders.txt` (any content, even empty).
+
+Every other player keeps the game's own shaders and gets no shader recompile. Without the patch,
+`add_attention_area` still works, but areas show as plain outlines and stripes in their colour.
+
 Mark any set of provinces on the map and move the camera there. Every look is a shader: an area
 has a **line** shader for its outline and a **fill** shader for its provinces, chosen by name.
 The loader ships a few, and mods add their own. Display only: nothing in the game state changes,
@@ -1474,7 +1484,7 @@ has_attention_area = chi_coast                         # trigger
 
 One outline goes around the whole area, not around each province. Lines are the game's thin
 province group outline (the one construction mode draws around build targets), so they show in
-every map mode; up to 32 colours at a time, and where two areas share an edge the earlier area's
+every map mode; up to 31 colours at a time, and where two areas share an edge the earlier area's
 line shows. Fills go through the map's stripe texture, also in every map mode; a filled province
 shows the area's fill instead of the game's own stripes (occupation, supply) while marked.
 
@@ -1508,9 +1518,22 @@ mod replaces a game shader file and shaders from several mods work side by side.
   fourth in about a million steps. The variables replace the colour channels, so a line shader with
   variables gets no `vAreaColor` colour, and a fill shader's `vMask` holds the variables normalised.
   Names: lowercase letters, digits and `_`, not a shader word (`min`, `max`, `float`, ...).
-- Shaders can use the game's shader globals and helpers, such as `vGlobalTime` for animation.
+- **What a shader may use:** HLSL itself; `sampler2D`, `tex2D`, `tex2Dlod`, `tex2Dlod0`,
+  `tex2Dbias`, `tex2Dgrad` (the game's DX11 macros); `vGlobalTime` (seconds, for animation),
+  `MAP_SIZE_X`, `MAP_SIZE_Y`, `vec2`/`vec3`/`vec4`, `mod`, `fmod_loop`, `cam_distance`,
+  `CalculateOccupationMask` (the game's stripe pattern); fills also `HL_EdgeDistance`; lines also
+  `BORDER_TILE` and `HL_LineAlpha`. Nothing else of the game's shaders: other names differ between
+  the shaders the code ends up in.
+- **Compile check.** Before the loader patches the game's shaders, it compiles every mod shader
+  against exactly that interface (the system's DirectX compiler, `d3dcompiler_47.dll`). A shader that
+  fails is logged with the compiler's error (`shader_patterns: ... failed the compile check`) and
+  left out: areas using it draw `solid` (line) or `stripes` (fill) instead, and a failing
+  replacement of a built-in gives the built-in back. So a broken mod shader can't break the map.
+  Without a compiler, every mod shader is left out (built-ins only). The check can't see a name
+  clash with the game's own shader code: prefix your helpers.
 - `border.shader` includes `standardfuncsgfx.fxh`, so the border's pixel shader holds the fill
-  shaders as well as the line shaders: helper names must be unique across both kinds.
+  shaders as well as the line shaders: helper names must be unique across both kinds (the compile
+  check catches a clash and leaves the later shader out).
 - A line colours inside the game's border strip; it cannot make the strip wider. Wide effects
   along the edge (a glow, a scorched zone) belong to the fill, with `HL_EdgeDistance`.
 - The files must not contain `[[` or `]]` (they would end the game's code block); such files are
@@ -1519,8 +1542,8 @@ mod replaces a game shader file and shaders from several mods work side by side.
 - The loader finds shaders in the mods enabled in the launcher (`dlc_load.json`). The startup log
   lists them (`shader_patterns: fill pattern 1 = ...`). An unknown name falls back to `solid`
   (line) or `stripes` (fill), with a log line.
-- A shader with an HLSL error breaks the map's shaders (error.log names the line). Check it in
-  game, or with the DirectX compiler as the loader's test tool does (`DEVELOPING.md`).
+- Check a shader before shipping it: `loader.log` has the compile check's result for each one,
+  and the loader's test tool can splice it into the game's cached shaders for `fxc` (`DEVELOPING.md`).
 - The first start after adding or changing a shader is slower: the game recompiles its map shaders.
 - Examples: the test mod's (`mod/hoi4_loader_test/gfx/FX/hoi4_loader_patterns/`) `matrix_rain`, `inferno` and `fire_edge` (fills),
   `marching_ants`, `fire_line` and `dna_helix` (lines; `dna_helix` uses `vUV` as along/across coordinates for a turning double helix). `fire_edge` with `fire_line` on top is a fire line: the fill
@@ -1535,6 +1558,13 @@ is far from all of its provinces, like Gotland plus Hainan) the camera stays whe
 game. Add them again from `on_startup` and from `on_game_loaded` (feature `game_loaded`). In
 multiplayer every machine runs the same effects, so every player sees the same areas.
 
+**Don't let `has_attention_area` drive game logic in multiplayer.** A player who joins a running
+game (hot-join) has no areas: they were never added on that machine. So the trigger can be false
+there while it is true for everyone else, and anything that changes the game state on it (an
+effect, an `available` or `allowed` check, AI weights) would run differently on that machine.
+Use it for display only (`visible` of decisions or GUI), and keep game logic on your own flags
+or variables, which are saved and synced.
+
 **Guard** native commands with `hoi4_loader_feature_attention_area = yes` (stub:
 `stubs/common/scripted_triggers/hoi4_loader_feature_attention_area.txt`). Without the loader the
 effects are dropped (nothing is marked) and `has_attention_area` is dropped too, so keep it next
@@ -1547,9 +1577,9 @@ of China, a random state, a random country), inferno, a fire line and a DNA heli
 `shader_variables`), clear all.
 
 **Hovering a railway queue entry** (with `attention_area` on as well) outlines the line's provinces
-on the map with the game's thin province outline in white (the loader makes outline colour 14
-white in the map renderer's colour table; vanilla uses colour 14 only for the faction theatre map icon
-hover, which then outlines in white too), for building, upgrading and dismantle entries alike. It is drawn on this
+on the map with the game's thin province outline in white (a colour slot the loader appends to the
+map renderer's colour table; no vanilla colour changes), for building, upgrading and dismantle
+entries alike. It is drawn on this
 machine only, from the UI; nothing in the game state changes. It goes away a moment after the
 pointer leaves the entry. A right-click on the entry moves the camera to show the whole line (a line
 too long to fit is centred at the highest zoom) instead of the game's centring on its start.

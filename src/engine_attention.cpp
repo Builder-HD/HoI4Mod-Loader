@@ -171,15 +171,14 @@ uint32_t g_hlOwner = 0;            // ui -> highlight owner (list of weak refere
 int g_hlSecond = 0;                // construction mode's priority (logged for comparison)
 const int kOutlinePriority = 100;  // the loader's outline: above the game's own outlines
 const int* g_paletteCount = nullptr;   // float count of BORDER_COLOR_CUSTOM_HIGHLIGHTS
-// The renderer's colour table: palette colour kWhiteSlot is made white there (vanilla colour 14,
-// FACTION_THEATER_HIGHLIGHT_COLOR_INDEX, the faction theatre map icon hover: that outline turns
-// white too). A colour past the vanilla 15 is drawn as colour 14 (second in-game test).
-const int kWhiteSlot = 14;
+// The renderer's colour table: the loader appends its own slots there when the game builds it
+// (TableDetour below). No vanilla colour is changed. (Until the #18 review the hover mark made
+// palette colour 14, FACTION_THEATER_HIGHLIGHT_COLOR_INDEX, white for every player; it now has a
+// slot of its own.)
 uint8_t* g_tableFn = nullptr;
 void(__fastcall* g_tableOrig)(void*) = nullptr;
 int g_tableFixed = 0;        // fixed colours before the palette in the table (10)
 uint32_t g_tableCount = 0;   // renderer -> the table's count field
-bool g_tableWhite = false;   // the slot was made white (the table was built after the hook)
 
 struct IntArray {  // CPdxArray<int> as the highlight constructor reads it: data, count at +0xc
     const int* data;
@@ -245,26 +244,14 @@ void ResolveHighlight() {
     g_tableCount = count;
 }
 
-// The renderer's colour table (renderer + count field - 0xc: float4 data; count at the field):
-// right after the game builds it, the loader's slot becomes white. The game builds it once, in
-// the map graphics setup, from the built-in palette (the defines are read later), so a defines
-// change never reaches it (third in-game test, NOTES.md M7).
-bool WhiteRaw(void* renderer) {
-    __try {
-        int count = Rd<int>(renderer, g_tableCount);
-        float* data = Rd<float*>(renderer, g_tableCount - 0xc);
-        int slot = g_tableFixed + kWhiteSlot;
-        if (!data || slot >= count) return false;
-        for (int k = 0; k < 4; ++k) data[slot * 4 + k] = 1.0f;
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
-}
-
-// Extra colours for script outlines: kExtraSlots entries appended to the renderer's colour table at
-// its build (CPdxArray<float4>: data, cap, count, allocator* at +0x10), filled as areas need them.
+// The loader's colours: kExtraSlots entries appended to the renderer's colour table (renderer +
+// count field - 0xc: CPdxArray<float4>: data, cap, count, allocator* at +0x10) when the game builds
+// it, once, in the map graphics setup, from the built-in palette (the defines are read later, so a
+// defines change never reaches it: third in-game test, NOTES.md M7). The last slot is the hover
+// mark's white; the others are filled as areas need them.
 const int kExtraSlots = 32;
+const int kAreaSlots = kExtraSlots - 1;
+const float kWhite[4] = {1.0f, 1.0f, 1.0f, 1.0f};
 void* g_renderer = nullptr;   // the renderer whose table was extended
 int g_extraBase = 0;          // colour id of the first extra slot (0: none)
 float g_extraRgba[kExtraSlots][4];
@@ -314,16 +301,14 @@ bool WriteSlotRaw(void* renderer, int id, const float* rgba) {
 
 void __fastcall TableDetour(void* renderer) {
     g_tableOrig(renderer);
-    bool ok = WhiteRaw(renderer);
-    g_tableWhite = ok;
     int base = 0;
     bool grown = GrowRaw(renderer, kExtraSlots, &base) && base + kExtraSlots <= 255;  // colour ids are bytes
     g_renderer = renderer;
     g_extraBase = grown ? base : 0;
     for (int i = 0; grown && i < g_extraUsed; ++i) WriteSlotRaw(renderer, base + i, g_extraRgba[i]);  // a rebuild keeps them
-    Log("attention_area: outline colour %d %s; %d extra outline colours %s", kWhiteSlot,
-        ok ? "made white in the renderer's colour table" : "NOT changed (table not as expected)", kExtraSlots,
-        grown ? "added" : "NOT added (script outlines use palette colours)");
+    if (grown) WriteSlotRaw(renderer, base + kAreaSlots, kWhite);
+    Log("attention_area: %d outline colours %s (the hover mark's white among them; vanilla colours unchanged)", kExtraSlots,
+        grown ? "appended to the renderer's colour table" : "NOT added (outlines use palette colours)");
 }
 
 // --- Stripes: the stripe texture (CMapSecondaryMask, NOTES.md M9) -----------------------------------
@@ -339,6 +324,8 @@ std::vector<StripeArea> g_stripeWant;     // guarded by g_stripeLock
 bool g_stripeChanged = false;             // guarded: g_stripeWant changed since the last paint
 std::vector<int64_t> g_stripeSaved;       // guarded: per province, the game's colour where ours went (-1: none)
 std::vector<int> g_stripeMine;            // guarded: provinces holding our colour
+int g_stripeIds = 0;                      // guarded: fill ids the patched shader decodes (alphas 255 - n .. 254)
+int g_stripeSeen[8] = {}, g_stripeSeenCount = 0;  // guarded: game alphas moved out of that range (logged once each)
 volatile long g_stripeFaultLogged = 0, g_stripeFirstLogged = 0;
 
 void ResolveStripes() {
@@ -398,6 +385,32 @@ bool ApplyStripes(uint8_t* mask, const std::vector<StripeArea>& want, bool chang
                 if (!ours) g_stripeSaved[p] = colours[p];
                 colours[p] = a.rgba;  // a province the game changed is queued already
             }
+        // The patched fill shader reads alpha 255 - n (n = 1 .. g_stripeIds) as the loader's fill n.
+        // Should the game itself write such an alpha (stripe strength) into a province that is not an
+        // area's, it is moved just outside that range (at most g_stripeIds / 255 of stripe strength),
+        // so the game's stripes are never drawn as a loader fill (#19 review; NOTES.md M15).
+        if (g_stripeIds > 0) {
+            std::vector<char> mine((size_t)count, 0);
+            for (const StripeArea& a : want)
+                for (int p : a.provinces)
+                    if (p > 0 && p < count) mine[p] = 1;
+            int lo = 255 - g_stripeIds;
+            for (int p = 1; p < count; ++p) {
+                int alpha = (int)(colours[p] >> 24);
+                if (mine[p] || alpha < lo || alpha > 254) continue;
+                int moved = alpha - lo + 1 <= 255 - alpha ? lo - 1 : 255;
+                colours[p] = (colours[p] & 0x00FFFFFFu) | (uint32_t)moved << 24;
+                repaint = true;
+                bool seen = false;
+                for (int k = 0; k < g_stripeSeenCount; ++k) seen = seen || g_stripeSeen[k] == alpha;
+                if (!seen && g_stripeSeenCount < 8) {
+                    g_stripeSeen[g_stripeSeenCount++] = alpha;
+                    Log("attention_area: the game wrote stripe alpha %d (province %d), which the fill shader would read as "
+                        "loader fill %d; moved to %d (logged once per value)",
+                        alpha, p, 255 - alpha, moved);
+                }
+            }
+        }
         if (repaint) mask[0x44] = 1;
         return true;
     }
@@ -407,7 +420,7 @@ char __fastcall StripePaintDetour(void* mask, void* gamestate, void* tiles, char
     AcquireSRWLockExclusive(&g_stripeLock);
     bool changed = g_stripeChanged;
     g_stripeChanged = false;
-    if ((changed || !g_stripeWant.empty()) && !ApplyStripes((uint8_t*)mask, g_stripeWant, changed) &&
+    if ((changed || !g_stripeWant.empty() || g_stripeIds > 0) && !ApplyStripes((uint8_t*)mask, g_stripeWant, changed) &&
         InterlockedExchange(&g_stripeFaultLogged, 1) == 0)
         Log("ERROR: attention_area: writing stripe colours faulted (contained; logged once)");
     if (changed && InterlockedExchange(&g_stripeFirstLogged, 1) == 0)
@@ -430,6 +443,12 @@ void SetStripes(const std::vector<StripeArea>& areas) {
     AcquireSRWLockExclusive(&g_stripeLock);
     g_stripeWant = areas;
     g_stripeChanged = true;
+    ReleaseSRWLockExclusive(&g_stripeLock);
+}
+
+void SetStripeIdRange(int ids) {
+    AcquireSRWLockExclusive(&g_stripeLock);
+    g_stripeIds = ids < 0 ? 0 : ids > 254 ? 254 : ids;
     ReleaseSRWLockExclusive(&g_stripeLock);
 }
 
@@ -457,7 +476,7 @@ int HighlightPaletteSize() {
     return n > 0 && n < 4096 ? n / 4 : 0;
 }
 
-int HighlightWhiteIndex() { return g_tableWhite ? kWhiteSlot : -1; }
+int HighlightPaletteColourId(int index) { return (g_tableFixed ? g_tableFixed : 10) + index; }
 
 // --- The owner's hovered item (drawn before every outline, colour id 5) ----------------------------
 namespace {
@@ -530,7 +549,7 @@ bool ClearHoveredProvinceIf(HoverFilter_t filter) {
     return cleared;
 }
 
-bool HookHighlightWhite() {
+bool HookOutlineColourTable() {
     return g_tableFn && HookQueue(g_tableFn, (void*)&TableDetour, (void**)&g_tableOrig, "highlight_colour_table");
 }
 
@@ -564,14 +583,14 @@ bool CreateOutline(const std::vector<int>& provinces, int colourId, int priority
     return res[1] != nullptr;
 }
 
-int OutlineWhiteId() { return g_tableWhite ? g_tableFixed + kWhiteSlot : -1; }
+int HoverWhiteId() { return g_extraBase && g_renderer ? g_extraBase + kAreaSlots : -1; }
 
 int OutlineColourId(float r, float g, float b, float a) {
     if (!g_extraBase || !g_renderer) return -1;
     float rgba[4] = {r, g, b, a};
     for (int i = 0; i < g_extraUsed; ++i)
         if (memcmp(g_extraRgba[i], rgba, 16) == 0) return g_extraBase + i;
-    if (g_extraUsed >= kExtraSlots) return -1;
+    if (g_extraUsed >= kAreaSlots) return -1;  // the last slot is the hover mark's white
     memcpy(g_extraRgba[g_extraUsed], rgba, 16);
     if (!WriteSlotRaw(g_renderer, g_extraBase + g_extraUsed, rgba)) return -1;
     return g_extraBase + g_extraUsed++;
@@ -585,9 +604,8 @@ namespace {
 OutlineRef g_hover;
 }
 void HideHighlight() { ReleaseOutline(&g_hover); }
-bool ShowHighlight(const std::vector<int>& provinces, int paletteIndex) {
-    if (paletteIndex < 0 || paletteIndex >= HighlightPaletteSize()) return false;
-    return CreateOutline(provinces, g_tableFixed + paletteIndex, kOutlinePriority, &g_hover);
+bool ShowHighlight(const std::vector<int>& provinces, int colourId) {
+    return CreateOutline(provinces, colourId, kOutlinePriority, &g_hover);
 }
 
 bool HaveAttentionCamera() { return g_ppUi && g_centreSlot && g_cameraSlot && g_setHeight && g_lookAt && g_heightMin; }

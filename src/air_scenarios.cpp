@@ -236,40 +236,6 @@ void Merge(std::vector<Definition>* all, const std::vector<Definition>& later) {
     }
 }
 
-bool ParseDlcLoad(const std::string& json, std::vector<std::string>* modFiles) {
-    modFiles->clear();
-    size_t k = json.find("\"enabled_mods\"");
-    if (k == std::string::npos) return false;
-    size_t open = json.find('[', k), close = open == std::string::npos ? open : json.find(']', open);
-    if (open == std::string::npos || close == std::string::npos) return false;
-    for (size_t i = open + 1; i < close; ++i) {
-        if (json[i] != '"') continue;
-        std::string v;
-        for (++i; i < close && json[i] != '"'; ++i) {
-            if (json[i] == '\\' && i + 1 < close) ++i;  // \" \\ \/
-            v += json[i];
-        }
-        if (!v.empty()) modFiles->push_back(v);
-    }
-    return true;
-}
-
-bool ParseDescriptor(const std::string& text, ModDescriptor* out) {
-    *out = ModDescriptor{};
-    std::vector<Node> top;
-    std::string error;
-    int line = 0;
-    ParseTree(text, &top, &error, &line);  // what was read before an error still counts
-    for (const Node& n : top) {
-        if (n.block) continue;
-        if (EqualsNoCase(n.key, "name")) out->name = n.value;
-        else if (EqualsNoCase(n.key, "path")) out->path = n.value;
-        else if (EqualsNoCase(n.key, "archive")) out->archive = n.value;
-        else if (EqualsNoCase(n.key, "replace_path")) out->replacePaths.push_back(n.value);
-    }
-    return !out->path.empty() || !out->archive.empty();
-}
-
 bool SideMatches(const Side& side, const std::vector<Plane>& planes) {
     if (!side.present || (side.equipment.empty() && side.countries.empty())) return true;
     for (const Plane& p : planes) {

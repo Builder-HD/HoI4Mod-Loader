@@ -76,9 +76,12 @@ static bool GetDocumentsDir(wchar_t* out, DWORD cch) {
 
 // The game's user folder, <Documents>\Paradox Interactive\Hearts of Iron IV (created if missing),
 // where the log and the generated docs go and dlc_load.json is read. HOI4_LOADER_USER_DIR replaces
-// it: for the smoke test's stand-in executables, so they never overwrite the game's loader.log.
+// it only in the smoke test's stand-in executables (tests/smoke.cpp exports
+// hoi4_loader_smoke_standin), so they never overwrite the game's loader.log; the real game ignores
+// the variable (#19 review).
 static bool GetUserDir(wchar_t* out, DWORD cch) {
-    DWORD n = GetEnvironmentVariableW(L"HOI4_LOADER_USER_DIR", out, cch);
+    static const bool standIn = GetProcAddress(GetModuleHandleW(nullptr), "hoi4_loader_smoke_standin") != nullptr;
+    DWORD n = standIn ? GetEnvironmentVariableW(L"HOI4_LOADER_USER_DIR", out, cch) : 0;
     if (n && n < cch) {
         CreateDirectoryW(out, nullptr);
         return true;
