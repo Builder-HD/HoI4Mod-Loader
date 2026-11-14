@@ -6471,3 +6471,26 @@ yet by the owner):
 **Not tested:** multiplayer with `xp` (expected: in sync when every player has the loader and mods;
 out of sync otherwise, as accepted), the update command (editing a saved design) paying from the
 `xp` pool (same tests, same hook; only the create command was used), `xp = air`.
+
+## N13: review before the PR, two fixes and the remaining in-game tests (2026-11-15)
+
+**Threads.** The archetype table was built at its first use, by whichever hook asked first. The
+experience pool hook (`xp`) can also run on worker threads, so two threads could build or read the
+table at once. Now it is built on the main thread before every game entry (`OnGameEntering`, or at
+an earlier first use on the main thread); other threads read it only once it is complete (an
+interlocked flag) and get the game's own answer before that. Game state changes only on the main
+thread, so every `xp` command sees the table. In game the table is logged before "game entered".
+
+**Title.** On the second opening of the window the title was blank. The game's SetText takes the
+string's buffer (the game passes a temporary), so it emptied the loader's cached title. Now the
+title is given to SetText as a fresh copy and freed after, as the experience line already did. In
+game: the title stays on every reopening.
+
+**In-game test** (1.19.5, Germany 1936, branch build, test mod only):
+1. Unlock, open the small arms designer, save with grenades: navy 50 -> 45, army 50.
+2. Reopen the saved design, add a bayonet, save ("Spend navy 5 to save the changes to this design",
+   the update command): navy 45 -> 40, army 50. The update command now tested.
+3. Close and reopen the window three times: "Small Arms Designer" each time.
+4. `loader.log`: no ERROR, no fault.
+
+**Not tested:** multiplayer with `xp`, `xp = air`.
