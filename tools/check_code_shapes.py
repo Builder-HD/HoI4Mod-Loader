@@ -211,6 +211,7 @@ def check(path, codes):
     results += check_air_scenarios(img, codes, text_va, text)
     results += check_time_control(img, codes, text_va, text)
     results += check_equipment_conversion(img, codes, text_va, text)
+    results += check_equipment_designers(img, codes, text_va, text)
     return results
 
 
@@ -559,6 +560,84 @@ def check_air_scenarios(img, codes, text_va, text):
     ok = bool(attach and mt) and img.match_at(creator, codes['kCodeAirCreator']) and u8(creator + 6) == u8(creator + 0xb)
     results.append(('kCodeAirAttach / Creator / ModelType (design type +0x%x, type name +0x%x)' %
                     (u32(mt + 3) if mt else -1, u8(mt + 0xa) if mt else -1), ok, hex(attach or 0)))
+    return results
+
+
+def check_equipment_designers(img, codes, text_va, text):
+    """equipment_designers (NOTES.md Part N): the same pieces engine_designers.cpp resolves, with its cross-checks."""
+    hdr = pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h'
+    sigs, anchors = cs.load_signatures(hdr)
+    sigs, anchors, k = dict(sigs), dict(anchors), load_constants(hdr)
+    u8 = lambda va: img.d[img.va2off(va)]
+    u32 = lambda va: struct.unpack_from('<I', img.d, img.va2off(va))[0]
+
+    def one(name):
+        m = [text_va + x.start() for x in cs.compile_pattern(sigs[name]).finditer(text)]
+        return m[0] if len(m) == 1 else None
+
+    def lea(name):
+        refs, _ = cs.anchor_refs(img.d, text_va, text, anchors[name])
+        return refs[0] if refs and len(refs) == 1 else None
+
+    results = []
+    can = one('kSigEqdCanOpen')
+    designable = rel32(img, can + k['kSigEqdCanOpenDesignableCall']) if can else 0
+    ok = bool(can) and img.match_at(designable, codes['kCodeEqdDesignable'])
+    mask = rel32(img, designable + k['kCodeEqdDesignableMaskCall']) if ok else 0
+    ok = ok and img.match_at(mask, codes['kCodeEqdDlcMask'])
+    bit = u8(mask + k['kCodeEqdDlcTankBit']) if ok else 0
+    ok = ok and bit != 0 and bit & (bit - 1) == 0
+    results.append(('kCodeEqdDesignable / DlcMask (tank DLC bit 0x%x)' % bit, ok, hex(designable)))
+
+    opn = one('kSigEqdOpenVariant')
+    t = find_in(img, opn, 0x300, codes['kCodeEqdTitle']) if opn else None
+    fn = rel32(img, t + k['kCodeEqdTitleTextCall']) if t else 0
+    anchor = lea('kAnchorEqdTitle')
+    ok = bool(fn) and img.match_at(fn, codes['kCodeEqdTitleText']) and bool(anchor) and fn <= anchor < fn + 0x40
+    key = ''
+    if ok:
+        j = fn + k['kCodeEqdTitleTankJump']
+        tank = j + 2 + struct.unpack_from('<b', img.d, img.va2off(j + 1))[0]
+        if img.d[img.va2off(tank):img.va2off(tank) + 3] == b'\x48\x8d\x15':
+            target = tank + 7 + i32(img, tank + 3)
+            o = img.va2off(target)
+            key = img.d[o:img.d.index(b'\0', o)].decode('ascii', 'replace')
+        ok = key == 'TANK_DESIGNER_TITLE'
+    results.append(('kCodeEqdTitle / TitleText (kind +0x%x, title +0x%x, kind 1 = %s)' %
+                    (u32(t + 2) if t else -1, u32(t + 0xe) if t else -1, key or '?'), ok, hex(t or 0)))
+
+    ref = one('kSigEqdRefresh')
+    assign = rel32(img, ref + k['kSigEqdRefreshAssignCall']) if ref else 0
+    ok = bool(ref) and img.match_at(assign, codes['kCodeEqdSlotAssign']) and \
+        u8(assign + k['kCodeEqdSlotCountDisp']) == (u8(designable + k['kCodeEqdDesignableCountDisp']) if designable else -1)
+    tok = find_in(img, assign, 0x100, codes['kCodeEqdSlotToken']) if ok else None
+    hf = find_in(img, assign, 0x400, codes['kCodeEqdSlotHideFixed']) if ok else None
+    hc = find_in(img, assign, 0x400, codes['kCodeEqdSlotHideCustom']) if ok else None
+    ok = ok and bool(tok and hf and hc) and rel32(img, hf + 4) == rel32(img, hc + 4)
+    ok = ok and img.match_at(rel32(img, hf + 4), codes['kCodeEqdSlotClear'])
+    results.append(('kCodeEqdSlotAssign / Token / Hide (archetype +0x%x, view %d)' %
+                    (u32(assign + 0x31) if assign else -1, struct.unpack_from('<b', img.d, img.va2off(ref + 0x26))[0] if ref else 0),
+                    ok, hex(assign)))
+
+    cu, fx = one('kSigEqdSlotsCustom'), one('kSigEqdSlotsFixed')
+    creator = rel32(img, cu + k['kSigEqdSlotsCreatorCall']) if cu else 0
+    ok = bool(cu and fx) and rel32(img, fx + k['kSigEqdSlotsCreatorCall']) == creator and \
+        u32(cu + k['kSigEqdSlotsContainerDisp']) == u32(fx + k['kSigEqdSlotsContainerDisp']) and bool(hc and hf) and \
+        u32(hc + k['kCodeEqdSlotCountVecDisp']) == u32(cu + k['kSigEqdSlotsVecDisp']) + 0xc and \
+        u32(hf + k['kCodeEqdSlotCountVecDisp']) == u32(fx + k['kSigEqdSlotsVecDisp']) + 0xc
+    look = find_in(img, creator, 0x200, codes['kCodeEqdSlotLookup']) if ok else None
+    place = find_in(img, creator, 0x400, codes['kCodeEqdSlotPlace']) if ok else None
+    ok = ok and bool(look and place) and u32(look + 6) % 8 == 0
+    ok = ok and img.match_at(rel32(img, place + k['kCodeEqdSetPositionCall']), codes['kCodeEqdSetPosition'])
+    new = find_in(img, creator, 0x400, codes['kCodeEqdSlotNew']) if ok else None
+    gui = find_in(img, rel32(img, new + k['kCodeEqdSlotCtorCall']), 0x200, codes['kCodeEqdSlotGuiBase']) if new else None
+    ok = ok and bool(gui) and u32(gui + 3) == u32(rel32(img, place + 0x12) + 3)
+    results.append(('kCodeEqdSlotLookup / Place (windows +0x%x/+0x%x, position +0x%x)' %
+                    (u32(cu + 7) if cu else -1, u32(fx + 7) if fx else -1, u32(place + 3) if place else -1), ok, hex(creator)))
+
+    roles = lea('kAnchorEqdRoles')
+    store = find_in(img, roles, 0x80, codes['kCodeEqdRolesStore']) if roles else None
+    results.append(('kCodeEqdRolesStore (roles +0x%x)' % (u32(store + 9) if store else -1), bool(store), hex(roles or 0)))
     return results
 
 

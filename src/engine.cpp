@@ -475,6 +475,7 @@ bool Resolve() {
     ResolveProvinceBuildings();
     ResolveConversion();  // after ResolveData: cross-checks production_data's offsets
     ResolveAirScenarios();  // after ResolveData: cross-checks production_data's design type
+    ResolveDesigners();  // after ResolveData: production_data's type offsets
     ResolveProvinceData();  // after ResolveRailways: the province controller offset
     ResolveAttention();
 

@@ -102,4 +102,77 @@ std::string PatchCountryStateViewGui(const std::string& original) {
     return changed ? out : std::string();
 }
 
+// tank_designer_view.gui (equipment_designers, NOTES.md N9): the engine makes one slot window per
+// positionType pos_custom_module_slot_window_N / pos_fixed_module_slot_window_N, N = 0, 1, ... up to
+// the first missing one. Missing ones are added after the last existing one, at window 0's position.
+std::string PatchTankDesignerViewGui(const std::string& original, int maxWindows, int* customBefore, int* fixedBefore) {
+    *customBefore = *fixedBefore = 0;
+    std::vector<Tok> t = Tokenize(original);
+    std::vector<long> partner(t.size(), -1);  // '{' -> its '}'
+    std::vector<size_t> stack;
+    for (size_t i = 0; i < t.size(); ++i) {
+        if (t[i].kind == Tok::Open) {
+            stack.push_back(i);
+        } else if (t[i].kind == Tok::Close && !stack.empty()) {
+            partner[stack.back()] = (long)i;
+            stack.pop_back();
+        }
+    }
+    struct Block {
+        std::string name;
+        size_t start;     // offset of `positionType`
+        size_t end;       // just after its '}'
+        std::string position;  // `position = { ... }` as written
+    };
+    std::vector<Block> blocks;
+    for (size_t i = 0; i + 2 < t.size(); ++i) {
+        if (t[i].kind != Tok::Word || _stricmp(t[i].text.c_str(), "positionType") != 0 || t[i + 1].kind != Tok::Eq ||
+            t[i + 2].kind != Tok::Open || partner[i + 2] < 0)
+            continue;
+        size_t close = (size_t)partner[i + 2];
+        Block b{std::string(), t[i].pos, t[close].pos + 1, std::string()};
+        for (size_t k = i + 3; k < close; ++k) {
+            if (b.name.empty() && k + 2 < close && t[k].kind == Tok::Word && _stricmp(t[k].text.c_str(), "name") == 0 &&
+                t[k + 1].kind == Tok::Eq && (t[k + 2].kind == Tok::Word || t[k + 2].kind == Tok::Str))
+                b.name = t[k + 2].text;
+            if (b.position.empty() && k + 2 < close && t[k].kind == Tok::Word && _stricmp(t[k].text.c_str(), "position") == 0 &&
+                t[k + 1].kind == Tok::Eq && t[k + 2].kind == Tok::Open && partner[k + 2] > 0)
+                b.position = original.substr(t[k].pos, t[(size_t)partner[k + 2]].pos + 1 - t[k].pos);
+        }
+        blocks.push_back(b);
+        i = close;
+    }
+    auto find = [&](const std::string& name) -> const Block* {
+        for (const Block& b : blocks)
+            if (_stricmp(b.name.c_str(), name.c_str()) == 0) return &b;
+        return nullptr;
+    };
+    const char* const kinds[2] = {"pos_custom_module_slot_window_", "pos_fixed_module_slot_window_"};
+    const Block* first = find(std::string(kinds[0]) + "0");
+    if (!first || first->position.empty()) return std::string();
+    size_t after = 0;  // just after the last existing slot position
+    for (const Block& b : blocks)
+        if (_strnicmp(b.name.c_str(), kinds[0], strlen(kinds[0])) == 0 || _strnicmp(b.name.c_str(), kinds[1], strlen(kinds[1])) == 0)
+            after = b.end > after ? b.end : after;
+    int* before[2] = {customBefore, fixedBefore};
+    for (int k = 0; k < 2; ++k)
+        while (*before[k] < maxWindows && find(kinds[k] + std::to_string(*before[k]))) ++*before[k];
+    size_t lineStart = original.rfind('\n', first->start);
+    lineStart = lineStart == std::string::npos ? 0 : lineStart + 1;
+    std::string indent = original.substr(lineStart, first->start - lineStart);
+    if (indent.find_first_not_of(" \t") != std::string::npos) indent = "\t\t\t";
+    const std::string nl = original.find("\r\n") != std::string::npos ? "\r\n" : "\n";
+    std::string add;
+    for (int k = 0; k < 2; ++k)
+        for (int n = 0; n < maxWindows; ++n) {
+            std::string name = kinds[k] + std::to_string(n);
+            if (find(name)) continue;
+            add += nl + indent + "positionType = { name = \"" + name + "\" " + first->position + " }";
+        }
+    if (add.empty()) return std::string();
+    std::string out = original;
+    out.insert(after, nl + nl + indent + "# hoi4_loader: equipment_designers (more slot windows, placed by the loader)" + add);
+    return out;
+}
+
 }  // namespace Engine

@@ -1022,6 +1022,96 @@ static const size_t kCodeAirDesignTypeDisp = 3, kCodeAirTypeNameDisp = 0xa;
 CODE(kCodeIdlerCentreTail, "48 8B 07 48 8B CF 48 83 C4 30 5F 48 FF A0 ?? ?? ?? ??")
 static const size_t kCodeCentreTailDisp = 0xe;
 
+// --- Equipment designers (equipment_designers, NOTES.md Part N; addresses 1.19.5) ------------------
+// bool CanOpenDesigner(ctx, CEquipmentType*): designable(type) (E8 at +0x13: slots and the DLC
+// designer mask) && layout(ctx, type) (E8 at +0x22: an equipment_designer_<type|archetype> window
+// exists). False opens the old upgrade window. Hooked; 9 callers, all UI. (0x141820c00)
+SIG(kSigEqdCanOpen, "48 89 5C 24 08 57 48 83 EC 20 48 8B F9 48 8B DA 48 8B CA E8 ?? ?? ?? ?? 84 C0 74 1C 48 8B D3 48 8B CF E8")
+static const size_t kSigEqdCanOpenDesignableCall = 0x13, kSigEqdCanOpenLayoutCall = 0x22;
+// The window picker (variant, rcx view): type = variant->[disp32 +0x1c]; naval(type) (E8 at
+// +0x23) picks the ship window, else land A (E8 at +0x44) or land B (E8 at +0x58) the tank window.
+// Not hooked: the two land tests are called to check that an archetype goes to the tank window.
+// (0x140bbf870)
+SIG(kSigEqdPickWindow, "48 89 5C 24 18 48 89 6C 24 20 56 57 41 57 48 83 EC 30 48 8B F9 45 0F B6 F8 48 8B 8A ?? ?? ?? ?? 48 8B DA E8 ?? ?? ?? ?? 84 C0 74 ?? 48 8B B7 ?? ?? ?? ?? BD 10 00 00 00 E9 ?? ?? ?? ?? 48 8B 8B ?? ?? ?? ?? E8 ?? ?? ?? ?? 84 C0 0F 85 ?? ?? ?? ?? 48 8B 8B ?? ?? ?? ?? E8 ?? ?? ?? ?? 84 C0 75")
+static const size_t kSigEqdPickTypeDisp = 0x1c, kSigEqdPickLandACall = 0x44, kSigEqdPickLandBCall = 0x58;
+// CEquipmentDesignerView::Open(view, variant): shows a design in a designer window, then sets the
+// title (kCodeEqdTitle). Hooked (after). (0x14181ce00)
+SIG(kSigEqdOpenVariant, "48 89 5C 24 18 55 56 57 48 83 EC 50 48 8B F9 48 8B DA 48 8B 8A ?? ?? ?? ?? 48 85 C9 74 12 E8 ?? ?? ?? ?? 84 C0 74 09")
+// The window's refresh (rcx = view + disp8 at +0x26, negative): first assigns the slot windows
+// (E8 at +0x2a, kCodeEqdSlotAssign). Hooked (after). (0x141821be0)
+SIG(kSigEqdRefresh, "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? 48 8B D9 C6 81 ?? ?? ?? ?? 00 48 8D 71 ?? 48 8B CE E8")
+static const size_t kSigEqdRefreshViewDisp = 0x26, kSigEqdRefreshAssignCall = 0x2a;
+// Setup: the slot windows, one per positionType pos_custom_module_slot_window_%i (then the
+// fixed ones, kSigEqdSlotsFixed): vector view+[disp32 +7], positions container view->[disp32
+// +0x13], creator E8 at +0x1a (kCodeEqdSlotLookup / Place). (0x14182037c, 0x14182043f)
+SIG(kSigEqdSlotsCustom, "C6 40 20 00 4C 8D 8B ?? ?? ?? ?? 4C 8D 44 24 20 48 8B 93 ?? ?? ?? ?? 48 8B CB E8")
+SIG(kSigEqdSlotsFixed, "C6 42 1F 00 4C 8D 8B ?? ?? ?? ?? 4C 8D 44 24 20 48 8B 93 ?? ?? ?? ?? 48 8B CB E8")
+static const size_t kSigEqdSlotsVecDisp = 7, kSigEqdSlotsContainerDisp = 0x13, kSigEqdSlotsCreatorCall = 0x1a;
+// Setup stores the role dropdown: lea of its name, then (SigFindIn 0x80, kCodeEqdRolesStore)
+// view->[disp32] = container->Find(name). (0x14181dfdb)
+ANCHOR(kAnchorEqdRoles, "dropdown_tank_roles")
+// The title's loc key by window kind; its error branch is the only lea of this string. (0x141813d5d)
+ANCHOR(kAnchorEqdTitle, "EQUIPMENT_DESIGNER_TITLE")
+// --- Equipment designers (NOTES.md Part N; addresses 1.19.5) ------------------------------------
+// designable(type) (kSigEqdCanOpen's first call): type->[disp8 +8] (slot count) != 0, then the DLC
+// designer mask (E8 at +0x14). Not hooked (gameplay callers). (0x140cf5670)
+CODE(kCodeEqdDesignable, "40 53 48 83 EC 20 83 79 ?? 00 48 8B D9 74 ?? 48 89 7C 24 30 E8")
+static const size_t kCodeEqdDesignableCountDisp = 8, kCodeEqdDesignableMaskCall = 0x14;
+// The DLC designer mask: per DLC (id imm8 at +0xb, +0x17, ...) its designer type bits; the second
+// DLC (No Step Back, the tank designer) ORs imm8 +0x3b. (0x14100bfe0)
+CODE(kCodeEqdDlcMask, "48 89 5C 24 08 57 48 83 EC 20 B9 ?? 00 00 00 E8 ?? ?? ?? ?? F6 D8 B9 ?? 00 00 00 48 B8 ?? ?? ?? ?? ?? ?? ?? ?? 48 1B DB 48 23 D8 E8 ?? ?? ?? ?? 48 8B FB B9 ?? 00 00 00 48 83 CF ??")
+static const size_t kCodeEqdDlcTankBit = 0x3b;
+// In Open (SigFindIn 0x300): title = TitleText(view->[disp32 +2] window kind) (E8 at +0x12) on
+// element view->[disp32 +0xe] through SetText (E8 at +0x1d). (0x14181cfe7)
+CODE(kCodeEqdTitle, "8B 97 ?? ?? ?? ?? 48 8D 4C 24 ?? 48 8B 9F ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B D0 48 8B CB E8")
+static const size_t kCodeEqdKindDisp = 2, kCodeEqdTitleDisp = 0xe, kCodeEqdTitleTextCall = 0x12, kCodeEqdSetTextCall = 0x1d;
+// TitleText(out, kind): kind 0 ship, then `sub edx,1; jz` (rel8 at +0x11) to the tank title's lea.
+// (0x141813d40)
+CODE(kCodeEqdTitleText, "40 53 48 83 EC 30 48 8B D9 85 D2 74 ?? 83 EA 01 74 ??")
+static const size_t kCodeEqdTitleTankJump = 0x10;
+// The slot assignment (kSigEqdRefresh's call): archetype view->[disp32 +0x31], its slots
+// ->[disp8 +0x48] (0x50 bytes each), count ->[disp8 +0x4c]. (0x14181bb90)
+CODE(kCodeEqdSlotAssign, "48 8B C4 53 57 41 54 48 83 EC 60 48 89 68 18 48 8B F9 48 89 70 E0 48 81 C1 ?? ?? ?? ?? 4C 89 68 D8 4C 89 70 D0 4C 89 78 C8 E8 ?? ?? ?? ?? 48 8B 87 ?? ?? ?? ?? 4C 8D 3D ?? ?? ?? ?? 45 33 E4 41 8B DC 41 8B EC 48 8B 70 ?? 48 63 40 ?? 4C 8D 2C 80 49 C1 E5 04")
+static const size_t kCodeEqdArchetypeDisp = 0x31, kCodeEqdSlotsDisp = 0x48, kCodeEqdSlotCountDisp = 0x4c;
+// In the assignment loop (SigFindIn 0x100): the slot's name token slot->[disp8 +2], compared with
+// "fixed_" (length 6). (0x14181bc00)
+CODE(kCodeEqdSlotToken, "8B 4E ?? E8 ?? ?? ?? ?? 48 8D 54 24 ?? 4C 89 74 24 ?? 48 8B C8 48 C7 44 24 ?? 06 00 00 00 E8")
+static const size_t kCodeEqdSlotTokenDisp = 2;
+// Unused windows lose their slot (SigFindIn 0x400): Clear(window) (E8 at +4, kCodeEqdSlotClear),
+// the fixed / custom window count view->[disp32 +0x11]. (0x14181bdf7, 0x14181be97)
+CODE(kCodeEqdSlotHideFixed, "49 8B 0C 36 E8 ?? ?? ?? ?? FF C3 48 83 C6 08 3B 9F ?? ?? ?? ??")
+CODE(kCodeEqdSlotHideCustom, "48 8B 0C 1E E8 ?? ?? ?? ?? FF C5 48 83 C3 08 3B AF ?? ?? ?? ??")
+static const size_t kCodeEqdSlotHideCall = 4, kCodeEqdSlotCountVecDisp = 0x11;
+// Clear(window): window->[disp32 +3] (its slot) = null; the game then draws the window locked
+// ("not available for this equipment type"), it doesn't hide it. (0x141e5d840)
+CODE(kCodeEqdSlotClear, "48 C7 81 ?? ?? ?? ?? 00 00 00 00 C3")
+static const size_t kCodeEqdSlotClearDisp = 3;
+// SetPosition(window, &pos) (kCodeEqdSlotPlace's call): forwards to the window's GUI element
+// window->[disp32 +3] (its vtable slot [disp32 +0xd]). (0x141e5d6c0)
+CODE(kCodeEqdSetPosition, "48 8B 89 ?? ?? ?? ?? 48 8B 01 48 FF A0 ?? ?? ?? ??")
+static const size_t kCodeEqdSlotElementDisp = 3;
+// The creator (SigFindIn 0x400) builds each slot window: new(0x690), then its constructor (E8 at
+// +0x11). (0x14181ff8a)
+CODE(kCodeEqdSlotNew, "4D 8D 8D ?? ?? ?? ?? 4C 8B C3 48 8B 55 ?? 48 8B C8 E8")
+static const size_t kCodeEqdSlotCtorCall = 0x11;
+// In the constructor (SigFindIn 0x200): the element window->[disp32 +3] is a container window; its
+// GUI object (the one hide/show and the +0x75 flags belong to, as Find returns them) is at
+// element + imm8 +0xa, which the constructor hands to the parent. The loader hides that one.
+// (0x141e5c920)
+CODE(kCodeEqdSlotGuiBase, "49 8B 86 ?? ?? ?? ?? 48 8D 58 ?? 48 85 C0")
+static const size_t kCodeEqdSlotGuiElementDisp = 3, kCodeEqdSlotGuiBaseImm = 0xa;
+// The slot window creator (kSigEqdSlotsCustom's call), SigFindIn 0x200: Find(container, &name, 0)
+// is the container's vtable slot [disp32 +6]. (0x14181ff28)
+CODE(kCodeEqdSlotLookup, "48 8B 03 4C 8B 88 ?? ?? ?? ?? 48 8D 45 ?? 48 83 7D ?? 0F 48 0F 47 45 ??")
+static const size_t kCodeEqdLookupSlotDisp = 6;
+// ... then (SigFindIn 0x400) SetPosition(window, &positionType->[disp32 +3]) (E8 at +0x12) and
+// IsMissing(found) (E8 at +0x1a). (0x141820171)
+CODE(kCodeEqdSlotPlace, "48 8B 87 ?? ?? ?? ?? 48 89 45 ?? 48 8D 55 ?? 48 8B CB E8 ?? ?? ?? ?? 48 8B CE E8")
+static const size_t kCodeEqdPositionDisp = 3, kCodeEqdSetPositionCall = 0x12, kCodeEqdIsMissingCall = 0x1a;
+// After the roles anchor (SigFindIn 0x80): view->[disp32 +9] = found dropdown. (0x14181e031)
+CODE(kCodeEqdRolesStore, "FF 90 ?? ?? ?? ?? 48 89 86 ?? ?? ?? ??")
+static const size_t kCodeEqdRolesDisp = 9;
+
 #undef CODE
 #undef SIG
 #undef ANCHOR

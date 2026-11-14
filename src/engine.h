@@ -456,6 +456,9 @@ uint32_t ProvinceControllerOffset();
 // Resolved after ResolveRailways (needs the controller offset).
 void ResolveProvinceBuildings();
 bool HaveProvinceBuildingRemoval();  // every function, field and vtable resolved (no game needed)
+// The engine's hide/show idiom for a GUI element (kSigGuiHideShow), shared with other UI features.
+bool HaveElementVisibility();
+void SetElementVisible(void* element, bool visible);
 // UI thread. `allowed`: may the cross show at all (the plugin: single player only). `onClick`: the
 // player clicked the cross of `type` (a CBuildingType*) in `province` (a province object) of `state`;
 // must defer the change (RemoveProvinceBuildingLevel) and return true if it did.
@@ -478,6 +481,11 @@ int RemoveProvinceBuildingLevel(void* province, void* type, void* state, std::st
 // The patch that adds the `remove` button to province_building_entry (countrystateview.gui). Empty
 // if the file has no such entry or already has the button. Pure text; tests call it directly.
 std::string PatchCountryStateViewGui(const std::string& original);
+// equipment_designers: adds the missing slot window positions (pos_custom_module_slot_window_N up
+// to N = maxWindows - 1, and the same for pos_fixed_module_slot_window_N) next to the existing ones
+// in tank_designer_view.gui, each at window 0's position. *customBefore / *fixedBefore: how many
+// the file had (0, 1, 2, ... without a gap). Empty if nothing was added. Pure text (gui_patch.cpp).
+std::string PatchTankDesignerViewGui(const std::string& original, int maxWindows, int* customBefore, int* fixedBefore);
 const char kProvinceBuildingRemoveTooltipKey[] = "BUILDING_SLOT_REMOVE_BUILDING_LEVEL";
 // --- Scope blocks and iterators (region_scope; engine_scope.cpp, NOTES.md F5) -----------------
 // The vanilla state iterators the region iterators are cloned from. keys: the block keys the
@@ -597,6 +605,36 @@ using AirBuilt_t = void (*)();  // after the game built its templates (every tim
 using AirPick_t = void* (*)(int slot, const void* attackers, const void* defenders);
 bool HookAirScenarios(AirBuilt_t built, AirPick_t pick);  // all hooks or none
 void DisableAirScenarios();  // after a fault: the game's own templates from now on
+
+// --- Equipment designers (equipment_designers; engine_designers.cpp, NOTES.md Part N) -----------
+// Lets equipment the game gives no designer (e.g. type infantry) open the tank designer window,
+// and changes that window's title, role dropdown and slot window positions. UI only, main thread.
+// Types are CEquipmentType; a view is a CEquipmentDesignerView (ship, tank or plane window).
+void ResolveDesigners();  // after ResolveData (production_data's type offsets)
+bool HaveDesigners();
+// The plugin's designer for a type (or its archetype), or null: such a type may open the tank
+// window when it has slots, the tank designer is unlocked, its type is one the tank window serves
+// and the game finds its equipment_designer_<archetype> layout.
+using DesignerFind_t = const void* (*)(const void* type);
+using DesignerOpened_t = void (*)(void* view, const void* archetype);     // a design was opened
+using DesignerRefreshed_t = void (*)(void* view, const void* archetype);  // after the slot windows were assigned
+using DesignerFault_t = void (*)(const char* where);                      // a contained fault; hooks idle from now on
+bool HookDesigners(DesignerFind_t find, DesignerOpened_t opened, DesignerRefreshed_t refreshed, DesignerFault_t fault);
+const void* TypeArchetypeOf(const void* type);  // the type itself for an archetype
+bool DesignerLandType(const void* type);        // the game's own test: the tank window serves this type
+bool TankDesignerUnlocked();                    // No Step Back
+int TypeSlotCount(const void* type);            // module slots, in definition order
+const char* TypeSlotName(const void* type, int i);
+bool IsTankDesigner(const void* view);
+void DesignerSetTitle(void* view, const EngineString* text);
+void DesignerShowRoles(void* view, bool show);
+// Slot windows: `fixed` for the fixed_* group. The game gives a type's slots the windows in
+// definition order (fixed_* slots the fixed group, the others the custom group).
+int DesignerSlotWindows(const void* view, bool fixed);
+void DesignerPlaceSlot(void* view, bool fixed, int i, int x, int y);
+bool DesignerResetSlot(void* view, bool fixed, int i);  // back to its positionType in the GUI file
+bool DesignerSlotAssigned(const void* view, bool fixed, int i);  // holds a slot (else the game draws it locked)
+void DesignerShowSlot(void* view, bool fixed, int i, bool show);
 
 // --- Time control (time_control; engine_time.cpp, NOTES.md Part K) -----------------------------
 void ResolveTimeControl();

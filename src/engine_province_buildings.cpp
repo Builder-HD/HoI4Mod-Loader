@@ -654,6 +654,12 @@ void ResolveProvinceBuildings() {
             g_buttonMap, g_wrapperSize, g_stateOwner, ProvinceControllerOffset());
 }
 
+// The engine's hide/show idiom (kSigGuiHideShow), shared with other UI features.
+bool HaveElementVisibility() { return g_hideDisp && g_showDisp && g_flags && g_hiddenBit; }
+void SetElementVisible(void* element, bool visible) {
+    if (element && HaveElementVisibility()) SetVisible(element, visible);
+}
+
 bool HaveProvinceBuildingRemoval() {
     return g_updateFn && g_tooltipFn && g_dtorFn && g_itemWindow && g_itemType && g_tipSub && g_tipView &&
            g_typeProvinceFlag && g_viewProvince && g_viewState && g_stateOwner && g_provinceBuildings && g_buttonMap &&

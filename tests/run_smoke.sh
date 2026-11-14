@@ -32,6 +32,11 @@ out=$("$BUILD/tests/air_scenarios_test.exe"); trc=$?
 echo "$out" | grep -E 'FAIL|air_scenarios_test:'
 [ "$trc" = 0 ] || rc=1
 
+echo "===== 0a2b) equipment designer definitions, tank_designer_view.gui patch (equipment_designers)"
+out=$("$BUILD/tests/equipment_designers_test.exe"); trc=$?
+echo "$out" | grep -E 'FAIL|equipment_designers_test:'
+[ "$trc" = 0 ] || rc=1
+
 echo "===== 0a3) shader patterns: stitching, the mod shaders' compile check (attention_area)"
 out=$("$BUILD/tests/shader_patterns_test.exe"); trc=$?
 echo "$out" | grep -E 'FAIL|note:|shader_patterns_test:'
@@ -127,7 +132,7 @@ expect_log "summary of disabled features" "Engine-tier features disabled: engine
 expect_log "file tier summary" "File-tier features stay active: core detection"
 expect_log "ini line printed" "my_build = $(hash_of "$SIG")"
 expect_log "unlisted: read-only report" "Signature report (unlisted hoi4.exe build): read-only, nothing is hooked or patched"
-expect_log "unlisted: present signatures counted" "Signature report: 2/129 signatures and anchors match exactly once"
+expect_log "unlisted: present signatures counted" "Signature report: 2/137 signatures and anchors match exactly once"
 expect_log "unlisted: failing signature named" "FAILS kSigGameEntered: matches 0 times"
 expect_log "unlisted: code shapes summarised" "code shapes match where the resolver checks them"
 expect_log "unlisted: unreachable shape named" "NOT CHECKED kCodeTriggerFactory"

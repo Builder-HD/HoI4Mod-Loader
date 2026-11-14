@@ -66,6 +66,10 @@ add_library(hoi4_loader SHARED
     src/air_scenarios.cpp
     src/air_scenarios.h
     src/plugin_air_scenarios.cpp
+    src/engine_designers.cpp
+    src/equipment_designers.cpp
+    src/equipment_designers.h
+    src/plugin_equipment_designers.cpp
     src/plugin_attention_area.cpp
     src/engine_attention.cpp
     src/engine_province_data.cpp
@@ -133,6 +137,12 @@ if(HOI4_LOADER_BUILD_TESTS)
     target_compile_features(gui_patch_test PRIVATE cxx_std_17)
     target_compile_definitions(gui_patch_test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
     set_target_properties(gui_patch_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/$<0:>)
+
+    # equipment_designers without engine access: definitions, the tank_designer_view.gui patch (NOTES.md Part N).
+    add_executable(equipment_designers_test tests/equipment_designers_test.cpp src/equipment_designers.cpp src/script_tree.cpp src/gui_patch.cpp)
+    target_compile_features(equipment_designers_test PRIVATE cxx_std_17)
+    target_compile_definitions(equipment_designers_test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    set_target_properties(equipment_designers_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/$<0:>)
 
     # air_scenarios without engine access: definition parser, mod list, matching (NOTES.md Part L).
     add_executable(air_scenarios_test tests/air_scenarios_test.cpp src/air_scenarios.cpp src/script_tree.cpp src/mod_list.cpp)
