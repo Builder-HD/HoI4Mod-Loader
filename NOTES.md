@@ -6373,3 +6373,53 @@ window); a save loaded without the loader with such a design (expected: producib
 edit); another mod replacing `tank_designer_view.gui`; `hide_roles = no`.
 
 **Open (owner):** the `xp` key (N9 decision 7), stats per designer (part 2), air and naval windows.
+
+## N11: stats, XP and more options (owner, 2026-11-14)
+
+**Owner:** the XP option is wanted even though a machine without the loader would go out of sync
+("the loader is a necessity anyways"); more options are welcome as long as each is optional; start
+with the stats.
+
+### Findings (1.19.5; same addresses on 1.19.4.2)
+
+**Stats.** `FUN_141823950(view, a, b, basePanel, combatPanel, miscPanel)` (callers: the stats
+dispatcher `FUN_141823510` for the tank kind, and `FUN_1418247c0`; both pass the window) fills each
+panel with `Fill(panel, &{begin,end}, a, &{b's 16 bytes, byte 1}, view->[+0x5e84])`
+(`FUN_141e57270`) over static arrays of `{int id; int8 kind}` (kind 0 = a stat, 1 = a special row,
+-1 = assert). A row's label is `Localize(table[id])`: `FUN_1414822a0` reads `table` at
+`0x14312b560`, 78 `char*` loc keys, id 0 `STAT_ARMY_DEFAULT_MORALE` … id 77
+`STAT_COMMON_BUILD_COST_IC`. The value is `builder->[+0xa0 + 8*id]`. The script names
+(`soft_attack`) are interned tokens with no static table; the loader keeps its own name → loc key
+list and finds the id by the loc key in the game's table at runtime.
+
+**XP.**
+- Pool: `FUN_141338880(container, out, type)`: land → `container+0x10`, navy `+0x28`, air
+  `+0x40`, copied by `FUN_142572db0`. Callers: the commands' validation and the UI.
+- Deduction: the create and update commands' execute (RTTI `CCreateEquipmentVariantCommand` /
+  `CUpdateEquipmentVariantCommand`, slot 10) call `IsAir(type)` (`FUN_140cf4e10`) and then
+  `IsNaval(type)` (`FUN_140cf5570`) to choose air / navy / army deduction (each with its own side
+  effects, so the loader doesn't redo them).
+- Shown: the window's line `DESIGNER_ARMY_EXPERIENCE` (`£army_experience $VALUE$`) for the tank kind,
+  from the player's container (`session->vt[0xa0]()` → `FUN_140c07da0`) at `+0x10`, on
+  `view+0x135c8`. `DESIGNER_NAVY_EXPERIENCE` / `DESIGNER_AIR_EXPERIENCE` exist.
+- Cost tooltip: `FUN_1415c8470(?, mask, ?, ?, out)` picks army / navy / air text by three masks
+  (`mov rax, imm64` at +0x3c, +0x134, +0x22c).
+
+**Window elements.** Setup finds elements in the window's root container `view->[+0xf2b8]` by name
+(vtable `+0xa0`, `{ptr, len}`, flags 0), e.g. the role dropdown.
+
+### Decisions (all keys optional)
+
+1. **`stats = { base = { ... } combat = { ... } misc = { ... } }`**: the stat rows per panel, in that
+   order, by script name (the list in MODDING.md, e.g. `soft_attack`, `ap_attack`, `armor_value`,
+   `build_cost_ic`). A missing group keeps the window's own list; `{ }` empties the panel. Unknown
+   names are logged and skipped.
+2. **`xp = army | navy | air`**: the experience the design costs and the window shows. The loader
+   answers the pool function for listed archetypes, answers `IsAir` / `IsNaval` differently only
+   when called from those two deduction checks (by return address), and fixes the tooltip's mask and
+   the window's XP line. A game rule: every machine in multiplayer needs the loader and the mods.
+3. **`hide = { <element> ... }`**: elements of the tank window (names from
+   `interface/tank_designer_view.gui`) hidden while this designer's design is shown, shown again for
+   other designs.
+4. **Later candidates** (not in this step): an XP cost factor, a country trigger for who may use the
+   designer, a blueprint background per designer, the air and naval windows.
