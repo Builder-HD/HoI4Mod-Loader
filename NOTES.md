@@ -5912,9 +5912,11 @@ commit of the stack was rewritten L -> M before the rebase, references in code i
 2. `feature/railway-hover-mark`: hovering a railway queue entry outlines the line (needs 1). M7.
 3. `feature/attention-shaders`: outline/band/stripes styles, then every look a shader, mod shaders,
    `shader_variables`, these examples (needs 2). M8-M13.
+4. `feature/area-selector`: the area selector and province data as modules of their own, ported
+   onto 3 (needs 3; no behaviour change). M14.
 Independent of the chain: `notes/1.19.5-exe-diff` (docs only, merge any time).
 
-**Merge order: 0, 1, 2, 3.** Each PR's diff on GitHub includes the branches below it until those
+**Merge order: 0, 1, 2, 3, 4.** Each PR's diff on GitHub includes the branches below it until those
 are merged (the PRs come from a fork, so they can't target each other's branches; review each PR
 by its own commits). Merge with a merge commit or rebase-merge, not squash: a squash gives the
 lower branch new commits, and the next PR then shows its commits again and conflicts. If one is
@@ -5922,12 +5924,32 @@ squashed anyway, rebase the next branch: `git rebase --onto origin/main <old tip
 branch> <next branch>`. Stopping after any step leaves `main` consistent (built and smoke-tested at
 every tip); stopping after 0 leaves out all experimental work. Merging out of order (say 3 alone)
 pulls in everything below it.
-Signature counts in `tests/run_smoke.sh` per tip: 0: 118, 1: 134, 2: 139, 3: 129 (3 removes the
-eleven gradient-border signatures).
+Signature counts in `tests/run_smoke.sh` per tip: 0: 118, 1: 134, 2: 139, 3: 129, 4: 129 (3 removes
+the eleven gradient-border signatures; 4 adds none).
 
-**Not in the chain:** the local branch `area-selector` (a refactor of the old attention code into
-`area_select.cpp` and `engine_province_data.cpp`, M4) predates `state = this`, `random_provinces`
-and the shader parameters, so it no longer applies; it needs porting onto 3 by hand.
+## M14: the area selector as its own module (2026-11-14, branch `feature/area-selector`)
+
+The earlier local branch `area-selector` (M4's preparation, made on the first attention commits)
+no longer applied after `state = this`, `random_provinces` and the shader parameters; it is ported
+by hand onto `feature/attention-shaders`. No behaviour change:
+- `src/area_select.h/.cpp` (`AreaSelect`): `Keys()` (the area block's keys, `state = this` and
+  `random_provinces` included), `BlockParam()` (the repeatable `area = { }` parameter for any
+  command), `Available()`, `Select(args, index, scope)` -> ascending province ids, and
+  `ResetSession()`. The random counter moved with it: `Select` advances it once per call, as
+  `add_attention_area` did once per run, and attention_area resets it when a game is entered, so
+  the picks are the same as before on every machine.
+- `src/engine_province_data.cpp` (`ResolveProvinceData`, `HaveProvinceIds`): province objects and
+  ids, rects, coastal flag, controller and state owner, out of `engine_attention.cpp`. It reads the
+  province id offset from `kSigGotoStateTail` itself, so the camera code no longer provides it;
+  the hover and centre-on-province hooks check `HaveProvinceIds()`. Resolved before
+  `ResolveAttention`. No signature added or removed.
+- Checks: Release build clean, smoke test, `native_script_test` (233), `shader_patterns_test` (54).
+  Not run in game: on load, `loader.log` has a "Province data: id +0x.., ..." line in place of
+  "Attention areas: map data ...", the camera line no longer names the id, and areas select as before
+  (Gotland/Hainan ids, China's coast, random provinces).
+- Still to decide for a selector feature of its own (M4): how its children get a province (a
+  province scope, or the province's state scope with the id in a temp variable), the iterator's
+  name and form (`every_selected_province`?), and which vanilla effects take a province there.
 
 ## M15: the #19 review (2026-11-14, owner Builder-HD)
 

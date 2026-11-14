@@ -66,6 +66,9 @@ add_library(hoi4_loader SHARED
     src/plugin_air_scenarios.cpp
     src/plugin_attention_area.cpp
     src/engine_attention.cpp
+    src/engine_province_data.cpp
+    src/area_select.cpp
+    src/area_select.h
     src/engine.h
     src/lifecycle.cpp
     src/lifecycle.h
