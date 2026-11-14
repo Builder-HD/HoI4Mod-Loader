@@ -264,33 +264,42 @@ int ReadCostPercent() {
     return best.percent;
 }
 
-// Alt+Shift+click on a railway map badge: one more dismantle level on that segment. The click comes
-// from the UI, so the change waits for the next safe point on the main thread. Only where local
-// writes are allowed (single player): a click happens on one machine only.
+// Clicks on a railway map badge: Alt+Shift+click one more dismantle level on that segment; on a
+// segment being dismantled, a click or right click one level less, with Shift no dismantling at
+// all. The click comes from the UI, so the change waits for the next safe point on the main
+// thread. Only where local writes are allowed (single player): a click happens on one machine only.
 struct IconClick {
     int tag;
     std::vector<int> path;
+    Engine::RailwayClick action;
 };
 
 void QueueClicked(void* ctx) {
     IconClick* c = (IconClick*)ctx;
-    int r = Engine::QueueOrDeepenRailwayDismantle(c->tag, c->path);
+    const char* what;
+    if (c->action == Engine::RailwayClick::kDeepen) {
+        int r = Engine::QueueOrDeepenRailwayDismantle(c->tag, c->path);
+        what = r == 2 ? "dismantle entry one level deeper" : r == 1 ? "dismantle entry queued" : "nothing to dismantle";
+    } else {
+        int r = Engine::LessenRailwayDismantle(c->tag, c->path, c->action == Engine::RailwayClick::kStop);
+        what = r == 2 ? "dismantle entry cancelled" : r == 1 ? "dismantle entry one level less" : "no dismantle entry";
+    }
     Log("railway_queue: badge click on %d -> %d (%zu provinces): %s", c->path.front(), c->path.back(), c->path.size(),
-        r == 2 ? "dismantle entry one level deeper" : r == 1 ? "dismantle entry queued" : "nothing to dismantle");
+        what);
     delete c;
 }
 
-bool OnIconClick(const std::vector<int>& path) {
+bool OnIconClick(const std::vector<int>& path, Engine::RailwayClick action) {
     const char* why = nullptr;
     if (!CurrentSessionSinglePlayer(&why)) {
         static bool logged = false;
-        if (!logged) Log("railway_queue: Alt+Shift+click dismantling is single player only (%s); click ignored", why);
+        if (!logged) Log("railway_queue: badge clicks on dismantling are single player only (%s); click ignored", why);
         logged = true;
-        return true;  // swallowed: no surprise vanilla Alt+Shift click either
+        return true;  // swallowed: no surprise vanilla click either
     }
     int tag = Engine::PlayerCountryTag();
     if (tag <= 0) return false;
-    IconClick* c = new IconClick{tag, path};
+    IconClick* c = new IconClick{tag, path, action};
     if (!RunOnMainThread(&QueueClicked, c)) {
         delete c;
         return false;

@@ -798,6 +798,107 @@ RailwayIconClick_t g_onIconClick = nullptr;
 // hidden flag), both read from kSigRailIconText: +0x75 and ~0x10 on the checked build.
 uint32_t g_iconFlags = 0;
 uint8_t g_iconShownMask = 0;
+uint32_t g_iconLevel = 0, g_iconTarget = 0;  // the segment's level and construction target
+uint32_t g_iconHammer = 0;                   // the under-construction mark element (H7; 0: none)
+// The badge tooltip (H7): this = icon + g_tipSelfToIcon; the click hints string at out+g_tipHints.
+using BadgeTip_t = char(__fastcall*)(void* self, void* arg, void* out);
+using StrNewline_t = void(__fastcall*)(void* str);
+using StrAppend_t = void(__fastcall*)(void* str, const char* p, size_t n);
+BadgeTip_t g_badgeTipOrig = nullptr;
+StrNewline_t g_strNewline = nullptr;
+StrAppend_t g_strAppend = nullptr;
+uint32_t g_tipSelfToIcon = 0, g_tipHints = 0;
+using IconVoid_t = void(__fastcall*)(void* icon);
+IconVoid_t g_iconRightClickOrig = nullptr;
+
+// --- Lines that cover only part of a segment ------------------------------------------------
+// The engine works a railway line link by link along its own path, but the badge shows a line, and
+// a click changes it, only when its path is exactly the badge's segment (FindRailwayLine). Removing
+// a railway can take away a junction, so two segments merge and a line queued on one of them no
+// longer matches anything: its brown target goes and a click would queue a second, overlapping line.
+// The line keeps its own stretch; the badge shows it and a click changes it (NOTES.md H3).
+using FindLine_t = void*(__fastcall*)(const void* path, const int* tag);
+FindLine_t g_findLineOrig = nullptr;
+uint8_t* g_findLineFn = nullptr;
+
+bool SharesLink(const int* a, int na, const int* b, int nb) {
+    for (int i = 0; i + 1 < na; ++i)
+        for (int j = 0; j + 1 < nb; ++j)
+            if ((a[i] == b[j] && a[i + 1] == b[j + 1]) || (a[i] == b[j + 1] && a[i + 1] == b[j])) return true;
+    return false;
+}
+
+// The country's first railway line (queue order) of the given kind that has a link in `path`.
+void* OverlappingLine(int tag, const int* path, int count, bool dismantle) {
+    if (tag <= 0 || !path || count < 2 || !g_lineList) return nullptr;
+    void* country = g_tagToCountry(&tag);
+    void* construction = country ? Rd<void*>(country, g_construction) : nullptr;
+    if (!construction) return nullptr;
+    void* const* lines = Rd<void* const*>(construction, g_lineList);
+    int n = Rd<int>(construction, g_lineListCount);
+    for (int i = 0; lines && i < n && i < 10000; ++i) {
+        void* line = lines[i];
+        if (!line || *(void***)line != g_vtLine || IsDismantleLine(line) != dismantle) continue;
+        if (Rd<uint8_t>(line, g_lineCancelled)) continue;  // leaves the queue at the next daily update
+        int lc;
+        const int* lp = LinePath(line, &lc);
+        if (lc && SharesLink(lp, lc, path, count)) return line;
+    }
+    return nullptr;
+}
+
+const int* IconPathRaw(void* icon, int* n) {
+    const uint8_t* arr = (const uint8_t*)icon + g_iconPath;
+    const int* data = Rd<const int*>(arr, 0);
+    *n = Rd<int>(arr, 0xc);
+    return data && *n >= 2 && *n <= 4096 ? data : nullptr;
+}
+
+// The target to show on a badge whose segment has no line of its own but shares links with one of
+// the player's upgrade lines; 0 to leave the badge as the engine set it.
+int PartialTarget(void* icon) {
+    if (!g_enabled || !g_iconTarget || (MainThreadQueueAvailable() && !IsMainThread())) return 0;
+    int level = Rd<int>(icon, g_iconLevel);
+    if (Rd<int>(icon, g_iconTarget) > level) return 0;  // the engine already shows a line here
+    int n;
+    const int* path = IconPathRaw(icon, &n);
+    int tag = PlayerCountryTag();
+    if (!path || tag <= 0 || !g_lineList) return 0;
+    // The highest target among the player's upgrade lines that share a link with the segment.
+    void* country = g_tagToCountry(&tag);
+    void* construction = country ? Rd<void*>(country, g_construction) : nullptr;
+    void* const* lines = construction ? Rd<void* const*>(construction, g_lineList) : nullptr;
+    int count = construction ? Rd<int>(construction, g_lineListCount) : 0, target = 0;
+    for (int i = 0; lines && i < count && i < 10000; ++i) {
+        void* line = lines[i];
+        if (!line || *(void***)line != g_vtLine || IsDismantleLine(line) || LineTarget(line) <= target) continue;
+        int lc;
+        const int* lp = LinePath(line, &lc);
+        if (lc && SharesLink(lp, lc, path, n)) target = LineTarget(line);
+    }
+    return target > level ? target : 0;
+}
+
+volatile LONG g_partialFaultLogged = 0;
+void LogPartialFaultOnce(const char* where) {
+    if (!InterlockedExchange(&g_partialFaultLogged, 1))
+        Log("ERROR: railway_queue: fault in the partial line lookup (%s); the badge stays vanilla", where);
+}
+
+// Vanilla's lookup first; without an exact match, an upgrade line sharing a link with the segment.
+void* __fastcall FindLineDetour(const void* path, const int* tag) {
+    void* line = g_findLineOrig(path, tag);
+    if (line || !g_enabled || !tag) return line;
+    __try {
+        const PathArray* p = (const PathArray*)path;
+        if (p && p->data && p->count >= 2 && p->count <= 4096) line = OverlappingLine(*tag, p->data, p->count, false);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        LogPartialFaultOnce("click");
+        line = nullptr;
+    }
+    if (line) Log("railway_queue: badge click: no line for exactly this segment; changing line %p (shares a link)", line);
+    return line;
+}
 
 // What the badge shows while the dismantle key is held: vanilla's removal cross (the sprite the
 // state view's cross uses) as a text icon, or a red X when the icon delimiter is unknown.
@@ -852,9 +953,98 @@ bool IconDismantleAllowed(void* icon, const std::vector<int>& path) {
     return g_iconClickable(icon);
 }
 
+int PartialTargetSafe(void* icon) {
+    __try {
+        return PartialTarget(icon);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        LogPartialFaultOnce("badge");
+        return 0;
+    }
+}
+
+// --- Segments being dismantled (NOTES.md H7) ------------------------------------------------
+// As vanilla marks a pending upgrade (target number in orange, the under-construction mark, a
+// "Currently upgrading" line, its own click hints), a segment with the player's dismantle entry
+// shows the entry's target in red with that mark, a "Currently dismantling" line and its own hints.
+// Clicks on it change the entry: one level less, with Shift none at all. Vanilla's own click or
+// right click there would post a level change that clamps the target up to the entry's base and
+// so turns the dismantling into a rebuild.
+bool SameLinePath(void* line, const int* path, int n) {
+    int count;
+    const int* p = LinePath(line, &count);
+    if (count != n || !p) return false;
+    bool same = true, reversed = true;
+    for (int i = 0; i < count; ++i) {
+        same &= p[i] == path[i];
+        reversed &= p[i] == path[count - 1 - i];
+    }
+    return same || reversed;
+}
+
+// The player's dismantle entry for this badge's segment: the one with exactly its path, else one
+// sharing a link with it. Main thread only (null elsewhere).
+void* DismantleLineOnIcon(void* icon) {
+    if (!g_enabled || !g_lineList || !g_iconLevel || (MainThreadQueueAvailable() && !IsMainThread())) return nullptr;
+    int n;
+    const int* path = IconPathRaw(icon, &n);
+    int tag = path ? PlayerCountryTag() : 0;
+    if (tag <= 0) return nullptr;
+    void* country = g_tagToCountry(&tag);
+    void* construction = country ? Rd<void*>(country, g_construction) : nullptr;
+    void* const* lines = construction ? Rd<void* const*>(construction, g_lineList) : nullptr;
+    int count = construction ? Rd<int>(construction, g_lineListCount) : 0;
+    for (int i = 0; lines && i < count && i < 10000; ++i)
+        if (IsDismantleLine(lines[i]) && !Rd<uint8_t>(lines[i], g_lineCancelled) && SameLinePath(lines[i], path, n))
+            return lines[i];
+    return OverlappingLine(tag, path, n, true);
+}
+
+void* DismantleLineOnIconSafe(void* icon) {
+    __try {
+        return DismantleLineOnIcon(icon);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        LogPartialFaultOnce("dismantle lookup");
+        return nullptr;
+    }
+}
+
+// Shows a badge element hidden by the update (the text's flags, mask and show slot).
+void ShowElement(void* element) {
+    Wr<uint8_t>(element, g_iconFlags, Rd<uint8_t>(element, g_iconFlags) & g_iconShownMask);
+    ((IconFn_t)(*(void***)element)[g_iconShowSlot])(element);
+}
+
+// After the update: the dismantle entry's target in red and the under-construction mark, on a
+// badge whose number is showing (not in cooldown). A railway going away entirely shows its current
+// level in red instead of a 0.
+void MarkDismantle(void* icon) {
+    void* text = Rd<void*>(icon, g_iconText);
+    if (!text || (Rd<uint8_t>(text, g_iconFlags) & (uint8_t)~g_iconShownMask)) return;  // number hidden
+    void* line = DismantleLineOnIconSafe(icon);
+    int target = line ? LineTarget(line) : 0, level = Rd<int>(icon, g_iconLevel);
+    if (!line || target >= level) return;
+    char num[16];
+    int len = snprintf(num, sizeof num, "%d", target > 0 ? target : level);  // going away: the level it has
+    TextView v{num, len};
+    EngineString s;
+    g_colorize(&s, 'R', &v);
+    g_iconSetText(text, &s);  // takes the string (frees it)
+    if (void* hammer = g_iconHammer ? Rd<void*>(icon, g_iconHammer) : nullptr) ShowElement(hammer);
+}
+
 void __fastcall IconUpdateDetour(void* icon) {
-    g_iconUpdateOrig(icon);
-    if (!g_enabled || !DismantleKeyHeld()) return;
+    // A line covering part of this segment: the update shows its target ("level -> target", the
+    // under-construction mark), then the engine's own value goes back, so nothing else sees ours.
+    if (int shown = PartialTargetSafe(icon)) {
+        int saved = Rd<int>(icon, g_iconTarget);
+        Wr<int>(icon, g_iconTarget, shown);
+        g_iconUpdateOrig(icon);
+        Wr<int>(icon, g_iconTarget, saved);
+    } else {
+        g_iconUpdateOrig(icon);
+    }
+    if (!g_enabled) return;
+    if (!DismantleKeyHeld()) return MarkDismantle(icon);
     std::vector<int> path;
     void* text = Rd<void*>(icon, g_iconText);
     if (!text || !IconPath(icon, &path) || PathMaxLevel(path) <= 0 || !IconDismantleAllowed(icon, path)) return;
@@ -867,16 +1057,75 @@ void __fastcall IconUpdateDetour(void* icon) {
         g_colorize(&s, 'R', &x);
     }
     g_iconSetText(text, &s);  // takes the string (frees it)
-    Wr<uint8_t>(text, g_iconFlags, Rd<uint8_t>(text, g_iconFlags) & g_iconShownMask);
-    ((IconFn_t)(*(void***)text)[g_iconShowSlot])(text);
+    ShowElement(text);
+}
+
+// The tooltip texts: the mod's localisation when it has the keys, else built-in English with the
+// engine's colour codes (0x11 + letter, 0x11 '!' to end, as Colorize writes them).
+std::string DismantleTooltipLine(int target) {
+    const EngineString* custom = LocalizeKey(kRailwayDismantlingKey);
+    std::string s = custom ? custom->c_str()
+                           : "Currently dismantling \x11YRailway Connection\x11! to level \x11Y$LEVEL$\x11!";
+    std::string level = std::to_string(target);
+    for (size_t at; (at = s.find("$LEVEL$")) != std::string::npos;) s.replace(at, 7, level);
+    return s;
+}
+std::string DismantleHints() {
+    const EngineString* custom = LocalizeKey(kRailwayDismantleHintsKey);
+    return custom ? custom->c_str()
+                  : "\x11GClick\x11! or \x11GRight-Click\x11! to dismantle one level less\n"
+                    "\x11GShift+Click\x11! to stop dismantling\n"
+                    "\x11GAlt+Shift+Click\x11! to dismantle one more level";
+}
+
+void AppendDismantleTooltip(void* out, int target) {
+    std::string line = DismantleTooltipLine(target);
+    g_strNewline(out);
+    g_strAppend(out, line.data(), line.size());
+    std::string hints = DismantleHints();
+    EngineString* h = (EngineString*)((uint8_t*)out + g_tipHints);
+    FreeEngineString(h);
+    ConstructEngineString(h, hints.data(), hints.size());
+}
+
+char __fastcall BadgeTooltipDetour(void* self, void* arg, void* out) {
+    char r = g_badgeTipOrig(self, arg, out);
+    if (!r || !out || !g_enabled) return r;
+    void* icon = (uint8_t*)self - g_tipSelfToIcon;
+    void* line = DismantleLineOnIconSafe(icon);
+    if (line && LineTarget(line) < Rd<int>(icon, g_iconLevel)) AppendDismantleTooltip(out, LineTarget(line));
+    return r;
+}
+
+bool ShiftOnlyHeld() {
+    if (!(GetAsyncKeyState(VK_SHIFT) & 0x8000) || (GetAsyncKeyState(VK_MENU) & 0x8000)) return false;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(GetForegroundWindow(), &pid);
+    return pid == GetCurrentProcessId();
+}
+
+// A click on a segment being dismantled: one level less, with Shift none. True if handled.
+bool LessenClick(void* icon) {
+    if (!g_enabled || !g_onIconClick || !DismantleLineOnIconSafe(icon)) return false;
+    std::vector<int> path;
+    return IconPath(icon, &path) &&
+           g_onIconClick(path, ShiftOnlyHeld() ? RailwayClick::kStop : RailwayClick::kLessen);
 }
 
 void __fastcall IconClickDetour(void* icon) {
     if (g_enabled && g_onIconClick && DismantleKeyHeld()) {
         std::vector<int> path;
-        if (IconPath(icon, &path) && IconDismantleAllowed(icon, path) && g_onIconClick(path)) return;
+        if (IconPath(icon, &path) && IconDismantleAllowed(icon, path) && g_onIconClick(path, RailwayClick::kDeepen))
+            return;
+    } else if (LessenClick(icon)) {
+        return;
     }
     g_iconClickOrig(icon);
+}
+
+void __fastcall IconRightClickDetour(void* icon) {
+    if (!DismantleKeyHeld() && LessenClick(icon)) return;
+    g_iconRightClickOrig(icon);
 }
 
 bool SamePath(void* line, const std::vector<int>& path) {
@@ -889,6 +1138,124 @@ bool SamePath(void* line, const std::vector<int>& path) {
         reversed &= p[i] == path[count - 1 - i];
     }
     return same || reversed;
+}
+}  // namespace
+
+// --- Badge segments split where the railway level changes (NOTES.md H6) ----------------------
+// The engine's segment builder walks the railway from node to node (a node: a province with a
+// supply flag in the supply system's per-province array, or with three or more railway links) and
+// gives each segment the level of its lowest link. Vanilla segments always have one level, since an
+// upgrade covers a whole segment; after a removal joins two stretches at different levels, the
+// merged badge shows the lower one. While the builder runs, it gets a copy of that array in which
+// every province with exactly two railway links at different levels has a node flag set, so the
+// stretches stay apart. The supply system's own data is never changed. Main thread (the map icon
+// update).
+namespace {
+using SegmentBuilder_t = void(__fastcall*)(void*, void*, void*, void*, void*, void*, void*, void*, void*, uintptr_t,
+                                           uintptr_t);
+SegmentBuilder_t g_builderOrig = nullptr;
+uint32_t g_nodeFlag = 0;  // the supply entry byte the node test reads (+0x15 on the checked build)
+const size_t kSupplyEntrySize = 0x20;
+std::vector<int> g_levelChanges;       // provinces where the level changes (rebuilt per call)
+std::vector<uint8_t> g_supplyCopy;     // the array copy handed to the builder
+volatile LONG g_splitFaultLogged = 0;
+
+struct EngineArray {  // CPdxArray as the builder reads it: data, capacity, count at +0xc, allocator
+    void* data;
+    int capacity;
+    int count;
+    void* allocator;
+};
+
+// Provinces with exactly two railway links whose levels differ. False on a fault.
+bool CollectLevelChanges(int* count) {
+    *count = 0;
+    __try {
+        void* m = Manager();
+        int n = m ? InfoCount(m) : 0;
+        for (int p = 1; p < n; ++p) {
+            void* info = Info(m, p);
+            if (!info) continue;
+            int pairs;
+            Pair* pr = Pairs(info, &pairs);
+            if (pairs == 2 && pr && pr[0].level != pr[1].level) {
+                if ((size_t)*count < g_levelChanges.size()) g_levelChanges[*count] = p;
+                ++*count;
+            }
+        }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// The segment records the badges are made from (NOTES.md H7): the badge table (the builder's
+// seventh argument) is a hash table of entries keyed by a path's middle province, each with an
+// array of 0x30-byte records (level, target, ...).
+uint32_t g_recArray = 0, g_recLevel = 0, g_recTarget = 0;  // 0 = not resolved
+const size_t kTableEntrySize = 0x28, kRecordSize = 0x30;
+volatile LONG g_recFaultLogged = 0;
+
+// A dismantle entry going to 0 gives its segment the target 0, and the map icon refresh makes no
+// badge for a record whose target is below 1 (vanilla never has one). Such a record gets its level
+// as the target, so the badge stays until the railway is gone; the update hook then marks it.
+void KeepRemovalBadges(void* table) {
+    if (!g_recTarget || !table) return;
+    __try {
+        uint8_t* entries = Rd<uint8_t*>(table, 0x8);
+        uint32_t mask = Rd<uint32_t>(table, 0x14);
+        size_t slots = (size_t)mask + 1 + Rd<uint8_t>(table, 0x18);  // entries past the mask: probe limit
+        if (!entries || mask >= (1u << 24)) return;
+        for (size_t i = 0; i < slots; ++i) {
+            uint8_t* e = entries + i * kTableEntrySize;
+            if (e[4] == 0 || e[4] == 0xff) continue;  // empty, end marker
+            uint8_t* recs = Rd<uint8_t*>(e, g_recArray);
+            int count = Rd<int>(e, g_recArray + 0xc);
+            for (int r = 0; recs && r < count && r < 100000; ++r) {
+                uint8_t* rec = recs + (size_t)r * kRecordSize;
+                int level = Rd<int>(rec, g_recLevel);
+                if (level >= 1 && Rd<int>(rec, g_recTarget) < 1) Wr<int>(rec, g_recTarget, level);
+            }
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        if (!InterlockedExchange(&g_recFaultLogged, 1))
+            Log("ERROR: railway_queue: fault in the badge table; a railway dismantled to 0 may lose its badge");
+    }
+}
+
+void SplitAndBuild(void* a1, void* supplyArray, void* a3, void* a4, void* a5, void* a6, void* a7, void* a8,
+                   void* a9, uintptr_t a10, uintptr_t a11) {
+    const EngineArray* src = (const EngineArray*)supplyArray;
+    if (!g_enabled || !g_nodeFlag || !src || !src->data || src->count <= 0 || src->count > 1000000)
+        return g_builderOrig(a1, supplyArray, a3, a4, a5, a6, a7, a8, a9, a10, a11);
+    // Two passes when the first one overflows the buffer (more level changes than last time).
+    int found = 0;
+    bool ok = CollectLevelChanges(&found);
+    if (ok && (size_t)found > g_levelChanges.size()) {
+        g_levelChanges.resize((size_t)found + 64);
+        ok = CollectLevelChanges(&found);
+    }
+    if (!ok || found == 0 || (size_t)found > g_levelChanges.size()) {
+        if (!ok && !InterlockedExchange(&g_splitFaultLogged, 1))
+            Log("ERROR: railway_queue: fault while looking for railway level changes; badges are not split");
+        return g_builderOrig(a1, supplyArray, a3, a4, a5, a6, a7, a8, a9, a10, a11);
+    }
+    size_t bytes = (size_t)src->count * kSupplyEntrySize;
+    if (g_supplyCopy.size() < bytes) g_supplyCopy.resize(bytes);
+    memcpy(g_supplyCopy.data(), src->data, bytes);
+    for (int i = 0; i < found; ++i) {
+        int p = g_levelChanges[i];
+        if (p > 0 && p < src->count) g_supplyCopy[(size_t)p * kSupplyEntrySize + g_nodeFlag] = 1;
+    }
+    EngineArray copy = *src;
+    copy.data = g_supplyCopy.data();
+    g_builderOrig(a1, &copy, a3, a4, a5, a6, a7, a8, a9, a10, a11);
+}
+
+void __fastcall SegmentBuilderDetour(void* a1, void* supplyArray, void* a3, void* a4, void* a5, void* a6, void* a7,
+                                     void* a8, void* a9, uintptr_t a10, uintptr_t a11) {
+    SplitAndBuild(a1, supplyArray, a3, a4, a5, a6, a7, a8, a9, a10, a11);
+    if (g_enabled) KeepRemovalBadges(a7);
 }
 }  // namespace
 
@@ -944,6 +1311,86 @@ bool HookRailwayMapIcons(RailwayIconClick_t onClick) {
     g_onIconClick = onClick;
     Log("Railway badges: path +0x%x, text +0x%x (show slot %u), construction lines +0x%x/+0x%x", g_iconPath, g_iconText,
         g_iconShowSlot, g_lineList, g_lineListCount);
+    // Lines covering part of a segment (optional): the level fields inside the update, and the click
+    // must call FindRailwayLine (the function kSigRailLineList starts).
+    uint8_t* levels = SigFindUnique("rail_icon_levels", kSigRailIconLevels);
+    bool clickCallsFind = false;
+    for (size_t i = 0; i + 5 <= 0x270; ++i)
+        if (click[i] == 0xE8 && SigFollowRel32(click + i) == list) clickCallsFind = true;
+    if (levels && levels > update && levels < update + 0x200 && clickCallsFind) {
+        g_iconLevel = Rd<uint32_t>(levels, kSigRailIconLevelDisp);
+        g_iconTarget = Rd<uint32_t>(levels, kSigRailIconTargetDisp);
+        g_findLineFn = list;
+        Log("Railway badges: level +0x%x, target +0x%x; lines covering part of a segment are shown and changed",
+            g_iconLevel, g_iconTarget);
+    } else {
+        Log("railway_queue: badge level fields or FindRailwayLine not as analysed; only exact segment lines show on badges");
+    }
+    // Segments being dismantled (optional, needs the level fields): the under-construction mark (in
+    // the update, shown like the text), the tooltip (its target read relative to the icon's) and
+    // the right click (same Clickable and path as the left click).
+    if (g_iconLevel) {
+        uint8_t* hammer = SigFindUnique("rail_icon_hammer", kSigRailIconHammer);
+        if (hammer && hammer > update && hammer < update + 0x600 &&
+            Rd<uint8_t>(hammer, kSigRailHammerFlagsDisp) == g_iconFlags &&
+            Rd<uint8_t>(hammer, kSigRailHammerMask) == g_iconShownMask &&
+            Rd<uint8_t>(hammer, kSigRailHammerShowDisp) / 8u == g_iconShowSlot)
+            g_iconHammer = Rd<uint32_t>(hammer, kSigRailHammerDisp);
+        uint8_t* tip = SigFindUnique("rail_badge_tooltip", kSigRailBadgeTooltip);
+        uint32_t tipTarget = tip ? Rd<uint32_t>(tip, kSigRailTipTargetDisp) : 0;
+        if (tip && tipTarget && tipTarget < g_iconTarget && g_iconTarget - tipTarget < 0x200) {
+            g_tipSelfToIcon = g_iconTarget - tipTarget;
+            g_tipHints = Rd<uint8_t>(tip, kSigRailTipHintsImm);
+            g_strNewline = (StrNewline_t)SigFollowRel32(tip + kSigRailTipNewlineCall);
+            g_strAppend = (StrAppend_t)SigFollowRel32(tip + kSigRailTipAppendCall);
+            if (!HookQueue(tip, (void*)&BadgeTooltipDetour, (void**)&g_badgeTipOrig, "railway_badge_tooltip"))
+                g_tipSelfToIcon = 0;
+        }
+        uint8_t* right = SigFindUnique("rail_icon_right_click", kSigRailIconRightClick);
+        bool rightOk = right && (IconBool_t)SigFollowRel32(right + kSigRailRightClickableCall) == g_iconClickable &&
+                       Rd<uint32_t>(right, kSigRailRightPathDisp) == g_iconPath &&
+                       HookQueue(right, (void*)&IconRightClickDetour, (void**)&g_iconRightClickOrig,
+                                 "railway_icon_right_click");
+        Log("Railway badges: dismantling shown (mark +0x%x, tooltip %s), right click %s", g_iconHammer,
+            g_tipSelfToIcon ? "yes" : "no", rightOk ? "changes the dismantle entry" : "vanilla");
+    }
+    // Badge segments split where the level changes (optional): the node test must lie inside the
+    // builder, read its second argument's home slot, and step 0x20-byte entries.
+    uint8_t* builder = SigFindUnique("rail_segment_builder", kSigRailSegmentBuilder);
+    uint8_t* nodeTest = SigFindUnique("rail_segment_node_test", kSigRailSegmentNodeTest);
+    int32_t rbpFromEntry = builder ? Rd<int32_t>(builder, kSigRailBuilderRbpDisp) : 0;  // lea rbp,[rax+disp]
+    if (builder && nodeTest && nodeTest > builder && nodeTest < builder + 0x1400) {
+        int32_t home = Rd<int32_t>(nodeTest, kSigRailNodeTestHomeDisp);  // [rbp+home] = rdx home
+        if (rbpFromEntry < 0 && (int64_t)home + rbpFromEntry == 0x10) {
+            g_nodeFlag = Rd<uint8_t>(nodeTest, kSigRailNodeTestFlagDisp);
+            if (g_nodeFlag >= kSupplyEntrySize) g_nodeFlag = 0;
+        }
+    }
+    // Badges for railways dismantled to 0 (optional): the record emission must lie inside the
+    // builder, read the table from the seventh argument's home slot (+0x38), and insert through the
+    // table shape analysed.
+    uint8_t* record = builder ? SigFindUnique("rail_segment_record", kSigRailSegmentRecord) : nullptr;
+    if (record && record > builder && record < builder + 0x1400 && rbpFromEntry < 0 &&
+        (int64_t)Rd<int32_t>(record, kSigRailRecTableHome) + rbpFromEntry == 0x38 &&
+        SigMatchAt(SigFollowRel32(record + kSigRailRecInsertCall), kShapeRailSegmentTableInsert)) {
+        g_recArray = Rd<uint8_t>(record, kSigRailRecArrayImm);
+        g_recLevel = Rd<uint8_t>(record, kSigRailRecLevelDisp);
+        g_recTarget = Rd<uint8_t>(record, kSigRailRecTargetDisp);
+        if (g_recLevel + 4 > kRecordSize || g_recTarget + 4 > kRecordSize || g_recArray + 0x10 > kTableEntrySize)
+            g_recTarget = 0;
+    }
+    if ((g_nodeFlag || g_recTarget) &&
+        !HookQueue(builder, (void*)&SegmentBuilderDetour, (void**)&g_builderOrig, "railway_segment_builder"))
+        g_nodeFlag = g_recTarget = 0;
+    if (g_nodeFlag)
+        Log("Railway badges: segments split where the level changes (supply entry flag +0x%x)", g_nodeFlag);
+    else
+        Log("railway_queue: segment builder not found or not as analysed; badges are not split by level");
+    if (!g_recTarget) Log("railway_queue: badge records not as analysed; a railway dismantled to 0 shows no badge");
+    if (g_findLineFn && !HookQueue(g_findLineFn, (void*)&FindLineDetour, (void**)&g_findLineOrig, "railway_find_line")) {
+        g_findLineFn = nullptr;
+        g_iconTarget = 0;
+    }
     return HookQueue(click, (void*)&IconClickDetour, (void**)&g_iconClickOrig, "railway_icon_click") &&
            HookQueue(update, (void*)&IconUpdateDetour, (void**)&g_iconUpdateOrig, "railway_icon_update");
 }
@@ -955,9 +1402,16 @@ int QueueOrDeepenRailwayDismantle(int tag, const std::vector<int>& path) {
     if (!construction) return 0;
     void* const* lines = Rd<void* const*>(construction, g_lineList);
     int n = Rd<int>(construction, g_lineListCount);
-    for (int i = 0; lines && i < n && i < 10000; ++i) {
-        void* line = lines[i];
-        if (!IsDismantleLine(line) || !SamePath(line, path)) continue;
+    // The entry for exactly this segment, else one covering part of it (segments merged after it
+    // was queued): that entry goes a level deeper on its own stretch.
+    void* match = nullptr;
+    for (int i = 0; lines && i < n && i < 10000 && !match; ++i)
+        if (IsDismantleLine(lines[i]) && SamePath(lines[i], path)) match = lines[i];
+    if (!match) {  // one already going down to nothing leaves the rest of the segment to a new entry
+        match = OverlappingLine(tag, path.data(), (int)path.size(), true);
+        if (match && LineTarget(match) <= 0) match = nullptr;
+    }
+    if (void* line = match) {
         int target = LineTarget(line);
         void* holder = LineHolder(line);
         if (target <= 0 || !holder) return 0;  // already going down to nothing
@@ -976,6 +1430,44 @@ int QueueOrDeepenRailwayDismantle(int tag, const std::vector<int>& path) {
     }
     int top = PathMaxLevel(path);
     return top > 0 && QueueRailwayDismantle(tag, path, top, top - 1) ? 1 : 0;
+}
+
+int LessenRailwayDismantle(int tag, const std::vector<int>& path, bool stop) {
+    if (!g_enabled || !g_lineList || !RailwaysReady() || path.size() < 2) return 0;
+    void* country = g_tagToCountry(&tag);
+    void* construction = country ? Rd<void*>(country, g_construction) : nullptr;
+    if (!construction) return 0;
+    void* const* lines = Rd<void* const*>(construction, g_lineList);
+    int n = Rd<int>(construction, g_lineListCount);
+    void* line = nullptr;
+    for (int i = 0; lines && i < n && i < 10000 && !line; ++i)
+        if (IsDismantleLine(lines[i]) && !Rd<uint8_t>(lines[i], g_lineCancelled) && SamePath(lines[i], path))
+            line = lines[i];
+    if (!line) line = OverlappingLine(tag, path.data(), (int)path.size(), true);
+    void* holder = line ? LineHolder(line) : nullptr;
+    if (!holder) return 0;
+    int target = LineTarget(line), count, level;
+    const int* lp = LinePath(line, &count);
+    // Nothing left to dismantle one level up (or the marker target < base would go): cancel, as the
+    // engine cancels a line; the production manager removes it at the next daily update.
+    if (stop || target + 1 >= LineBase(line) || FirstLinkAbove(lp, count, target + 1, &level) < 0) {
+        ((LineFn_t)Slot(line, g_slotCancel))(line);
+        RefreshConstructionView();
+        return 2;
+    }
+    // One level less: that level's work comes off what remains (the work already done stays).
+    RefreshCostPercent();
+    int levels;
+    int64_t before = CostLeft(line, holder, &levels);
+    Wr<int>(line, g_lineTarget, target + 1);
+    int64_t less = before - CostLeft(line, holder, &levels);
+    int64_t remaining = Rd<int64_t>(line, g_lineRemaining);
+    if (remaining > 0) Wr<int64_t>(line, g_lineRemaining, remaining - less > 1 ? remaining - less : 1);
+    int64_t total = Rd<int64_t>(line, g_lineTotal) - less;
+    Wr<int64_t>(line, g_lineTotal, total > 0 ? total : 0);
+    ((LineFn_t)g_progressFn)(line);  // hooked: our progress update
+    RefreshConstructionView();
+    return 1;
 }
 
 bool QueueRailwayDismantle(int tag, const std::vector<int>& path, int from, int to) {

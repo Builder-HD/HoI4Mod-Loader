@@ -4,6 +4,28 @@ Release versions name the DLL package. The script version is the number script r
 `global.hoi4_loader_version` (MODDING.md "Versions and compatibility"). Development went in parts
 A–F; NOTES.md has the findings and test results behind each.
 
+## Unreleased
+
+- **Railway badges after a merge** (`railway_queue`; NOTES.md H6). When a removed railway takes a
+  junction with it, the two segments next to it merge into one badge. An entry queued on one of
+  them used to vanish from the badge, and a click queued a second, overlapping entry. Now the entry
+  keeps working on its own stretch, the badge shows its target, a click changes it, and
+  Alt+Shift+click deepens a dismantle entry on part of the segment. Badges are also split where
+  the railway level changes, as vanilla would show them: a merged segment used to show only its
+  lowest link's level, so a finished upgrade looked lost. The engine's segment builder gets a copy
+  of the supply array with those provinces marked as nodes; supply itself is unchanged. Hooks
+  `FindRailwayLine` (only the badge click calls it) and the segment builder; three new signatures,
+  and `kSigRailLineList` now starts at `FindRailwayLine`. Checked on 1.19.4.2 only.
+- **Railway badges while dismantling** (`railway_queue`; NOTES.md H7). A segment with a dismantle
+  entry now looks like one being upgraded: the target level in red with the under-construction
+  mark, and a "Currently dismantling ... to level N" tooltip line with its own click hints
+  (localisation keys `HOI4_LOADER_RAILWAY_DISMANTLING` / `_DISMANTLE_HINTS`, else built-in English).
+  A click or right click there dismantles one level less, Shift+click stops it. **Fix:** vanilla's
+  click or right click on such a segment used to turn the dismantle entry into a rebuild of the
+  links already taken down. A railway being removed entirely (dismantled to 0) keeps its badge,
+  showing its current level in red, until it is gone; vanilla made no badge for it. Hooks the badge
+  tooltip and right click; four new signatures.
+
 ## 0.6.0-beta (2026-11-13), script version 3
 
 - **New feature `air_scenarios`** (engine tier; guard `hoi4_loader_feature_air_scenarios`; no

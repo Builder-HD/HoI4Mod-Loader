@@ -3788,6 +3788,198 @@ Static analysis only; nothing here was observed at runtime yet.
 - Game rules can't be read from C++ here without more work; a mod sets the flags from
   `has_game_rule` at `on_startup` (rules are fixed per game, flags are saved).
 
+## H6: segments merge under a queued line (2026-11-11)
+
+**Bug report (game test, video):** an upgrade was queued on Jiangxi – Ganzhou, and a dismantle on
+the railway joining it (Jiangxi – Kukong). Once the dismantle finished, the junction was gone, the
+badge read "Nanchang to Ganzhou" (the two segments as one), its brown target number was gone,
+and the upgrade entry stayed in the queue.
+
+**Findings (1.19.4.2, Ghidra):**
+- A railway line never looks at segments. Daily step (slot 24, 0x141a944c0): `PathUsable` on the
+  first and last province only, then per link of its own path, the first link below the target gets
+  the progress. Finished (slot 25, 0x141a958c0) and the progress recompute (0x141a961b0) also go
+  link by link. So a merge does not stop the work: the line still raises its own stretch.
+- The badge copies level (+0x63c), target (+0x640), cooldown (+0x644) and its path from an engine
+  segment record (`SetFromSegment` 0x141993470, called from the map icon refresh 0x141322820). The
+  update (0x141992ce0) only reads them: "level -> target" in orange plus `under_construction`
+  while target > level.
+- The click (0x141992860) looks for a line with `FindRailwayLine(path, tag)` (0x14157d360): the
+  same path, or its reverse, only. If there is none, it posts a new `CBuildRailwayCommand` for the
+  whole segment (target max(level, target) + 1). It is the only caller.
+- So after a merge the queued line matches no segment: no brown number, and a click would queue a
+  second line overlapping the first. A newly built railway that splits a segment with a queued
+  line probably gives vanilla the same mismatch (not tested).
+
+**Decision (user, 2026-11-11):** the line keeps its own stretch, and the loader fixes the badge.
+
+**Implementation (`engine_railway.cpp`):**
+- "Covers part of a segment" = the line shares at least one link with the segment's path (in
+  either direction). That covers merges and splits.
+- Badge update hook: if the engine's target is not above the level, look for the player's first
+  upgrade line (queue order) sharing a link. If its target is above the level, write it to +0x640
+  for the duration of the original update, then restore the engine's value. Main thread only
+  (skipped elsewhere), and a fault is logged once while the badge stays vanilla.
+- `FindRailwayLine` hook: vanilla's lookup first; without a match, the same overlap search. The
+  click then posts vanilla's change-level command for that line (+1, Shift to the maximum)
+  instead of a new overlapping line.
+- Alt+Shift dismantle: the exact entry first, else a dismantle entry sharing a link (unless it is
+  already going to 0), which then goes one level deeper on its own stretch.
+- Signatures: `kSigRailIconLevels` (the two reads in the update, checked to lie within 0x200 bytes
+  of its start). `kSigRailLineList` now starts at `FindRailwayLine` itself, and the click must
+  contain a call to it. Without either, only exact segment lines show (logged).
+- Not covered: right-click on the badge (lower a pending upgrade, `FindRailwayLine` variant
+  0x14157e170) still needs an exact path. Our dismantle entries show no target on the badge,
+  exact or not (vanilla shows none for target < level).
+
+### Game tests and the mixed-level segment (2026-11-12)
+
+- **First test:** after the merge the badge kept the queued target (the overlay worked), but the
+  entry then left the queue. With logging of every engine railway line (path levels, cancelled
+  flag, how it ends), the next run showed it was **not** voided: "Henan" (base 1, target 4, links
+  7085-10098-7656-4066-10364) raised every link 1 → 4, then finished normally. Xuzhou – Henan
+  (7025-7085, target 2) did the same.
+- **The real problem:** a merged segment has links at different levels, and its badge shows the
+  **lowest** link (a white 2 on a segment mostly at 4). Vanilla never has mixed segments, since an
+  upgrade always covers a whole segment. Also, the overlay showed the first overlapping line it
+  found (target 2) rather than the highest (4).
+- **Decision (user):** split segments where the level changes, as vanilla would show them.
+
+### Finding the segment builder: a runtime watchpoint
+
+- Static passes ruled out the AI railway planner (0x14157c780, 0x14157efa0, 0x141392fa0: they
+  walk construction lines too), the supply node update (0x140f48e50) and the icon factory.
+- A temporary build hooked the badge's SetFromSegment (0x141993470), put hardware data
+  breakpoints (DR0/DR1, every thread) on the record a badge was set from, and logged the writing
+  code from a vectored handler. On the main thread, at every icon refresh: a record constructor
+  (0x1416f5220) zeroes it, **0x1416fd92c** writes the level, 0x1401b164e copies the path; return
+  addresses 0x1416fd90b → 0x141701608. The watchpoint code was removed afterwards.
+
+### The builder (1.19.4.2)
+
+- `BuildRailwaySegments` 0x1416fcc50, 11 arguments, called from the map icon update 0x141700cc0
+  (when its inputs change, else every 0.25 s; main thread). The second argument is the supply
+  system's per-province array (`gamestate+0x3d8` → +0x10: data, count at +0xc, 0x20-byte entries).
+- It is a priority-queue walk from node to node: it extends a path through provinces that are not
+  nodes, keeps the lowest link level seen, and emits a record (path, level, target, cooldown) at
+  each node, keyed in the badge table by the path's middle province.
+- **Node** (0x1416fd50e): the province's supply entry has byte +0x14 or +0x15 set, word +0x12
+  non-zero, or bit 0 of +0x18 (supply flags), **or** it has three or more railway links.
+
+### The split
+
+- Hook on the builder: if any province has exactly two railway links at different levels, the
+  builder gets a **copy** of the supply array with the node byte (+0x15, read from the node test)
+  set for those provinces, so its walk ends a segment there. The supply system's own array is
+  never written. The copy is about 0x20 bytes per province, rebuilt per call (cheap at 4 calls a
+  second); without level changes the builder runs on the original array.
+- Resolution: `kSigRailSegmentBuilder` (function start) and `kSigRailSegmentNodeTest`, which must
+  lie inside the builder, read the second argument's home slot (`[rbp+0x188]` with
+  `rbp = entry rsp - 0x178`, i.e. the rdx home at +0x10) and step 0x20-byte entries. Otherwise
+  badges are not split (logged).
+- Effect: each stretch gets its own badge with its true level. A line queued on one stretch
+  matches that badge exactly again, so vanilla's brown target, click and right-click work as
+  before; the overlay and the click fallback from above only matter when a line still spans
+  more than one stretch.
+- The overlay now shows the **highest** target among the player's upgrade lines sharing a link.
+
+### To verify in game
+
+1. Queue an upgrade on one segment and a dismantle on a railway joining it at a junction. Once
+   the dismantle is done, the two stretches keep separate badges while their levels differ, each
+   with its own queued target.
+2. When the upgrade finishes, its stretch's badge shows the new level; once both stretches have
+   the same level they merge into one badge.
+3. A click on the merged badge raises the existing entry's target (no second entry); Shift+click
+   to the maximum.
+4. Alt+Shift+click on a merged badge with a dismantle entry on part of it deepens that entry.
+5. `loader.log`: "level +0x63c, target +0x640; lines covering part of a segment are shown and
+   changed" and "segments split where the level changes (supply entry flag +0x15)".
+6. Supply in the area is unchanged by the split (only the badges change).
+   - **Result (2026-11-12):** passed for items 1, 2 and 5: after the dismantle and the upgrade, the
+     upgraded stretch has its own badge at 4 next to the level-1 stretch; the log is clean.
+
+## H7: segments being dismantled on the badge (requested 2026-11-12)
+
+The user asked for the same indication as a pending upgrade (orange target number, "Currently
+upgrading ... to level N") when a segment is being dismantled.
+
+### Findings (1.19.4.2)
+
+- **Badge number** (update 0x141992ce0): in the construction map mode it shows max(level, target)
+  in orange ('O') while target > level, and the under-construction mark (`icon+0x670`, shown by
+  clearing bit 0x10 at +0x75 and calling vtable +0x78, as the text).
+- **Tooltip** (0x141992570, the icon's second vtable slot 0, `this` = icon+0x80): first the engine's
+  segment text (0x1416f92a0, from the segment record: "Railway Connection Level N", the names,
+  "Currently upgrading ... to level N", throughput) into `out`, then the click hints into
+  `out+0x20`: `AppendNewline` (0x1401e1510: a `\n` unless empty or already there), Localize
+  `RAILWAY_UPGRADE` while target < MAX, `RAILWAY_CANCEL_UPGRADE` while level < target, appended with
+  0x14012b330 (`append(str, chars, len)`). It returns false off a segment.
+- **Colour codes:** Colorize (0x140245cf0) writes byte 0x11, the letter, the text, then 0x11 '!'.
+- **Vanilla clicks on a dismantle entry:** the left click finds a line with exactly the segment's
+  path (`FindRailwayLine`), the right click a line with that path or at least two provinces in
+  common (0x14157e170). Both then post `CChangeRailwayConstructionLeveLCommand`, which clamps the
+  target to [base, MAX]: a dismantle entry (target < base) ends at target = base, is no longer a
+  dismantle line, and the engine starts **rebuilding** the links already taken down. Since the H6
+  split, dismantle entries match their badges exactly more often, so this became easy to hit.
+
+### Implementation
+
+- **Number:** after the update, on a badge whose number is showing (not hidden by a cooldown), if
+  the player has a dismantle entry for exactly that path or sharing a link with it, and its target
+  is below the badge's level: the text becomes the target, Colorize 'R', and the mark is shown.
+  Under Alt+Shift the cross still replaces it.
+- **Tooltip hook:** after vanilla, on such a segment: a newline and "Currently dismantling
+  §YRailway Connection§! to level §Y$LEVEL$§!" appended to the main text, and the hints replaced
+  with dismantle hints (click / right click one level less, Shift+click stop, Alt+Shift+click one
+  more). Keys `HOI4_LOADER_RAILWAY_DISMANTLING` and `HOI4_LOADER_RAILWAY_DISMANTLE_HINTS`, else
+  built-in English with the 0x11 colour codes.
+- **Clicks:** on such a segment, the left click (without Alt+Shift) and the right click go to the
+  plugin instead of vanilla, deferred to the next safe point (single player only, as Alt+Shift):
+  `LessenRailwayDismantle` raises the entry's target by one and takes that level's cost off the
+  remaining work; it cancels the entry (the cancel slot; the queue drops it at the next daily
+  update) with Shift, or when nothing would be left to dismantle. Cancelled entries no longer
+  count for badges, overlays or clicks.
+- **Signatures:** `kSigRailIconHammer` (checked to lie in the update and to use the text's flags,
+  mask and show slot), `kSigRailBadgeTooltip` (its target offset gives `this` → icon),
+  `kSigRailIconRightClick` (the same Clickable and path offset as the left click). Each part is
+  optional and logged.
+
+### Dismantling to 0: the badge disappeared (game test, 2026-11-12)
+
+- **Seen:** a level-1 segment queued for removal had no badge at all, while its neighbours kept
+  theirs.
+- **Cause:** the segment builder gives a record the lowest link target, so a dismantle entry going
+  to 0 gives target 0. The map icon refresh (0x141322820) creates a badge only for a record with
+  target ≥ 1 (in the construction map mode, `+0x3f0 == 0x11`) or a non-zero +0x24. Vanilla never has
+  a target below 1, so the segment simply had no badge.
+- **Record layout** (emitted at 0x1416fd8e8): the badge table is the builder's seventh argument
+  (map icon object +0x30), a Robin Hood hash table (insert 0x1416f5630: entries +0x8, 0x28 bytes,
+  probe length byte +4 with 0 = empty, mask +0x14, probe limit byte +0x18). Entry +0x10 is a
+  CPdxArray of 0x30-byte records (count +0x1c): key (middle province) +0x18, level +0x1c, target
+  +0x20, +0x24 as `SetFromSegment` copies it to the badge's +0x644.
+- **Fix:** after the builder (the same hook as the H6 split), every record with level ≥ 1 and target
+  < 1 gets its level as the target, so the refresh keeps the badge. The number hook then shows the
+  **current level** in red with the mark (a red 0 would say nothing). The tooltip says "to level 0".
+- **Signatures:** `kSigRailSegmentRecord` (inside the builder; its table home slot must be the
+  seventh argument's, +0x38 from entry rsp) and `kShapeRailSegmentTableInsert`, matched at that
+  call's target, since the template's insert exists nine times. Optional; logged when missing.
+
+### To verify in game
+
+1. Queue a dismantle on a segment: its badge shows the target level in red with the hammer mark,
+   in the construction view. A level-1 segment (or any dismantle to 0) keeps its badge with the
+   current level in red until the railway is gone.
+2. The tooltip: "Currently dismantling Railway Connection to level N" and the three hint lines,
+   in colour.
+3. Click (and right click) on that badge: the entry goes one level up (the queue shows less work);
+   at the last level it is cancelled and leaves the queue the next day. Shift+click cancels it at
+   once. No rebuild entry appears.
+4. Alt+Shift+click still deepens the entry; on segments without a dismantle entry clicks stay
+   vanilla.
+5. `loader.log`: "dismantling shown (mark +0x670, tooltip yes), right click changes the dismantle
+   entry".
+
 # Part I: province building removal (supply hubs first)
 
 The railway work (Part H) carried over to province buildings. It started with supply hubs and

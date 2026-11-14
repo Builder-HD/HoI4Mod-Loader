@@ -399,10 +399,58 @@ SIG(kSigRailIconUpdate, "48 89 5C 24 10 55 56 57 41 56 41 57 48 8D 6C 24 ?? 48 8
 SIG(kSigRailIconText, "BA 57 00 00 00 B8 4F 00 00 00 45 3B FE 0F 4F D0 4C 8D 45 ?? 48 8D 4D ?? E8 ?? ?? ?? ?? 48 8B D0 48 8B CB E8 ?? ?? ?? ?? 48 8B 8F ?? ?? ?? ?? 80 61 ?? ?? 48 8B 01 FF 50 ??")
 static const size_t kSigRailIconColorizeCall = 0x18, kSigRailIconSetTextCall = 0x23, kSigRailIconTextDisp = 0x2b,
                     kSigRailIconFlagsDisp = 0x31, kSigRailIconShownMask = 0x32, kSigRailIconShowSlotDisp = 0x38;
-// FindRailwayLine(path, tag): country(E8 at +3)->[disp32 +0xb] (construction), its lines at
-// +[disp8 +0x12], count +[disp8 +0x16]. (0x14157d37f)
-SIG(kSigRailLineList, "48 8B CA E8 ?? ?? ?? ?? 48 8B 90 ?? ?? ?? ?? 4C 8B 72 ?? 48 63 42 ?? 4D 8D 24 C6 4D 3B F4")
-static const size_t kSigRailListConstructionDisp = 0xb, kSigRailListLinesDisp = 0x12, kSigRailListCountDisp = 0x16;
+// In the badge update: level = icon->[disp32 +3], construction target = icon->[disp32 +0x1a] (both
+// copied from the engine's segment data; the text shows "level -> target" while target > level).
+// (0x141992db8)
+SIG(kSigRailIconLevels, "44 8B B7 ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ?? 48 8B 01 FF 90 B8 00 00 00 44 8B BF ?? ?? ?? ?? 83 B8 ?? ?? ?? ?? 11")
+static const size_t kSigRailIconLevelDisp = 3, kSigRailIconTargetDisp = 0x1a;
+// The badge's under-construction mark (NOTES.md H7), in the update: rbx = icon->[disp32 +3];
+// shown with and byte [rbx+disp8 +0x14],imm8 +0x15 and call [rax+disp8 +0x18] (the same flags,
+// mask and show slot as the text). (0x1419930cd)
+SIG(kSigRailIconHammer, "48 8B 9F ?? ?? ?? ?? 48 8B 03 48 8B CB 45 3B FE 7E ?? 80 63 ?? ?? FF 50 ??")
+static const size_t kSigRailHammerDisp = 3, kSigRailHammerFlagsDisp = 0x14, kSigRailHammerMask = 0x15,
+                    kSigRailHammerShowDisp = 0x18;
+// The badge tooltip (its second vtable's slot 0; this = icon + (icon target offset - [disp32 at
+// +0x5d])), function start: the engine's segment text into out (+0), then the click hints into
+// out+[imm8 +0x54]: AppendNewline (E8 at +0x66), Localize "RAILWAY_UPGRADE", Append(str, chars,
+// len) (E8 at +0x97). Hooked. (0x141992570)
+SIG(kSigRailBadgeTooltip, "48 89 5C 24 08 48 89 74 24 10 55 57 41 56 48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? 49 8B F8 4C 8B F2 48 8B D9 C7 45 ?? 00 00 00 00 48 8B 0D ?? ?? ?? ?? 48 8B 01 FF 50 78 48 8B D7 48 8B 88 30 07 00 00 E8 ?? ?? ?? ?? 0F B6 F0 84 C0 0F 84 ?? ?? ?? ?? 48 83 C7 20 8B 0D ?? ?? ?? ?? 39 8B ?? ?? ?? ?? 7D ?? 48 8B CF E8 ?? ?? ?? ?? 45 33 C9 45 33 C0 48 8D 15 ?? ?? ?? ?? 48 8D 4D ?? E8 ?? ?? ?? ?? 90 48 8D 55 ?? 48 83 7D ?? 0F 48 0F 47 55 ?? 4C 8B 45 ?? 48 8B CF E8")
+static const size_t kSigRailTipHintsImm = 0x54, kSigRailTipTargetDisp = 0x5d, kSigRailTipNewlineCall = 0x66,
+                    kSigRailTipAppendCall = 0x97;
+// The badge's right click, function start: Clickable(icon) (E8 at +0x12, the same as the left
+// click's), then the segment path at icon+[disp32 +0x22]. Vanilla lowers a pending upgrade.
+// Hooked. (0x141992b10)
+SIG(kSigRailIconRightClick, "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 30 48 8B D9 E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ?? 48 8D BB ?? ?? ?? ??")
+static const size_t kSigRailRightClickableCall = 0x12, kSigRailRightPathDisp = 0x22;
+// The railway segment builder (NOTES.md H6), function start, 11 arguments: it walks the railway
+// graph from node to node and emits the segment records the badges are made from (level = the
+// lowest link). Its second argument is the supply system's per-province array (CPdxArray: data,
+// then count at +0xc; 0x20-byte entries). rbp = entry rsp - [disp32 at +0x22, negative]. Hooked.
+// (0x1416fcc50)
+SIG(kSigRailSegmentBuilder, "48 8B C4 4C 89 48 20 4C 89 40 18 48 89 50 10 48 89 48 08 55 53 56 57 41 54 41 55 41 56 41 57 48 8D A8 ?? ?? ?? ?? 48 81 EC ?? ?? ?? ?? 0F 29 70 ?? 4C 8B E2 4C 8B E9 33 DB")
+static const size_t kSigRailBuilderRbpDisp = 0x22;
+// In it, the node test for the next province: entry = id << 5 (+0) plus the array data read
+// through the second argument's home slot [rbp+disp32 at +7]; a node if byte [entry+disp8 +0x10]
+// or [entry+disp8 +0x1a] is set, or word +0x24, or bit 0 of +0x31. (0x1416fd500)
+SIG(kSigRailSegmentNodeTest, "48 C1 E1 05 48 8B 85 ?? ?? ?? ?? 48 03 08 80 79 ?? 00 0F 87 ?? ?? ?? ?? 80 79 ?? 00 0F 87 ?? ?? ?? ?? 66 83 79 ?? 00 0F 85 ?? ?? ?? ?? F6 41 ?? 01 0F 85")
+static const size_t kSigRailNodeTestHomeDisp = 7, kSigRailNodeTestFlagDisp = 0x1a;
+// In it, a segment record emitted (NOTES.md H7): the badge table (home slot [rbp+disp32 at +0xa])
+// gets the entry for the path's middle province (insert E8 at +0xe), a 0x30-byte record is appended
+// to the entry's array (+[disp8 at +0x1d]), then level -> [rec+disp8 at +0x43] and the target ->
+// [rec+disp8 at +0x53]. (0x1416fd8e8)
+SIG(kSigRailSegmentRecord, "48 8D 95 ?? ?? ?? ?? 48 8B 8D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B 8D ?? ?? ?? ?? 48 83 C1 ?? E8 ?? ?? ?? ?? 4C 8B F0 41 8B 47 ?? 99 2B C2 D1 F8 48 63 D0 48 8B 0E 8B 14 91 41 89 56 ?? 41 8B 4F ?? 41 89 4E ?? 41 8B 4F ?? 41 89 4E ?? 41 8B 47 ?? 41 89 46 ??")
+static const size_t kSigRailRecTableHome = 0xa, kSigRailRecInsertCall = 0xe, kSigRailRecArrayImm = 0x1d,
+                    kSigRailRecLevelDisp = 0x43, kSigRailRecTargetDisp = 0x53;
+// The badge table's insert (the call above), function start: a Robin Hood hash table with mask
+// +0x14, entries +0x8 (0x28 bytes: probe length byte +4, 0 = empty; key +8), probe limit byte
+// +0x18. Shared by several tables of the same template, so not scanned: checked with SigMatchAt at
+// the call's target. (0x1416f5630)
+static const char kShapeRailSegmentTableInsert[] = "48 89 5C 24 10 48 89 74 24 18 55 57 41 54 41 56 41 57 48 8B EC 48 83 EC 60 4D 8B F9 45 8B E0 48 8B F2 48 8B F9 8B 49 14 8B C1 41 23 C0 48 98 4C 8D 14 80 48 8B 47 08 4A 8D 1C D0 41 B6 01 44 38 73 04 72 ?? 41 8B 01 3B 43 08 74 ?? 41 FE C6 48 83 C3 28 44 3A 73 04 76 ?? 44 3A 77 18";
+// FindRailwayLine(path, tag), function start: the country's railway line whose path equals the
+// segment's (or its reverse). Only the badge click calls it. Hooked. Then country(E8 at +0x22)->
+// [disp32 +0x2a] (construction), its lines at +[disp8 +0x31], count +[disp8 +0x35]. (0x14157d360)
+SIG(kSigRailLineList, "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 54 41 55 41 56 41 57 48 83 EC 40 48 8B E9 48 8B CA E8 ?? ?? ?? ?? 48 8B 90 ?? ?? ?? ?? 4C 8B 72 ?? 48 63 42 ?? 4D 8D 24 C6 4D 3B F4")
+static const size_t kSigRailListConstructionDisp = 0x2a, kSigRailListLinesDisp = 0x31, kSigRailListCountDisp = 0x35;
 
 // --- Time control (time_control, NOTES.md Part K; addresses 1.19.4.2, 1.19.3 unchecked) --------
 // Console `gamespeed <0-5>`: n = atoi(arg); if (n > 5) error; paused = idler->IsPaused();
