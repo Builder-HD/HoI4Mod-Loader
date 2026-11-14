@@ -56,6 +56,10 @@ src/plugin_create_army.cpp    create_army and add_to_army features (armies under
 src/plugin_air_scenarios.cpp  air_scenarios feature (mods' definition files, picking a scenario)
 src/air_scenarios.cpp         air_scenarios without engine access: parser, mod list, matching (tested)
 src/engine_air.cpp            engine access for air_scenarios (templates, the game's loader, scenario start)
+src/plugin_equipment_designers.cpp  equipment_designers feature (definitions, tank window title, roles, slot windows)
+src/equipment_designers.cpp   equipment_designers without engine access: definition parser, merging (tested)
+src/engine_designers.cpp      engine access for equipment_designers (can-open hook, window open and refresh)
+src/script_tree.cpp           the Paradox script reader shared by the definition parsers
 src/plugin_time_control.cpp   time_control feature (speed lock, pause block, hidden date; saved as flags)
 src/engine_data.cpp           engine access for the data triggers (read-only game state)
 src/engine_scope.cpp          engine access for scope blocks (vanilla iterator templates, child scopes)

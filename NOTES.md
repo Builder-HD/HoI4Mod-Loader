@@ -6307,3 +6307,69 @@ commands like any other.
    off (vanilla behaviour). Problems in definitions are logged per entry. Multiplayer: UI only.
    Saves: designs are normal variants; without the loader they stay producible, and editing them
    opens the old window.
+
+## N10: implementation (2026-11-14, branch `feature/equipment-designers`)
+
+**Files:** `src/engine_designers.cpp` (engine access), `src/plugin_equipment_designers.cpp` (the
+feature), `src/equipment_designers.cpp/.h` (parser and merging, tested by
+`tests/equipment_designers_test.cpp`), `Engine::PatchTankDesignerViewGui` in `src/gui_patch.cpp`.
+Shared: `src/script_tree.cpp` (the script reader, moved out of air_scenarios) and
+`ModList::ScanFolder` (the mod folder scan, likewise).
+
+**Hooks** (all UI, main thread, SEH around each body; a fault switches the feature off):
+- `kSigEqdCanOpen` (`FUN_141820c00`): when the game says no and the type or its archetype is listed,
+  yes if the archetype has slots, the DLC mask has the tank bit (`kCodeEqdDlcMask` +0x3b, 4), the
+  game's land tests (`kSigEqdPickWindow`'s calls) pass and the game's own layout check passes. The
+  picker then opens the tank window itself.
+- `kSigEqdOpenVariant` (after): the title (`view+0xf878`, SetText from `kCodeEqdTitle`) with the
+  definition's loc key, localised once per definition.
+- `kSigEqdRefresh` (after; its argument is `view+0x28`): role dropdown (`view+0x134f8`) hidden or
+  shown; slot windows placed by name; window visibility.
+
+**Slot windows, as found in game.** The game does not hide unused slot windows: it clears their slot
+(`window+0xd8 = 0`, `kCodeEqdSlotClear`) and draws them locked ("This slot is not available for
+this equipment type"), which is vanilla's look for tanks with fewer slots. So the loader sets each
+window's visibility after every refresh: for listed designs only the windows that hold a slot; for
+every other tank design the GUI file's own windows (as vanilla) and none of the added ones. The
+visible part: `window+0x670` is a container window; its GUI object, the one hide/show and the
+`+0x75` flags belong to (as Find returns them), is at `+0x30` (`kCodeEqdSlotGuiBase`, from the
+window's constructor). The first build hid `window+0x670` itself: its vtable slot `0x80` is the
+container's Find, which threw a C++ exception (`0xE06D7363`); the SEH caught it and the feature
+switched itself off, as designed. The fault log now names the exception and the call stack.
+
+**Positions.** `DesignerPlaceSlot` packs `{int x; int y}` and calls the window's SetPosition
+(`kCodeEqdSetPosition`). Putting a window back: its `pos_custom/fixed_module_slot_window_N` is
+looked up in the window's position container (`view+0xf2c0`, vtable `+0xc0`) as setup does. The
+plugin remembers per window which listed archetype it showed last and resets only on a change.
+
+**GUI patch.** `interface/tank_designer_view.gui` (any copy) gets the missing
+`pos_custom_module_slot_window_N` and `pos_fixed_module_slot_window_N` up to 19, each at window 0's
+`position` text, after the last existing one. Only registered when a definition exists.
+
+**Checks:** Release build without warnings; `equipment_designers_test` (31 checks, plus vanilla's
+`tank_designer_view.gui`: 9 custom, 0 fixed before, all 40 after, idempotent), `air_scenarios_test`
+(34), smoke test, `check_signatures.py` and `check_code_shapes.py` on the 1.19.5 and 1.19.4.2
+copies (same addresses on both). 1.19.3 / 1.19.2 unchecked (no copies).
+
+**In-game test** (1.19.5, Germany 1936, loader build of this branch, test mod only; driven with
+screenshots, not yet by the owner, 2026-11-14):
+1. `loader.log`: every signature, anchor and shape resolved; `1 designer(s) for 1 archetype(s)`;
+   `tank_designer_view.gui: 9 custom and 0 fixed ... 20 each now`; `serves hoi4_loader_test_small_arms
+   (10 slot(s), 1 fixed_, 11 placed by the definition)`. No ERROR. `error.log`: nothing about the
+   test files.
+2. Vanilla Panzer II design first: "Tank Designer", role "Light Tank", turret, gun and the rest at
+   vanilla's places, no extra windows.
+3. Decision "Unlock the test small arms": Production > infantry/artillery lists "Test Small Arms" with
+   the designer icon. The icon opens **"Small Arms Designer"**, no role dropdown, 11 slots in two rows
+   (6 + 5) at the definition's places, including the 10th slot and the `fixed_` slot ("Sight
+   (fixed_ slot)", from `EQ_MOD_SLOT_..._TITLE`) in windows only the patch adds.
+4. Module picker per slot works ("Module Slot: Kit 1", modules with ★5 army experience to add).
+   Saving with grenades: "Spend ★5 to save the changes"; army experience 50 → 45; "Test Small Arms
+   Mk0" appears in the infantry/artillery tab and takes a production line.
+5. Back to the Panzer II: "Tank Designer", "Light Tank" dropdown and vanilla's slot places again.
+
+**Not tested:** multiplayer (expected unaffected: UI only, the variant commands don't check the
+window); a save loaded without the loader with such a design (expected: producible, old window to
+edit); another mod replacing `tank_designer_view.gui`; `hide_roles = no`.
+
+**Open (owner):** the `xp` key (N9 decision 7), stats per designer (part 2), air and naval windows.
