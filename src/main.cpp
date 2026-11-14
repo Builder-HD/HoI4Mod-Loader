@@ -100,6 +100,20 @@ std::wstring LoaderOutputPath(const wchar_t* fileName) {
     return std::wstring(dir) + L"\\" + fileName;
 }
 
+std::wstring UserFolder() {
+    wchar_t dir[MAX_PATH * 2];
+    return GetUserDir(dir, ARRAYSIZE(dir)) ? std::wstring(dir) : std::wstring();
+}
+
+std::wstring GameFolder() {
+    wchar_t exe[MAX_PATH * 2];
+    DWORD n = GetModuleFileNameW(nullptr, exe, ARRAYSIZE(exe));
+    if (n == 0 || n >= ARRAYSIZE(exe)) return L"";
+    std::wstring p(exe, n);
+    size_t slash = p.find_last_of(L"\\/");
+    return slash == std::wstring::npos ? L"." : p.substr(0, slash);
+}
+
 static void OpenLog() {
     wchar_t path[MAX_PATH * 2];
     if (!GetUserDir(path, MAX_PATH)) return;

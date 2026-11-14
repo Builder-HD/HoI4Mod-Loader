@@ -20,6 +20,10 @@
 void Log(const char* fmt, ...);
 // <Documents>\Paradox Interactive\Hearts of Iron IV\<fileName> (where loader.log lives).
 std::wstring LoaderOutputPath(const wchar_t* fileName);
+// The game's user folder (<Documents>\Paradox Interactive\Hearts of Iron IV) and the game folder
+// (where hoi4.exe is), without a trailing backslash; "" if unknown.
+std::wstring UserFolder();
+std::wstring GameFolder();
 
 // ---------------------------------------------------------------------------
 // hash.cpp

@@ -1,6 +1,8 @@
 // air_scenarios without engine access (see air_scenarios.h, NOTES.md Part L).
 #include "air_scenarios.h"
 
+#include "script_tree.h"
+
 #include <cctype>
 #include <cstdlib>
 
@@ -8,127 +10,8 @@ namespace Air {
 
 namespace {
 
-// --- A small reader for Paradox script: key = value, key = { ... }, bare lists, # comments ---
-struct Node {
-    std::string key;     // empty for a bare list item
-    std::string value;   // for key = value and bare items
-    bool block = false;  // key = { ... }
-    std::vector<Node> children;
-    int line = 0;
-};
-
-struct Reader {
-    const std::string& s;
-    size_t i = 0;
-    int line = 1;
-    std::string error;
-    int errorLine = 0;
-
-    explicit Reader(const std::string& text) : s(text) {
-        if (s.size() >= 3 && (unsigned char)s[0] == 0xEF && (unsigned char)s[1] == 0xBB && (unsigned char)s[2] == 0xBF) i = 3;
-    }
-    void SkipSpace() {
-        while (i < s.size()) {
-            char c = s[i];
-            if (c == '\n') {
-                ++line;
-                ++i;
-            } else if (c == ' ' || c == '\t' || c == '\r') {
-                ++i;
-            } else if (c == '#') {
-                while (i < s.size() && s[i] != '\n') ++i;
-            } else {
-                break;
-            }
-        }
-    }
-    bool Fail(const std::string& message) {
-        if (error.empty()) {
-            error = message;
-            errorLine = line;
-        }
-        return false;
-    }
-    // A word or a quoted string.
-    bool Word(std::string* out) {
-        out->clear();
-        if (i >= s.size()) return Fail("unexpected end of file");
-        if (s[i] == '"') {
-            ++i;
-            while (i < s.size() && s[i] != '"') {
-                if (s[i] == '\n') return Fail("quoted text runs past the end of the line");
-                *out += s[i++];
-            }
-            if (i >= s.size()) return Fail("quoted text is not closed");
-            ++i;
-            return true;
-        }
-        while (i < s.size()) {
-            char c = s[i];
-            if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '=' || c == '{' || c == '}' || c == '#' || c == '"') break;
-            *out += c;
-            ++i;
-        }
-        if (out->empty()) return Fail(std::string("unexpected '") + s[i] + "'");
-        return true;
-    }
-    // Items until '}' (inside a block) or the end of the file (top level).
-    bool Items(std::vector<Node>* out, bool inBlock) {
-        for (;;) {
-            SkipSpace();
-            if (i >= s.size()) return inBlock ? Fail("a '{' is not closed") : true;
-            if (s[i] == '}') {
-                if (!inBlock) return Fail("a '}' without its '{'");
-                ++i;
-                return true;
-            }
-            Node n;
-            n.line = line;
-            std::string word;
-            if (!Word(&word)) return false;
-            SkipSpace();
-            if (i < s.size() && s[i] == '=') {
-                ++i;
-                SkipSpace();
-                n.key = word;
-                if (i < s.size() && s[i] == '{') {
-                    ++i;
-                    n.block = true;
-                    if (!Items(&n.children, true)) return false;
-                } else if (!Word(&n.value)) {
-                    return false;
-                }
-            } else {
-                n.value = word;  // a bare list item
-            }
-            out->push_back(std::move(n));
-        }
-    }
-};
-
-bool ParseTree(const std::string& text, std::vector<Node>* out, std::string* error, int* errorLine) {
-    Reader r(text);
-    if (r.Items(out, false)) return true;
-    *error = r.error;
-    *errorLine = r.errorLine;
-    return false;
-}
-
-// key = { a b c } or key = a: the words.
-bool ListOf(const Node& n, std::vector<std::string>* out, std::string* why) {
-    if (!n.block) {
-        out->push_back(n.value);
-        return true;
-    }
-    for (const Node& c : n.children) {
-        if (!c.key.empty() || c.block) {
-            *why = "'" + n.key + "' takes a list of names, e.g. " + n.key + " = { a b }";
-            return false;
-        }
-        out->push_back(c.value);
-    }
-    return true;
-}
+using ScriptTree::ListOf;
+using ScriptTree::Node;
 
 bool ReadSide(const Node& n, Side* side, std::string* why) {
     if (!n.block) {
@@ -156,19 +39,14 @@ bool EndsWithNoCase(const std::string& s, const char* suffix) {
 
 }  // namespace
 
-bool EqualsNoCase(const std::string& a, const std::string& b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i)
-        if (std::tolower((unsigned char)a[i]) != std::tolower((unsigned char)b[i])) return false;
-    return true;
-}
+bool EqualsNoCase(const std::string& a, const std::string& b) { return ScriptTree::EqualsNoCase(a, b); }
 
 void ParseFile(const std::string& text, const std::string& fileName, std::vector<Definition>* out,
                std::vector<Problem>* problems) {
     std::vector<Node> top;
     std::string error;
     int errorLine = 0;
-    bool syntaxOk = ParseTree(text, &top, &error, &errorLine);
+    bool syntaxOk = ScriptTree::Parse(text, &top, &error, &errorLine);
     // Entries complete before a syntax error still count; the error is reported.
     for (const Node& e : top) {
         auto problem = [&](int line, const std::string& message) { problems->push_back({fileName, line, message}); };

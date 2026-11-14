@@ -39,4 +39,20 @@ bool ReadWholeFile(const std::wstring& path, std::string* out);  // a UTF-8 BOM 
 std::wstring Wide(const std::string& utf8);
 std::string Narrow(const std::wstring& w);
 
+// The definition files of one folder (e.g. "common/hoi4_loader_air_scenarios"), as the game reads a
+// folder: the game folder first, then the enabled mods in load order. A file replaces an earlier
+// one of the same name; a mod whose replace_path lists the folder drops every earlier file.
+struct FolderFile {
+    std::wstring path;
+    std::string shown;  // "<mod name>/<file>" (or "game/<file>") for messages
+};
+struct FolderScan {
+    std::vector<FolderFile> files;   // by file name, case-insensitive
+    bool modListRead = false;        // false: dlc_load.json unreadable, only the game folder searched
+    size_t enabledMods = 0;
+    int modsWithFolder = 0;
+    std::vector<std::string> notes;  // descriptors that couldn't be used (unreadable, zipped)
+};
+FolderScan ScanFolder(const std::wstring& gameDir, const std::wstring& userDir, const std::string& folder);
+
 }  // namespace ModList

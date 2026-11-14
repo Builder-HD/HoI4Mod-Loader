@@ -34,8 +34,7 @@
 namespace {
 
 const char* const kFeature = "air_scenarios";
-const wchar_t kFolder[] = L"common\\hoi4_loader_air_scenarios";
-const char kFolderSlash[] = "common/hoi4_loader_air_scenarios";
+const char kFolder[] = "common/hoi4_loader_air_scenarios";
 
 struct Built {
     Air::Definition def;
@@ -46,95 +45,27 @@ std::vector<Built*> g_bySlot[64];  // read-only after the build
 bool g_built = false;
 std::atomic<uint32_t> g_rng{0};
 
-using ModList::Narrow;
-
-bool ReadFile(const std::wstring& path, std::string* out) {
-    std::ifstream f(path.c_str(), std::ios::binary);
-    if (!f) return false;
-    std::ostringstream ss;
-    ss << f.rdbuf();
-    *out = ss.str();
-    return true;
-}
-
-// The documents folder of the game ("...\Paradox Interactive\Hearts of Iron IV").
-std::wstring DocumentsDir() {
-    std::wstring p = LoaderOutputPath(L"x");
-    return p.empty() ? p : p.substr(0, p.size() - 2);
-}
-
-std::wstring GameDir() {
-    wchar_t exe[MAX_PATH * 2];
-    DWORD n = GetModuleFileNameW(nullptr, exe, MAX_PATH * 2);
-    std::wstring p(exe, n);
-    size_t slash = p.find_last_of(L"\\/");
-    return slash == std::wstring::npos ? L"." : p.substr(0, slash);
-}
-
-bool ReplacesFolder(const ModList::ModDescriptor& d) {
-    for (std::string r : d.replacePaths) {
-        std::replace(r.begin(), r.end(), '\\', '/');
-        while (!r.empty() && r.back() == '/') r.pop_back();
-        if (Air::EqualsNoCase(r, kFolderSlash)) return true;
-    }
-    return false;
-}
-
-// Definition files by file name, in load order: the game folder, then the enabled mods.
-struct Source {
-    std::wstring path;
-    std::string shown;  // "<mod name>/<file>"
-};
-void Collect(const std::wstring& root, const std::string& label, std::map<std::wstring, Source>* files) {
-    WIN32_FIND_DATAW fd;
-    std::wstring dir = root + L"\\" + kFolder;
-    HANDLE h = FindFirstFileW((dir + L"\\*.txt").c_str(), &fd);
-    if (h == INVALID_HANDLE_VALUE) return;
-    do {
-        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-        std::wstring key = fd.cFileName;
-        std::transform(key.begin(), key.end(), key.begin(), ::towlower);
-        (*files)[key] = Source{dir + L"\\" + fd.cFileName, label + "/" + Narrow(fd.cFileName)};
-    } while (FindNextFileW(h, &fd));
-    FindClose(h);
-}
-
 std::vector<Air::Definition> LoadDefinitions() {
-    std::map<std::wstring, Source> files;
-    Collect(GameDir(), "game", &files);
-    std::vector<ModList::EnabledMod> mods;
-    if (!ModList::Enabled(DocumentsDir(), &mods))
+    ModList::FolderScan scan = ModList::ScanFolder(GameFolder(), UserFolder(), kFolder);
+    if (!scan.modListRead)
         Log("air_scenarios: the launcher's mod list (dlc_load.json) is unreadable; only the game folder is searched");
-    int modsWithFiles = 0;
-    for (const ModList::EnabledMod& m : mods) {
-        if (m.status == ModList::EnabledMod::Status::Unreadable) {
-            Log("air_scenarios: mod descriptor %s unreadable or without a path; skipped", m.file.c_str());
-            continue;
-        }
-        if (m.status == ModList::EnabledMod::Status::Archive) {
-            Log("air_scenarios: mod %s is a zip archive; its air scenario files can't be read", m.descriptor.name.c_str());
-            continue;
-        }
-        if (ReplacesFolder(m.descriptor)) files.clear();
-        if (GetFileAttributesW((m.root + L"\\" + kFolder).c_str()) != INVALID_FILE_ATTRIBUTES) ++modsWithFiles;
-        Collect(m.root, m.label(), &files);
-    }
+    for (const std::string& note : scan.notes) Log("air_scenarios: %s", note.c_str());
     std::vector<Air::Definition> all;
-    for (const auto& f : files) {  // file name order, as the game reads a folder
+    for (const ModList::FolderFile& f : scan.files) {  // file name order, as the game reads a folder
         std::string text;
-        if (!ReadFile(f.second.path, &text)) {
-            Log("air_scenarios: %s unreadable", f.second.shown.c_str());
+        if (!ModList::ReadWholeFile(f.path, &text)) {
+            Log("air_scenarios: %s unreadable", f.shown.c_str());
             continue;
         }
         std::vector<Air::Definition> defs;
         std::vector<Air::Problem> problems;
-        Air::ParseFile(text, f.second.shown, &defs, &problems);
+        Air::ParseFile(text, f.shown, &defs, &problems);
         for (const Air::Problem& p : problems)
             Log("air_scenarios: %s line %d: %s", p.file.c_str(), p.line, p.message.c_str());
         Air::Merge(&all, defs);
     }
     Log("air_scenarios: %zu definition(s) from %zu file(s) (%zu enabled mod(s), %d with an air scenario folder)", all.size(),
-        files.size(), mods.size(), modsWithFiles);
+        scan.files.size(), scan.enabledMods, scan.modsWithFolder);
     return all;
 }
 
