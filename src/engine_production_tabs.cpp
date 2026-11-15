@@ -57,6 +57,9 @@ uint8_t* g_listFn[2] = {nullptr, nullptr};  // land/air, naval
 List_t g_listOrig[2] = {nullptr, nullptr};
 
 // Called.
+using TypeByName_t = uint64_t(__fastcall*)(const EngineString* name);
+TypeByName_t g_typeByName = nullptr;
+int g_typesChecked = 0;  // 0 not yet, 1 passed, -1 failed
 Open_t g_open = nullptr;
 Root_t g_root = nullptr;
 MaskTest_t g_canHave = nullptr, g_hasFactories = nullptr;
@@ -253,6 +256,13 @@ bool ResolveAll() {
     if (Rd<uint32_t>(nt, kCodePtabWindowMaskDisp) != g_windowMask || Rd<uint32_t>(lt, kCodePtabDesignMaskDisp) != g_designMask ||
         Rd<uint32_t>(nt, kCodePtabDesignMaskDisp) != g_designMask)
         return Fail("the two lists test different fields");
+    // Optional: type names (add_types / remove_types). Its default token is compared and returned.
+    if (uint8_t* tn = SigFindUnique("ptab_type_by_name", kSigPtabTypeByName)) {
+        if (Rd<uint32_t>(tn, kSigPtabTypeDefaultToken) == Rd<uint32_t>(tn, kSigPtabTypeDefaultToken2))
+            g_typeByName = (TypeByName_t)tn;
+        else
+            Log("production_tabs: the type name lookup has an unexpected shape; add_types / remove_types unavailable");
+    }
     g_setupFn = setup;
     g_statesFn = states;
     g_listFn[0] = land;
@@ -285,8 +295,9 @@ bool DesignIsNaval(const void* design) { return (Rd<uint64_t>(design, g_designMa
 bool Member(int tab, const void* design, uint64_t vanillaMask) {
     const void* type = Rd<const void*>(design, g_designType);
     if (!type) return false;
-    bool vanilla = tab < 4 && (Rd<uint64_t>(design, g_designMask) & vanillaMask) != 0;
-    return g_member(tab, PtabArchetypeOf(type), vanilla);
+    uint64_t types = Rd<uint64_t>(design, g_designMask);
+    bool vanilla = tab < 4 && (types & vanillaMask) != 0;
+    return g_member(tab, PtabArchetypeOf(type), types, vanilla);
 }
 
 // The viewing country's designs (as the state function reads them), or false.
@@ -401,6 +412,8 @@ void ApplyState(void* button, void* glow, void* open, int tab, uint64_t vanillaM
     }
 }
 
+bool TryBind(void* view, size_t t, bool atSetup);
+
 void StatesBody(void* view, void* open) {
     for (int i = 0; i < 4; ++i) {
         if (!g_changed[i]) continue;
@@ -410,7 +423,8 @@ void StatesBody(void* view, void* open) {
     if (view != g_view) return;
     for (size_t t = 0; t < g_tabs.size(); ++t) {
         const NewTab& nt = g_tabs[t];
-        if (!nt.buttonEl) continue;
+        // A button the setup didn't find is looked up again (cheap; the tab works once it is there).
+        if (!nt.buttonEl && !TryBind(view, t, false)) continue;
         uint64_t types = 0;
         bool naval = NewTabNaval(4 + (int)t, &types);
         // The factory check of the land/air tabs (military factories) or of the naval tab (dockyards).
@@ -471,31 +485,45 @@ void ClickSafe(int t) {
     }
 }
 
+// Finds and binds new tab t's button (and glow) in the view; false if the view has no such button
+// yet. At setup a missing button is logged once; later lookups (each buttons update) stay quiet
+// until they find it.
+bool TryBind(void* view, size_t t, bool atSetup) {
+    NewTab& nt = g_tabs[t];
+    void* button = FindInView(view, g_buttonSlot, nt.button.c_str());
+    if (!button) {
+        if (atSetup && !nt.missingLogged)
+            Log("production_tabs: %s: no button %s in the production view (add a buttonType of that name to "
+                "countryproductionlineview.gui); looked up again when the buttons update, the tab is off until then",
+                nt.name.c_str(), nt.button.c_str());
+        nt.missingLogged = true;
+        return false;
+    }
+    void* glow = nt.glow.empty() ? nullptr : FindInView(view, g_iconSlot, nt.glow.c_str());
+    if (!nt.glow.empty() && !glow)
+        Log("production_tabs: %s: the production view has no icon %s; the tab has no glow", nt.name.c_str(), nt.glow.c_str());
+    int index = (int)t;
+    // The wrapper lives as long as the game: the button keeps a reference to it.
+    if (!BindButtonClick(button, [index]() { ClickSafe(index); })) {
+        Log("production_tabs: %s: the button could not be bound; the tab is off", nt.name.c_str());
+        nt.buttonEl = nullptr;
+        nt.button.clear();  // not looked up again
+        return false;
+    }
+    nt.buttonEl = button;
+    nt.glowEl = glow;
+    Log("production_tabs: %s: button %s bound%s%s", nt.name.c_str(), nt.button.c_str(), glow ? " (with glow)" : "",
+        atSetup ? "" : " (found after the view's setup)");
+    return true;
+}
+
 void SetupBody(void* view) {
     g_view = view;
     for (size_t t = 0; t < g_tabs.size(); ++t) {
-        NewTab& nt = g_tabs[t];
-        nt.buttonEl = FindInView(view, g_buttonSlot, nt.button.c_str());
-        nt.glowEl = nt.glow.empty() ? nullptr : FindInView(view, g_iconSlot, nt.glow.c_str());
-        if (!nt.buttonEl) {
-            if (!nt.missingLogged)
-                Log("production_tabs: %s: the production view has no button %s (add a buttonType of that name next to the "
-                    "vanilla tab buttons in countryproductionlineview.gui); the tab is off",
-                    nt.name.c_str(), nt.button.c_str());
-            nt.missingLogged = true;
-            continue;
-        }
-        if (!nt.glow.empty() && !nt.glowEl)
-            Log("production_tabs: %s: the production view has no icon %s; the tab has no glow", nt.name.c_str(), nt.glow.c_str());
-        int index = (int)t;
-        // The wrapper lives as long as the game: the button keeps a reference to it, and the view
-        // (with its buttons) lasts the whole session.
-        if (!BindButtonClick(nt.buttonEl, [index]() { ClickSafe(index); })) {
-            Log("production_tabs: %s: the button could not be bound; the tab is off", nt.name.c_str());
-            nt.buttonEl = nullptr;
-            continue;
-        }
-        Log("production_tabs: %s: button %s bound%s", nt.name.c_str(), nt.button.c_str(), nt.glowEl ? " (with glow)" : "");
+        g_tabs[t].buttonEl = nullptr;
+        g_tabs[t].glowEl = nullptr;
+        g_tabs[t].missingLogged = false;
+        if (!g_tabs[t].button.empty()) TryBind(view, t, true);
     }
 }
 void SetupSafe(void* view) {
@@ -523,6 +551,47 @@ void ResolveProductionTabs() {
 }
 
 bool HaveProductionTabs() { return g_ok && HaveCountries() && HaveButtonClick(); }
+
+namespace {
+uint64_t TypeByName(const char* name) {
+    EngineString s;
+    ConstructEngineString(&s, name, strlen(name));
+    uint64_t m = g_typeByName(&s);
+    FreeEngineString(&s);
+    return m;
+}
+uint64_t TypeByNameSafe(const char* name, bool* ok) {
+    __try {
+        *ok = true;
+        return TypeByName(name);
+    } __except (FaultFilter(GetExceptionInformation())) {
+        *ok = false;
+        return 0;
+    }
+}
+}  // namespace
+
+bool HavePtabTypes() {
+    if (!g_typeByName) return false;
+    if (g_typesChecked == 0) {  // the game's own masks: "armor" is exactly the tank tab's; a made-up name has none
+        bool ok1 = false, ok2 = false;
+        uint64_t armor = TypeByNameSafe("armor", &ok1);
+        uint64_t none = TypeByNameSafe("hoi4_loader_no_such_type", &ok2);
+        g_typesChecked = ok1 && ok2 && armor == g_vanilla[1].listMask && none == 0 ? 1 : -1;
+        if (g_typesChecked < 0)
+            Log("production_tabs: the type name lookup failed its check (armor 0x%llx, the tank tab 0x%llx); add_types / "
+                "remove_types unavailable",
+                (unsigned long long)armor, (unsigned long long)g_vanilla[1].listMask);
+    }
+    return g_typesChecked > 0;
+}
+
+uint64_t PtabTypeMask(const char* name) {
+    if (!name || !*name || !HavePtabTypes()) return 0;
+    bool ok = false;
+    uint64_t m = TypeByNameSafe(name, &ok);
+    return ok && !(m >> kOwnBits) ? m : 0;
+}
 
 const void* PtabArchetypeOf(const void* type) {
     const void* a = type && TypeArchetypeOffset() ? Rd<const void*>(type, TypeArchetypeOffset()) : nullptr;

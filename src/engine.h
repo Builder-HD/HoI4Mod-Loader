@@ -619,9 +619,10 @@ void DisableAirScenarios();  // after a fault: the game's own templates from now
 // state; UI only (the add-line command doesn't check the tab), main thread.
 void ResolveProductionTabs();  // after ResolveData (production_data's type offsets)
 bool HaveProductionTabs();
-// Is a design of `archetype` in `tab`? `vanilla`: the game's own answer (its type matches a vanilla
-// tab; always false for new tabs).
-using PtabMember_t = bool (*)(int tab, const void* archetype, bool vanilla);
+// Is a design of `archetype` in `tab`? `types`: the design's type mask (its archetype's types and its
+// modules' add_equipment_type); `vanilla`: the game's own answer (its type matches a vanilla tab;
+// always false for new tabs).
+using PtabMember_t = bool (*)(int tab, const void* archetype, uint64_t types, bool vanilla);
 using PtabFault_t = void (*)(const char* where);  // a contained fault; the game's own tabs from now on
 struct PtabNewTab {
     const char* name;    // for messages
@@ -631,6 +632,10 @@ struct PtabNewTab {
 // changed[i]: vanilla tab i has add / remove (else the game alone lists it). All hooks or none.
 bool HookProductionTabs(const bool changed[4], const PtabNewTab* tabs, int count, PtabMember_t member, PtabFault_t fault);
 const void* PtabArchetypeOf(const void* type);  // the archetype of an equipment type (itself for one)
+// The type mask bit of an equipment type name (`type = { ... }` names), 0 if the game has no such type
+// or the lookup is unavailable (HavePtabTypes false: not found, or its check against the tank tab failed).
+bool HavePtabTypes();
+uint64_t PtabTypeMask(const char* name);
 
 // --- Equipment designers (equipment_designers; engine_designers.cpp, NOTES.md Part N) -----------
 // Lets equipment the game gives no designer (e.g. type infantry) open the tank designer window,

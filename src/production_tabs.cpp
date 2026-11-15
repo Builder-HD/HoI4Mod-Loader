@@ -16,7 +16,7 @@ const char* const kVanillaNames[kVanillaTabs] = {"infantry", "armor", "air", "na
 bool ReadList(const Node& n, const std::string& fileName, std::vector<Archetype>* out, std::string* why) {
     std::vector<std::string> names;
     if (!n.block) {
-        *why = "'" + n.key + "' takes a block of archetypes: " + n.key + " = { <archetype> ... }";
+        *why = "'" + n.key + "' takes a block of names: " + n.key + " = { ... }";
         return false;
     }
     if (!ScriptTree::ListOf(n, &names, why)) return false;
@@ -71,6 +71,10 @@ void ParseFile(const std::string& text, const std::string& fileName, std::vector
                 ok = ReadList(c, fileName, &t.add, &why);
             } else if (EqualsNoCase(c.key, "remove")) {
                 ok = ReadList(c, fileName, &t.remove, &why);
+            } else if (EqualsNoCase(c.key, "add_types")) {
+                ok = ReadList(c, fileName, &t.addTypes, &why);
+            } else if (EqualsNoCase(c.key, "remove_types")) {
+                ok = ReadList(c, fileName, &t.removeTypes, &why);
             } else if ((isButton || isGlow) && t.vanilla >= 0) {
                 why = c.key + ": the vanilla tabs keep their own buttons (change them in countryproductionlineview.gui)";
                 ok = false;
@@ -82,7 +86,8 @@ void ParseFile(const std::string& text, const std::string& fileName, std::vector
             } else if (isGlow) {
                 t.glow = c.value;
             } else {
-                why = "unknown key '" + Label(c) + "' (allowed: add, remove" + (t.vanilla >= 0 ? "" : ", button, glow") + ")";
+                why = "unknown key '" + Label(c) + "' (allowed: add, remove, add_types, remove_types" +
+                      (t.vanilla >= 0 ? "" : ", button, glow") + ")";
                 ok = false;
             }
             if (!ok) {
@@ -93,6 +98,9 @@ void ParseFile(const std::string& text, const std::string& fileName, std::vector
         if (!ok) continue;
         for (const Archetype& a : t.add)
             if (Listed(t.remove, a.name)) problem(a.line, t.name + ": " + a.name + " is in both add and remove; remove wins");
+        for (const Archetype& a : t.addTypes)
+            if (Listed(t.removeTypes, a.name))
+                problem(a.line, t.name + ": type " + a.name + " is in both add_types and remove_types; remove_types wins");
         out->push_back(std::move(t));
     }
     if (!syntaxOk) problems->push_back({fileName, errorLine, error + "; the rest of the file is ignored"});
@@ -113,6 +121,8 @@ void Merge(std::vector<Tab>* all, const std::vector<Tab>& later, std::vector<Pro
             copy.line = t.line;
             AddNew(&copy.add, t.add);
             AddNew(&copy.remove, t.remove);
+            AddNew(&copy.addTypes, t.addTypes);
+            AddNew(&copy.removeTypes, t.removeTypes);
             all->push_back(std::move(copy));
             continue;
         }
@@ -129,6 +139,8 @@ void Merge(std::vector<Tab>* all, const std::vector<Tab>& later, std::vector<Pro
         keep(&old->glow, t.glow, "glow");
         AddNew(&old->add, t.add);
         AddNew(&old->remove, t.remove);
+        AddNew(&old->addTypes, t.addTypes);
+        AddNew(&old->removeTypes, t.removeTypes);
     }
 }
 

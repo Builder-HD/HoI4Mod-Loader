@@ -1199,6 +1199,11 @@ static const size_t kSigPtabStateCall[4] = {0x27, 0x43, 0x63, 0x8d};  // E8, E8,
 // array. Hooked to list a tab's members. Function starts.
 SIG(kSigPtabListLand, "4C 89 44 24 18 48 89 54 24 10 55 53 56 57 41 54 41 55 41 56 41 57 48 8B EC 48 83 EC 78 4D 8B F8 48 8B FA 4C 8B F1 45 33 ED 44 89 6D 48 48 8B 81 ?? ?? ?? ?? 48 8B 80 ?? ?? ?? ?? 48 89 45 B8")
 SIG(kSigPtabListNaval, "48 89 5C 24 18 48 89 54 24 10 55 56 57 41 54 41 55 41 56 41 57 48 83 EC 70 4D 8B E0 48 8B F2 48 8B F9 45 33 FF 44 89 BC 24 B0 00 00 00 48 8B 81 ?? ?? ?? ?? 48 8B 80 ?? ?? ?? ?? 48 89 44 24 30")
+// The equipment category of a type name (`type = { ... }` names: infantry, armor, artillery ...) as
+// a type mask bit, 0 for any other name (0x14100c8c0): CategoryOf(const std::string*). The same
+// masks the tabs and designs use (checked at first use: "armor" is the tank tab's mask). Function start.
+SIG(kSigPtabTypeByName, "48 83 EC 28 48 83 79 18 0F 76 03 48 8B 09 48 8B D1 41 B8 ?? ?? ?? ?? 48 8D 4C 24 30 E8 ?? ?? ?? ?? 8B 4C 24 30 81 F9 ?? ?? ?? ?? 74 09 48 83 C4 28 E9 ?? ?? ?? ?? 33 C0 48 83 C4 28 C3")
+static const size_t kSigPtabTypeDefaultToken = 0x13, kSigPtabTypeDefaultToken2 = 0x27;
 
 // --- Production tabs (NOTES.md Part O; addresses 1.19.5, same on 1.19.4.2) ------------------------
 // In the setup (SigFindIn 0x100): root = GetRoot(view) (E8 at +3); container = root->vtable[disp32

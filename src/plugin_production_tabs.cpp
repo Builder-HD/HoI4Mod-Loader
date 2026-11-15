@@ -39,6 +39,7 @@ std::vector<size_t> g_newDefs;           // g_defs index per new tab (engine tab
 // equipment database is loaded by then).
 struct Sets {
     std::unordered_set<const void*> add, remove;
+    uint64_t addTypes = 0, removeTypes = 0;  // type mask bits
 };
 std::vector<Sets> g_sets;  // per engine tab: 0..3 vanilla, then the new tabs
 bool g_resolved = false;
@@ -67,16 +68,36 @@ void ResolveList(const Ptab::Tab& t, const std::vector<Ptab::Archetype>& list, c
     }
 }
 
+uint64_t ResolveTypes(const Ptab::Tab& t, const std::vector<Ptab::Archetype>& list, const char* key) {
+    uint64_t mask = 0;
+    for (const Ptab::Archetype& a : list) {
+        if (!Engine::HavePtabTypes()) {
+            Log("%s: %s (%s line %d): %s is unavailable on this build; ignored", kFeature, t.name.c_str(), a.file.c_str(), a.line, key);
+            return 0;
+        }
+        uint64_t m = Engine::PtabTypeMask(a.name.c_str());
+        if (!m)
+            Log("%s: %s (%s line %d): %s: %s is not an equipment type (the names of `type = { ... }`); skipped", kFeature,
+                t.name.c_str(), a.file.c_str(), a.line, key, a.name.c_str());
+        mask |= m;
+    }
+    return mask;
+}
+
 void Resolve() {
     g_resolved = true;
     g_sets.assign(4 + g_newDefs.size(), Sets());
     for (int tab = 0; tab < (int)g_sets.size(); ++tab) {
         const Ptab::Tab* t = DefOf(tab);
         if (!t) continue;
-        ResolveList(*t, t->add, "add", &g_sets[(size_t)tab].add);
-        ResolveList(*t, t->remove, "remove", &g_sets[(size_t)tab].remove);
-        Log("%s: %s%s: %zu archetype(s) added, %zu removed", kFeature, t->name.c_str(), tab < 4 ? " (vanilla tab)" : "",
-            g_sets[(size_t)tab].add.size(), g_sets[(size_t)tab].remove.size());
+        Sets& s = g_sets[(size_t)tab];
+        ResolveList(*t, t->add, "add", &s.add);
+        ResolveList(*t, t->remove, "remove", &s.remove);
+        s.addTypes = ResolveTypes(*t, t->addTypes, "add_types");
+        s.removeTypes = ResolveTypes(*t, t->removeTypes, "remove_types");
+        Log("%s: %s%s: %zu archetype(s) added, %zu removed; types added 0x%llx, removed 0x%llx", kFeature, t->name.c_str(),
+            tab < 4 ? " (vanilla tab)" : "", s.add.size(), s.remove.size(), (unsigned long long)s.addTypes,
+            (unsigned long long)s.removeTypes);
     }
 }
 
@@ -84,8 +105,9 @@ void ResolveBeforeEntry() {
     if (!g_resolved) Resolve();
 }
 
-// UI thread (the production view).
-bool Member(int tab, const void* archetype, bool vanilla) {
+// UI thread (the production view). The most specific rule decides: an archetype's remove, its add,
+// then the types' remove, their add, then the game's own answer.
+bool Member(int tab, const void* archetype, uint64_t types, bool vanilla) {
     if (!g_resolved) {
         if (!IsMainThread()) return vanilla;
         Resolve();
@@ -93,7 +115,10 @@ bool Member(int tab, const void* archetype, bool vanilla) {
     if (tab < 0 || (size_t)tab >= g_sets.size()) return vanilla;
     const Sets& s = g_sets[(size_t)tab];
     if (s.remove.count(archetype)) return false;
-    return vanilla || s.add.count(archetype) != 0;
+    if (s.add.count(archetype)) return true;
+    if (types & s.removeTypes) return false;
+    if (types & s.addTypes) return true;
+    return vanilla;
 }
 
 void OnFault(const char* where) { FeatureDeactivate(kFeature, (std::string("fault in the ") + where).c_str()); }
@@ -141,7 +166,7 @@ bool ProductionTabsInit() {
     bool changed[4] = {false, false, false, false};
     for (int i = 0; i < 4; ++i) {
         const Ptab::Tab* t = DefOf(i);
-        changed[i] = t && (!t->add.empty() || !t->remove.empty());
+        changed[i] = t && (!t->add.empty() || !t->remove.empty() || !t->addTypes.empty() || !t->removeTypes.empty());
     }
     std::vector<Engine::PtabNewTab> tabs;
     for (size_t i : g_newDefs) tabs.push_back({g_defs[i].name.c_str(), g_defs[i].button.c_str(), g_defs[i].glow.c_str()});

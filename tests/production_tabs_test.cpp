@@ -63,6 +63,23 @@ int main() {
           "vanilla names");
     Check(std::string(VanillaName(kNaval)) == "naval" && std::string(VanillaName(7)).empty(), "vanilla name by index");
 
+    // Type lists next to the archetype lists; merged like them.
+    problems.clear();
+    tabs = Parse("guns = { button = g add_types = { artillery anti_tank } remove_types = { infantry } }\n"
+                 "infantry = { remove_types = { artillery } add_types = { artillery } }\n",
+                 &problems);
+    Check(tabs.size() == 2, "types: two entries");
+    if (tabs.size() == 2) {
+        Check(tabs[0].addTypes.size() == 2 && Has(tabs[0].addTypes, "anti_tank") && tabs[0].removeTypes.size() == 1,
+              "types: add_types and remove_types read");
+        Check(tabs[0].add.empty() && tabs[0].remove.empty(), "types: archetype lists untouched");
+    }
+    Check(HasProblem(problems, "type artillery is in both add_types and remove_types"), "types: both lists reported");
+    std::vector<Tab> merged;
+    Merge(&merged, tabs, &problems);
+    Merge(&merged, Parse("guns = { add_types = { anti_air artillery } }", &problems), &problems);
+    Check(!merged.empty() && merged[0].addTypes.size() == 3, "types: merged without duplicates");
+
     // Several add blocks in one entry append.
     problems.clear();
     tabs = Parse("armor = { add = { a } add = { b } remove = { c } }", &problems);

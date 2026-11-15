@@ -804,6 +804,10 @@ def check_production_tabs(img, codes, text_va, text):
     ok = bool(lt and nt and d) and u32(lt + 3) == u32(nt + 3) and \
         u32(lt + k['kCodePtabDesignMaskDisp']) == u32(nt + k['kCodePtabDesignMaskDisp']) == u32(d + k['kCodePtabMaskDisp'])
     results.append(('kCodePtabMaskTestLand / Naval (window mask +0x%x)' % (u32(lt + 3) if lt else -1), ok, hex(lt or 0)))
+    tn = one('kSigPtabTypeByName')
+    ok = bool(tn) and u32(tn + k['kSigPtabTypeDefaultToken']) == u32(tn + k['kSigPtabTypeDefaultToken2'])
+    results.append(('kSigPtabTypeByName (default token 0x%x)' % (u32(tn + k['kSigPtabTypeDefaultToken']) if tn else -1), ok,
+                    hex(tn or 0)))
     return results
 
 
