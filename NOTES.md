@@ -6677,4 +6677,12 @@ of MODDING.md at x = 265, not in the repo; screenshots):
    production view has no button ...; the tab is off`, the vanilla tab changes still applied.
 
 **Offline:** check_signatures (5 new, unique) and check_code_shapes (6 new rows) on 1.19.5 and
-1.19.4.2; smoke `2/149`. **Not tested:** a naval new tab, multiplayer (UI only).
+1.19.4.2; smoke `2/149`. **Not tested:** multiplayer (UI only).
+
+**Ship tab** (same day, owner's request; the test mod's `hoi4_loader_test_ships_tab`: submarines
+moved out of `naval`, destroyers copied; its button in the local test GUI at the repair button's
+place): the button opens the dockyard list (ship filters, "infinite" amount) with the Zerstörer
+1934A, the Type VII and the two base designs; the naval list has no submarine any more and keeps
+the destroyers. A Type VII line from the new tab: the game's MIO choice (HDW), then line 22 "Type
+VII" on dockyards ("U-31"). No ERROR, no fault. Tested on a local merge of this branch with the
+roles branch (both features together, not pushed).
