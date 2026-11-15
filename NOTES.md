@@ -6494,3 +6494,125 @@ game: the title stays on every reopening.
 4. `loader.log`: no ERROR, no fault.
 
 **Not tested:** multiplayer with `xp`, `xp = air`.
+# Part O: production tabs (`production_tabs`, investigation)
+
+Branch `feature/production-tabs` (from `main`). Investigation only, nothing implemented.
+Owner's request (2026-11-15): choose which "add production line" tab lists an equipment, and let
+mods add their own tabs (e.g. one tab for artillery, anti-tank and anti-air guns, to declutter the
+infantry tab). Only what the game hard-codes belongs in the loader. Addresses are from vanilla
+**1.19.5** (`hoi4_1195.exe`, a copy) and only for orientation; the shapes below are unique on
+1.19.5 and 1.19.4.2. 1.19.3 / 1.19.2: no copies.
+
+## O1: what vanilla script and the wiki have
+
+- **Wiki** (hoi4.paradoxwikis.com: Equipment modding, Unit modding, Interface modding, Defines; the
+  Production modding page doesn't exist). Equipment modding: `interface_category` "Which category
+  the equipment appears in the production screen", `group_by` (`archetype | type`), `visual_level`
+  "Image priority in production screen", `is_buildable`, `can_be_produced` (trigger). Six interface
+  categories. Nothing on how a tab is chosen, nothing on adding tabs; Interface modding: "the effects
+  of base game's GUI are hard-coded", new elements "will not be populated with data". No define
+  about tabs (NInterface only has offsets for the ship filters).
+- **Already scriptable, stays vanilla:**
+  - whether a design may be produced at all: `is_buildable`, `can_be_produced` (the list calls it,
+    `FUN_140cf1470`, walking archetype/parent), research, the "show outdated" box;
+  - grouping and filtering of **existing** lines: `interface_category` (six fixed values with one
+    `show_*` checkbox each in `countryproductionlineview.gui`);
+  - the buttons' look, position and tooltip: `countryproductionlineview.gui` (`infantry_button`,
+    `tank_button`, `aircraft_button`, `naval_button`, each with a `_glow` icon; tooltips are
+    commented out, `pdx_tooltip` works);
+  - the vanilla trick to get an equipment into a tab: an extra type (towed artillery is
+    `type = { artillery infantry }`).
+- **Mods:** BlackICE, Millennium Dawn, TNO, Kaiserreich-family, The Fire Rises, Darkest Hour (all
+  installed as Workshop items) override `countryproductionlineview.gui` and keep exactly the four
+  tabs. None has a fifth.
+
+## O2: engine findings (1.19.5)
+
+- **Buttons** (`FUN_1417d8f10`, the view's setup): looked up by name, stored at view `+0x2758`
+  (tank), `+0x2760` (infantry), `+0x2768` (air), `+0x2770` (naval); glow icons at `+0x2788..+0x27a0`.
+  Clicks go to four thunks, each a hard-coded type mask:
+  | thunk | button | mask (click) | window |
+  |---|---|---|---|
+  | `FUN_1417d7020` | infantry | `0x80080038` | land/air list `+0x2720` |
+  | `FUN_1417d7080` | tank | `4` (armor) | `+0x2720` |
+  | `FUN_1417d6ff0` | air | `0x1f0037fc00` | `+0x2720` |
+  | `FUN_1417d7050` | naval | `0x80004003c1` | naval list `+0x2728` (dockyards) |
+  All call `FUN_1417d6e10(view, mask, naval, window, button)`: it stores the mask at window `+0x1120`
+  (and the naval flags at `+0x112d/+0x112e`), refreshes the window (`FUN_141e3fb00`) and the buttons.
+- **The list** (`FUN_141e3c020` for land/air, `FUN_141e3cd40` for naval, both called by
+  `FUN_141e3fb00` with the country's variant array): a variant is listed when its type is buildable
+  (`+0x445`), `can_be_produced` passes, it isn't outdated (or "show outdated" is on), its modules are
+  available, and **`variant+0x408 & window+0x1120` is non-zero**. `+0x408` is the design's type
+  mask (archetype types plus modules' `add_equipment_type`). So the tab is the type, nothing else:
+  pure `artillery` / `anti_tank` match no tab and are listed nowhere (N3 probes on the designer
+  branch). `FUN_141e3d660` adds a second kind of entry to the same window by the same mask (from
+  country `+0xf68 +0x130`, matched through `TypeMask`; not identified yet).
+- **Button state** (`FUN_1417d66b0` -> `FUN_1417d8cc0(button, glow, open button, mask)` per tab,
+  enable masks: infantry `0x80000038` (without bit 19), tank `4`, air `0x1f0037fc00`, naval
+  inline): enabled if the country has a variant with that mask; glow if one is new (`+0x426`) and
+  buildable; frame "selected" while open. `FUN_1417d25c0(mask)` checks military factories (dockyards
+  for naval) and **asserts on any other mask**, so a new tab can't go through it.
+- **Changing an existing line's equipment** (`FUN_1417d27d0` / `28d0` / `29e0`, from the line item):
+  opens the same window with the line's own mask (`+0x2248` of the line item).
+- **Adding the line** (`CAddProductionLineCommand`, vtable `0x142a0fbc8`; validate `FUN_1411edb10`):
+  checks the country, that it owns the variant (`FUN_140c2cad0`) and the conversion source. **No tab
+  or type mask check.** The tab is UI only: nothing synced, the AI never uses it.
+- **Other users of the button names:** `FUN_141d285e0` / `FUN_141d288e0` (`infantry_button`,
+  `naval_button`) and `FUN_142063990` (`naval_button`) are other views; not part of this.
+- **Binding a click** on a button the game doesn't know: the loader already does it
+  (`CButtonWrapper`, `kSigButtonWrapperCtor`, province_buildings).
+
+## O3: what is hard-coded (loader material) and what isn't
+
+| Hard-coded in the exe | Scriptable (not the loader's job) |
+|---|---|
+| which types each of the four tabs lists (masks in the click thunks) | buttons' sprite, position, tooltip, glow icon (gui) |
+| exactly four tabs (four names bound in setup) | whether something can be produced (`can_be_produced`, `is_buildable`) |
+| button enabled / glow by the same masks | existing-line grouping and filters (`interface_category`) |
+
+## O4: proposal (for the owner's approval)
+
+One file kind, `common/hoi4_loader_production_tabs/*.txt`, engine-tier feature `production_tabs`:
+```
+# Put equipment into a vanilla tab: infantry | armor | air | naval
+infantry = {
+    equipment = { my_field_gun }         # archetypes; their variants and duplicate_archetypes copies follow
+}
+
+# A new tab: the mod adds the button to countryproductionlineview.gui (vanilla gui modding)
+artillery_tab = {
+    button = artillery_tab_button        # required: a buttonType next to the vanilla ones
+    glow = artillery_tab_button_glow     # optional iconType, lit while a new design is unseen
+    equipment = { artillery_equipment anti_tank_equipment anti_air_equipment }
+}
+```
+- **Moves, doesn't copy:** a listed archetype shows only in its tab, so the vanilla tab gets
+  shorter. An archetype in two tabs: the second is logged and skipped.
+- **Land/air vs naval:** a tab is naval when its equipment is (naval type bits), and uses the
+  dockyard window; mixing, or moving across (a ship into `infantry`, a gun into `naval`), is logged
+  and skipped.
+- **Vanilla rules stay:** research, `can_be_produced`, outdated filter, modules, the designer button
+  on the entry. Button enabled/glow/selected like the vanilla ones (and the vanilla buttons stop
+  counting moved-out equipment).
+- **Changing a line's equipment** lists that equipment's tab (the loader's tab if moved).
+- **Fail safe:** a missing button: logged, that tab off (its equipment stays where the game puts it).
+  Any pattern mismatch: feature off, vanilla tabs.
+- **Not in it:** the existing-lines filters (`interface_category`, vanilla); button looks (gui).
+  A `types = { ... }` selector instead of archetypes: later, if wanted (the name-to-bit table is not
+  found yet; archetypes cover every case).
+- **Space:** the vanilla row has room for one more button at x = 265 (between air and naval).
+
+**Hooks (plan):** the list builders (`FUN_141e3c020`, `FUN_141e3cd40`): call the original with a
+filtered copy of the variant array for the open tab (the original keeps every other check); the
+four click thunks' target `FUN_1417d6e10` stays the entry for vanilla tabs, new tabs call it with
+the union of their equipment's masks (so `FUN_141e3d660`'s entries keep working by type) and the
+loader remembers which tab is open; the button-state updater (`FUN_1417d66b0`, post) for new
+buttons and `FUN_1417d8cc0` for moved equipment. Signatures for the four thunks, the two list
+builders and the updater (unique shapes on 1.19.5 and 1.19.4.2).
+
+**Open before code:** what `FUN_141e3d660`'s entries are (licences or market contracts?) and
+whether they should follow a new tab; whether the open-tab toggle (`FUN_141e3d120`, compares the
+mask) needs the loader's tab id when two tabs have the same mask union.
+
+**Supersedes** the `production_tab` key planned for `equipment_designers` (designer branch, N16):
+one place for all equipment, modular or not.
