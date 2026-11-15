@@ -6597,3 +6597,54 @@ drone (`air_transport` with slots) is not designable in vanilla even with By Blo
 **Offline:** both checkers on 1.19.5 and 1.19.4.2; the GUI patch on all three vanilla designer
 files (ship 7 + 7 windows before). **Not tested:** the ship window in game (Man the Guns is not
 installed here), multiplayer.
+
+## N16: custom roles (owner 2026-11-15; branch `feature/equipment-designer-roles`)
+
+**Owner:** the `roles` syntax is approved (role twins in script, the archetype is the default role,
+optional `name` and per-role `stats`). `production_tab` afterwards, possibly with custom tabs.
+
+### Findings (1.19.5; same bytes on 1.19.4.2)
+
+- **A role is a type mask, not an equipment.** The dropdown builder (`FUN_1418268b0`) takes the
+  design's type mask (`view+0x5058` is the design being edited, `+0x408` its mask; `view+0x5448` =
+  design `+0x3f0`) without the six role bits (`& 0x81ffffff`, bits 25-30) and calls the entry
+  function `FUN_14180f740(ctx, mask)` seven times: the base, then base | bit 29, 28, 27, 30, 26 (only
+  with DLC 0x17) and 25 (`48 8B 9E disp32; 48 81 E3 FF FF FF 81; ...; E8`, unique). ctx = {view,
+  archetype token, ...}.
+- **Entry** (`FUN_14180f740`): a mask with role bits is only listed when some equipment of the list
+  `ctx[3]` covers them; it is enabled when no module forbids it (`FUN_140c33d50`) and the mask lies
+  within what the design can be (`FUN_140c2ee50`: the type's masks plus what the modules allow);
+  selected when it equals the design's mask. Label: `FUN_14100de60(out, mask, token)` (E8 at +0xba),
+  a loc key; the disabled tooltip is that key plus `_role_disallowed`; icon `FUN_14100e800`.
+- **Labels are a hard-coded switch** on the exact mask (`4` gives `tank_designer_<archetype>`, other
+  masks fixed keys, unknown masks "unknown").
+- **Choosing a role** (the entry's click handler, vtable `0x142a784e0` slot 2) calls
+  `FUN_14152d710(view+0x3ce8, mask)`: if allowed, the design's mask becomes the mask plus the
+  modules' types (`FUN_140c37170` / `FUN_140c29730`), then the window refreshes. The design then
+  belongs to the equipment whose type mask (`+0x5a8` without bit 24, the builder's own comparison)
+  equals it: the role twin (`archetype = X`, `type = { ... }`, vanilla `x_tank_chassis.txt`).
+- So the game's own mechanism already handles any twin; only the list (seven fixed masks) and the
+  labels (fixed keys) are hard-coded.
+
+### Decisions
+
+1. **Syntax** (as approved; one correction): each role is an equipment, the archetype or a twin of
+   it (`archetype = <archetype>`), and **each role needs its own type set**, because the game tells
+   roles apart by type. A role's types beyond the archetype's must be allowed by a module
+   (`allow_equipment_type`), as in vanilla.
+   ```
+   roles = {
+       field_gun = { name = ROLE_HOWITZER }                      # the archetype: default role
+       field_gun_at = { name = ROLE_ANTI_TANK stats = { combat = { hard_attack ap_attack } } }
+       field_gun_aa = { name = ROLE_ANTI_AIR }
+   }
+   ```
+2. **Hooks** (UI only, tank window): the entry function, for a design of a listed archetype with
+   `roles`: the base call lists the definition's roles instead (each role's mask, through the game's
+   own entry: allowed / disabled / selected as vanilla), the six role-bit calls are skipped; the
+   label function, for a listed archetype (by token) and a role's mask: the role's `name` (default:
+   the role equipment's own loc key). With `roles`, the dropdown shows (`hide_roles` is ignored).
+3. **Per-role `stats`:** the stats hook reads the design's mask and uses the role's panels first,
+   then the designer's.
+4. **Multiplayer and saves:** unchanged; the role is the design's type mask, saved by the game's own
+   command, as for vanilla tank roles.
