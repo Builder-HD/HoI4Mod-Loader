@@ -30,10 +30,12 @@ A–F; NOTES.md has the findings and test results behind each.
   `countryproductionlineview.gui`, defined in `common/hoi4_loader_production_tabs/*.txt`. Move, copy
   or hide equipment is the mod's choice; the same tab in several mods merges. `add_types` /
   `remove_types` select by equipment type (`type = { ... }` names, through the game's own name
-  lookup), the more specific archetype entries win. The game's own checks
+  lookup), the more specific archetype entries win. `visible = <scripted trigger>` (any tab, vanilla
+  ones too) shows the button only while the trigger is true for the player's country (evaluated in
+  the UI, outside the synced RNG). The game's own checks
   (research, `can_be_produced`, outdated) and the add-line command stay; UI only. Hooks the view's
-  setup (binds the new buttons), the buttons' state and the two add-line lists; 6 new signatures
-  (smoke `2/150`). Checked on 1.19.4.2 and 1.19.5; tested in game on 1.19.5 (2026-11-15). The test
+  setup (binds the new buttons), the buttons' state and the two add-line lists; 7 new signatures
+  (smoke `2/151`). Checked on 1.19.4.2 and 1.19.5; tested in game on 1.19.5 (2026-11-15). The test
   mod moves the towed guns into a "Towed guns" tab and copies the test small arms into the armor tab.
 - **Shared code:** `Engine::BindButtonClick` (a click handler on a GUI button through the engine's
   `CButtonWrapper`, from province_building_removal) for any feature.

@@ -1612,6 +1612,18 @@ infantry = { remove_types = { artillery anti_tank anti_air } }
 - **Ships and the rest:** a new tab whose archetypes are all ships opens the dockyard list (as the
   naval tab), every other one the military factory list. A list never shows designs of the other
   kind: a ship added to `armor`, or a tank to `naval`, is not listed there.
+- **A condition** (`visible = <scripted trigger>`, any tab, vanilla ones too): the button and its
+  glow show only while the trigger is true for the player's country (ROOT and THIS). Write the
+  trigger in `common/scripted_triggers` as usual:
+  ```
+  my_artillery_tab_visible = { has_tech = gwtank }          # common/scripted_triggers/...
+  artillery_tab = { button = artillery_tab_button visible = my_artillery_tab_visible add = { ... } }
+  naval = { visible = my_has_navy_tabs }                    # hide a vanilla tab under a condition
+  ```
+  It is evaluated when the production screen updates its buttons (opening it, adding lines, the
+  game's own refreshes), locally and without the game's synced random numbers, so it never touches
+  multiplayer. A hidden tab's list that is open stays open until closed. An unknown trigger name is
+  logged and the tab always shows.
 - **Vanilla rules stay:** research, `can_be_produced`, `is_buildable`, the "show outdated" box, the
   designer button on each entry. The buttons behave as the vanilla ones: disabled when the country
   has no design of the tab (or no factories / dockyards), the glow while one is new, "selected"
@@ -1643,7 +1655,7 @@ More buttons need room (move the vanilla ones in the same file). At most 16 new 
 name replaces the earlier one, `replace_path = "common/hoi4_loader_production_tabs"` drops the
 earlier mods' files, zipped mods can't be read. The **same tab in several files or mods merges**:
 their `add` and `remove` lists add up, so a submod can add its equipment to its parent mod's tab.
-`button` and `glow` keep the first definition's (a different later one is logged).
+`button`, `glow` and `visible` keep the first definition's (a different later one is logged).
 
 **Checks and messages** (`loader.log`):
 - At start: `production_tabs: 1 new tab(s), 1 vanilla tab(s) changed, from 1 file(s) ...`.
@@ -1651,7 +1663,8 @@ their `add` and `remove` lists add up, so a submod can add its equipment to its 
   bound (with glow)`, or `no button ... in the production view ...; looked up again when the
   buttons update, the tab is off until then`.
 - Before the game starts: per tab `N archetype(s) added, M removed; types added 0x8, removed 0x0`,
-  and every name that is not found, is an equipment type instead of an archetype, or is not a type.
+  and every name that is not found, is an equipment type instead of an archetype, or is not a type;
+  `visible while <trigger>`, or `no scripted trigger ...; the tab always shows`.
 - Problems in the files, with file and line: syntax, unknown keys, `button` on a vanilla tab, a new
   tab without `button`, the same archetype in a tab's `add` and `remove`.
 - Without definitions the feature stays idle: `no tab definitions; the production tabs are left
@@ -1667,7 +1680,9 @@ tab's button shows but does nothing. Guard: `hoi4_loader_feature_production_tabs
 rocket artillery, anti-tank and anti-air move from the infantry tab to a "Towed guns" tab; the test
 small arms (decision "Unlock the test small arms") also show in the armor tab; every `motorized`
 design moves from infantry to armor by type; a ship tab takes the submarines out of the naval tab
-and also lists the destroyers. The test mod doesn't ship a copy of `countryproductionlineview.gui`:
+and also lists the destroyers. The guns and the naval tab have `visible = hoi4_loader_test_tabs_visible`
+(no country flag `hoi4_loader_test_hide_tabs`): the decisions "Tabs: hide the guns and naval tabs" and
+"Tabs: show them again" toggle it. The test mod doesn't ship a copy of `countryproductionlineview.gui`:
 add the elements above with the names `hoi4_loader_test_guns_button` /
 `hoi4_loader_test_guns_button_glow` (tooltip `HOI4_LOADER_TEST_GUNS_TAB`) and
 `hoi4_loader_test_ships_button` (`HOI4_LOADER_TEST_SHIPS_TAB`) to test the new tabs; without them

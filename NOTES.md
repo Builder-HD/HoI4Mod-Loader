@@ -6784,3 +6784,16 @@ naval = { visible = has_navy_tabs }      # the vanilla tabs too
 - Merging: `visible` like `button`: the first definition wins, a different later one is logged.
 - Fail safe: no signature: `visible` logged as unavailable, tabs always shown; a fault while
   evaluating: the feature's usual fault path (game tabs from then on).
+
+**Implementation and in-game test** (2026-11-15):
+- `Engine::WithCountryScope(tag, fn, ctx, &result)` (engine.cpp): a CEventScope with seed 0, ROOT and
+  THIS the country (SetCountry), under SEH. The tabs call the template's evaluate entry in it.
+- First run: `no scripted trigger ... ; the tab always shows`. A diagnostic showed the Find pointer
+  outside every module: the call's offset in the signature was 0x55, the E8 is at +0x51 (the
+  `4C 8B F8` after it is at +0x55). The fault guard caught it (returned "not found"). Fixed; the
+  resolver and check_code_shapes.py now also require the E8 there.
+- In game (1.19.5, Germany 1936, combined test build): `visible while hoi4_loader_test_tabs_visible`
+  for the guns tab and the naval tab; both buttons show. Decision "Tabs: hide the guns and naval
+  tabs" (sets the country flag): reopened, both are gone, the other tabs (infantry, armor, air, the
+  ship tab) stay. "Tabs: show them again": both back. No fault, no ERROR.
+- Offline: both checkers on 1.19.5 and 1.19.4.2 (one more signature: smoke `2/151`); 37 unit checks.
