@@ -28,3 +28,22 @@ hoi4_loader_test_small_arms_designer = {
 		fixed_sa_sight_slot = { x = 293 y = 300 }
 	}
 }
+
+# The plane window (window = air) for a type the game routes there but never makes designable.
+hoi4_loader_test_drone_designer = {
+	archetypes = { hoi4_loader_test_drone }
+	window = air
+	title = HOI4_LOADER_TEST_DRONE_DESIGNER
+	stats = {
+		base = { maximum_speed air_range reliability build_cost_ic }
+		combat = { air_defence air_agility }
+		misc = { }
+	}
+	hide = { historical_design_button plane_role }   # plane_role: the plane window's role line
+	slots = {
+		fixed_drone_engine_slot = { x = 1 y = 1 }
+		drone_cargo_slot_1 = { x = 220 y = 300 }
+		drone_cargo_slot_2 = { x = 293 y = 300 }
+		drone_cargo_slot_3 = { x = 366 y = 300 }
+	}
+}
