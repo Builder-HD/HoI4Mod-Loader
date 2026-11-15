@@ -703,6 +703,26 @@ bool AreaProvinceObjects(AreaKind kind, int id, std::vector<void*>* out) {
     return true;
 }
 
+bool StateObjectProvinces(const void* state, void* const** data, int* count) {
+    *data = nullptr;
+    *count = 0;
+    if (!state || !g_provinces || !g_provinceCount) return false;
+    PtrList l = ListAt(state, g_provinces, g_provinceCount);
+    *data = l.data;
+    *count = l.count;
+    return true;
+}
+
+bool ProvinceCombatObjects(const void* province, void* const** data, int* count) {
+    *data = nullptr;
+    *count = 0;
+    if (!province || !g_provinceCombats || !g_provinceCombatCount) return false;
+    PtrList l = ListAt(province, g_provinceCombats, g_provinceCombatCount);
+    *data = l.data;
+    *count = l.count;
+    return true;
+}
+
 int GameDateHours() {
     void* gs = GameState();
     return gs && g_gameDate ? Rd<int>(gs, g_gameDate) : 0;

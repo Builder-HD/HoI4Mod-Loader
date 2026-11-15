@@ -284,6 +284,10 @@ int StateCount();
 // The CProvince objects of a state or strategic region, in the engine's list order. False if the
 // area does not exist or the list layout is unresolved.
 bool AreaProvinceObjects(AreaKind kind, int id, std::vector<void*>* out);
+// The CProvince list of a state object (as AreaProvinceObjects, without a copy). False if unresolved.
+bool StateObjectProvinces(const void* state, void* const** data, int* count);
+// The combats located in a province (CProvince object). False if unresolved.
+bool ProvinceCombatObjects(const void* province, void* const** data, int* count);
 
 // --- Province data (area selection; engine_province_data.cpp, NOTES.md M14) ---------------------
 // Resolved on its own: attention_area uses it, and a general area selector can.
@@ -292,10 +296,15 @@ bool HaveProvinceIds();      // CProvince -> id (from goto_state)
 bool HaveProvinceData();     // province objects, ids, rects, controller, coastal, state owner
 // Main thread or trigger reads; ids 1 .. ProvinceCount()-1.
 int ProvinceCount();
+void* ProvinceById(int id);                  // the CProvince object, null if none or unresolved
+// The static map province of an id (map/definition.csv's data, loaded once at start and kept
+// between games; CProvince's map province is the same object). Null if none or unresolved.
+void* MapProvinceById(int id);
 int ProvinceIdOf(const void* province);      // CProvince -> id, 0 if unreadable
 bool ProvinceIsCoastal(int id);
 int ProvinceController(int id);              // tag, 0 if unknown
 int StateOwner(int stateId);                 // tag, 0 if unknown
+int StateObjectOwner(const void* state);     // the same for a state object
 bool ProvinceRect(int id, int rect[4]);      // map pixels {x, y, width, height}
 
 // --- Attention areas (attention_area; engine_attention.cpp, NOTES.md Part M) -------------------
@@ -362,6 +371,10 @@ bool HookCentreOnProvince(CentreFilter_t filter);
 void ResolveRailways();
 bool HaveRailways();   // every railway field and function resolved (no game needed)
 bool RailwaysReady();  // HaveRailways() and a game with a railway manager exists
+// The supply system's "province changed" notification (marks the province and its railway
+// neighbours for the next supply update), as railway changes use it. Main thread, in a game.
+bool HaveSupplyNotify();
+bool SupplyProvinceChanged(int province);
 // Switches railways off for the rest of the session (the plugin's self-check failed): nothing
 // changes a railway any more, dismantle entries in the queue pause (no progress, not finished,
 // kept in the queue and in saves), and the map badges are vanilla again.
@@ -612,6 +625,35 @@ using AirBuilt_t = void (*)();  // after the game built its templates (every tim
 using AirPick_t = void* (*)(int slot, const void* attackers, const void* defenders);
 bool HookAirScenarios(AirBuilt_t built, AirPick_t pick);  // all hooks or none
 void DisableAirScenarios();  // after a fault: the game's own templates from now on
+
+// --- Province terrain (province_terrain; engine_terrain.cpp, NOTES.md Part P) --------------------
+// A province's terrain category (CTerrainType, common/terrain) is the pointer in its static map
+// province; the game also keeps per-state and per-country terrain masks (has_terrain) and a copy
+// in each battle. All functions here: main thread.
+void ResolveTerrain();  // after ResolveProvinceData, ResolveRailways and ResolveMilitaryCounts
+bool HaveTerrain();     // every terrain field resolved and the province, state, combat, supply parts
+// Once per game (game entered): finds the water bit (the bit every sea province's terrain has) and
+// checks the state masks against the provinces, except the states of `skip` (provinces whose
+// terrain was restored before the entry: the game may have built their masks earlier). False and
+// *problem if the layout looks different.
+bool TerrainSelfCheck(const std::vector<int>& skip, std::string* problem);
+const void* TerrainByToken(int token);          // a valid category by name token, null if none
+int TerrainToken(const void* terrain);          // its name token
+bool TerrainIsWater(const void* terrain);       // is_water (after TerrainSelfCheck)
+const void* ProvinceTerrain(int province);      // the province's category now, null if none
+// Only the map province's pointer, no game needed (restoring before a game is entered). The game
+// builds its masks before that point, so refresh the province with SetProvinceTerrain once the game
+// is entered. False if the province does not exist.
+bool SetMapTerrain(int province, const void* terrain);
+// In a game: the pointer, then the province's state mask, its owner's country mask, the battles in
+// the province and the supply notification (also with the province's current terrain: a refresh).
+// False if the province does not exist or a fault was contained. *battles (optional): the battles
+// in the province that got the terrain.
+bool SetProvinceTerrain(int province, const void* terrain, int* battles = nullptr);
+// The state's province ids (empty if none). Main thread.
+bool StateProvinceIds(int stateId, std::vector<int>* out);
+// Any province of the state is of that category. Trigger reads (no allocation).
+bool StateHasTerrain(int stateId, const void* terrain);
 
 // --- Production tabs (production_tabs; engine_production_tabs.cpp, NOTES.md Part O) --------------
 // The production view's "add production line" tabs: the four vanilla ones (0 infantry, 1 armor,

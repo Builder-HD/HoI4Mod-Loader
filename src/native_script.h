@@ -73,8 +73,9 @@ struct ParamSpec {
     // Declared but not supported yet: writing it is a parse error ("not supported yet"), so the
     // name stays reserved for a later version instead of reading as a typo.
     bool reserved = false;
-    // Int or Block only: the key may be written several times; every value is kept, in script
-    // order (Args::count / Args::at / Args::block). Without it a second value replaces the first.
+    // Int, Token or Block only: the key may be written several times; every value is kept, in script
+    // order (Args::count / Args::at (Int values, Token tokens) / Args::block). Without it a second
+    // value replaces the first. Args::key of a repeated Token is the last text written.
     bool repeat = false;
     // Block: the keys allowed inside (any types but Block; no scope defaults). Must outlive the
     // registration call (copied then).

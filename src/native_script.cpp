@@ -84,8 +84,8 @@ std::string CheckParams(const std::vector<ParamSpec>& params, bool inBlock = fal
     if (params.size() > kMaxParams) return "at most 16 parameters";
     for (size_t i = 0; i < params.size(); ++i) {
         const ParamSpec& p = params[i];
-        if (p.repeat && p.type != ParamType::Int && p.type != ParamType::Block)
-            return std::string("only int and block parameters can repeat ('") + p.name + "')";
+        if (p.repeat && p.type != ParamType::Int && p.type != ParamType::Token && p.type != ParamType::Block)
+            return std::string("only int, token and block parameters can repeat ('") + p.name + "')";
         if (p.type == ParamType::Block) {
             if (inBlock) return std::string("block parameter '") + p.name + "' cannot be nested in a block";
             if (!p.block || p.block->empty()) return std::string("block parameter '") + p.name + "' needs its keys";
@@ -869,6 +869,10 @@ bool NativeSetArg(ParsedCommand& pc, size_t index, const char* text, std::string
                 if (!v.i) {
                     *error = std::string("'") + spec.name + "': cannot create a token for '" + text + "'";
                     return false;
+                }
+                if (spec.repeat) {  // every token written, in script order (Args::count / Args::at)
+                    pc.lists[index].push_back(v.i);
+                    v.ints = &pc.lists[index];
                 }
             }
             break;

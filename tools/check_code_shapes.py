@@ -213,6 +213,7 @@ def check(path, codes):
     results += check_equipment_conversion(img, codes, text_va, text)
     results += check_equipment_designers(img, codes, text_va, text)
     results += check_production_tabs(img, codes, text_va, text)
+    results += check_province_terrain(img, codes, text_va, text)
     return results
 
 
@@ -870,6 +871,44 @@ def check_production_tabs(img, codes, text_va, text):
                     (rel32(img, call) if st else 0, u8(v + k['kCodePtabScriptedValidDisp']) if v else -1,
                      u8(ev + k['kCodePtabScriptedTemplateDisp']) if ok else -1, u8(ev + k['kCodePtabScriptedEvalSlot']) if ok else -1),
                     ok, hex(st or 0)))
+    return results
+
+
+def check_province_terrain(img, codes, text_va, text):
+    """province_terrain (NOTES.md Part P): the pieces engine_terrain.cpp resolves, with its cross-checks."""
+    hdr = pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h'
+    sigs, _ = cs.load_signatures(hdr)
+    sigs, k = dict(sigs), load_constants(hdr)
+    u8 = lambda va: img.d[img.va2off(va)]
+    u32 = lambda va: struct.unpack_from('<I', img.d, img.va2off(va))[0]
+
+    def one(name):
+        m = [text_va + x.start() for x in cs.compile_pattern(sigs[name]).finditer(text)]
+        return m[0] if len(m) == 1 else None
+
+    combat, ps, lk = one('kSigTerrainCombatLocation'), one('kSigTerrainProvinceState'), one('kSigTerrainLookup')
+    he, rb = one('kSigTerrainHasEval'), one('kSigTerrainCountryRebuild')
+    if not (combat and ps and lk and he and rb):
+        return [('province_terrain signatures', False, 'missing')]
+    results = []
+    mp, tr = u32(combat + k['kSigTerrainCombatMap']), u32(combat + k['kSigTerrainCombatTerrain'])
+    ok = u32(ps + k['kSigTerrainStateMap']) == mp and u32(ps + k['kSigTerrainStateTerrain']) == tr and mp < 0x1000 and tr < 0x1000
+    results.append(('kSigTerrainCombatLocation / ProvinceState (map +0x%x, terrain +0x%x, state +0x%x, combat +0x%x/+0x%x)' %
+                    (mp, tr, u32(ps + k['kSigTerrainStateDisp']), u8(combat + k['kSigTerrainCombatProvince']),
+                     u8(combat + k['kSigTerrainCombatCopy'])), ok, hex(combat)))
+    getter = rel32(img, lk + k['kSigTerrainDbGetter'])
+    ok = u8(lk + k['kSigTerrainDbGetter']) == 0xE8 and img.is_code(getter) and \
+        u8(lk + k['kSigTerrainValid']) == u8(he + k['kSigTerrainHasValid'])
+    results.append(('kSigTerrainLookup (getter 0x%x, db +0x%x/+0x%x, token +0x%x, valid +0x%x)' %
+                    (getter, u8(lk + k['kSigTerrainDbArray']), u8(lk + k['kSigTerrainDbCount']), u8(lk + k['kSigTerrainToken']),
+                     u8(lk + k['kSigTerrainValid'])), ok, hex(lk)))
+    cm = u32(he + k['kSigTerrainCountryMask'])
+    ok = u32(rb + k['kSigTerrainCountryMask2']) == cm and u32(he + k['kSigTerrainBits']) < 0x1000 and \
+        u32(rb + k['kSigTerrainStateMask']) < 0x4000
+    results.append(('kSigTerrainHasEval / CountryRebuild (bits +0x%x, country mask +0x%x, dirty +0x%x, states +0x%x/+0x%x, '
+                    'state mask +0x%x)' % (u32(he + k['kSigTerrainBits']), cm, u32(rb + k['kSigTerrainCountryDirty']),
+                                            u32(rb + k['kSigTerrainCountryStates']), u32(rb + k['kSigTerrainCountryStateCount']),
+                                            u32(rb + k['kSigTerrainStateMask'])), ok, hex(he)))
     return results
 
 

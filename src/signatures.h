@@ -1311,6 +1311,36 @@ static const size_t kCodePtabScriptedValidDisp = 8;
 CODE(kCodePtabScriptedEval, "40 53 48 83 EC 20 48 8B D9 48 8B 49 ?? 48 8B 01 FF 50 ?? 38 43 ?? 0F 94 C0")
 static const size_t kCodePtabScriptedTemplateDisp = 0xc, kCodePtabScriptedEvalSlot = 0x12, kScriptedTriggerEvalSlot = 22;
 
+// --- Province terrain (province_terrain, NOTES.md Part P; addresses 1.19.5, same on 1.19.4.2) ----
+// CCombat::SetLocation (slot 17 of CCombat / CLandCombat / CLandBorderWarCombat, 0x14147faa0):
+// combat->[disp8 +3] = province; combat->[disp8 +0x15] = province->[disp32 +7] (the map province)
+// ->[disp32 +0xe] (its CTerrainType*).
+SIG(kSigTerrainCombatLocation, "48 89 51 ?? 48 8B 82 ?? ?? ?? ?? 48 8B 90 ?? ?? ?? ?? 48 89 51 ?? C3")
+static const size_t kSigTerrainCombatProvince = 3, kSigTerrainCombatMap = 7, kSigTerrainCombatTerrain = 0xe,
+                    kSigTerrainCombatCopy = 0x15;
+// A province's supply value (0x140eee51c): province->[disp32 +3] (map province)->[disp32 +0xa]
+// (terrain); later the province's state province->[disp32 +0x28] and its province count
+// state->[disp8 +0x3a].
+SIG(kSigTerrainProvinceState, "48 8B 81 ?? ?? ?? ?? 48 8B 88 ?? ?? ?? ?? 48 63 81 ?? ?? ?? ?? 48 69 C8 A0 86 01 00 49 03 C8 45 33 C0 48 89 0F 48 8B 9B ?? ?? ?? ?? 48 8B CB E8 ?? ?? ?? ?? 48 8B D0 48 63 43 ??")
+static const size_t kSigTerrainStateMap = 3, kSigTerrainStateTerrain = 0xa, kSigTerrainStateDisp = 0x28,
+                    kSigTerrainStateCount = 0x3a;
+// has_terrain's parser (CHasTerrainTrigger slot 5, 0x1404546f7): the terrain database's count
+// db->[disp8 +8] and array [disp8 +0x10] (index 0 is the default), each entry's name token [disp8
+// +0x1f], the valid byte [disp8 +0x3d]; then the database getter (E8 at +0x45).
+SIG(kSigTerrainLookup, "BA 01 00 00 00 48 63 47 ?? 3B C2 7E ?? 4C 8B 47 ?? 4C 8B C8 8B CA 0F 1F 00 49 8B 04 C8 39 58 ?? 0F 84 ?? ?? ?? ?? FF C2 48 FF C1 49 3B C9 7C ?? 48 8B 47 ?? 48 8B 00 48 89 46 ?? 80 78 ?? 00 0F 85 ?? ?? ?? ?? E8 ?? ?? ?? ??")
+static const size_t kSigTerrainDbCount = 8, kSigTerrainDbArray = 0x10, kSigTerrainToken = 0x1f, kSigTerrainValid = 0x3d,
+                    kSigTerrainDbGetter = 0x45;
+// has_terrain's evaluate (slot 22, 0x1403f72b2): country->[disp32 +0xc] (its terrain mask) &
+// terrain->[disp32 +0x12] (the terrain's mask bits); the valid byte terrain->[disp8 +6].
+SIG(kSigTerrainHasEval, "48 8B 4B ?? 80 79 ?? 00 74 ?? 8B 80 ?? ?? ?? ?? 85 81 ?? ?? ?? ?? 74 ?? B0 01")
+static const size_t kSigTerrainCountryMask = 0xc, kSigTerrainBits = 0x12, kSigTerrainHasValid = 6;
+// The country's terrain mask rebuild (0x140745fa6): if country->[disp32 +2] (dirty byte): mask
+// [disp32 +0xd] = OR over the owned states country->[disp32 +0x14] (count [disp32 +0x1b]) of
+// state->[disp32 +0x2f] (the state's mask).
+SIG(kSigTerrainCountryRebuild, "80 BB ?? ?? ?? ?? 00 74 ?? 33 D2 89 93 ?? ?? ?? ?? 48 8B 8B ?? ?? ?? ?? 48 63 83 ?? ?? ?? ?? 4C 8D 04 C1 49 3B C8 74 ?? 66 90 48 8B 01 0B 90 ?? ?? ?? ?? 89 93 ?? ?? ?? ?? 81 FA")
+static const size_t kSigTerrainCountryDirty = 2, kSigTerrainCountryMask2 = 0xd, kSigTerrainCountryStates = 0x14,
+                    kSigTerrainCountryStateCount = 0x1b, kSigTerrainStateMask = 0x2f;
+
 #undef CODE
 #undef SIG
 #undef ANCHOR
