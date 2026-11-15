@@ -6746,3 +6746,41 @@ lifetime (hook after its build; it dies with the in-game UI).
 3. A loader key naming a **scripted trigger** the loader evaluates for the player's country:
    `visible = my_scripted_trigger`. Full trigger power without the scripted GUI, but the loader needs
    to call the game's trigger evaluation with a country scope (not done before; medium analysis).
+
+## O8: `visible` = a scripted trigger (owner's choice: option 3, 2026-11-15)
+
+**Findings** (1.19.5, same on 1.19.4.2):
+- Scripted triggers are `CScriptedTriggerTemplate`s (`common/scripted_triggers`), each an AND trigger
+  itself (its vtable's evaluate slot 22 is `CAndTrigger`'s), name std::string at `+0x60`, "valid"
+  byte at `+0x58`. The database (`CScriptedTriggerTemplateDatabase`) is a global (`0x1433dd4a0`);
+  `Find(db, const std::string* name)` (`0x140b07e20`) returns the template or a dummy whose valid byte
+  is 0.
+- The trigger parser uses exactly that for `<name> = yes` (`0x14059771c`): `mov r15, [db]` ...
+  `Find(r15, &name)`, then `test r15; cmp byte [r15+0x58], 0` before building a `CScriptedTrigger`
+  (`new 0x68`, ctor `0x14143d880`: template at `+0x60`). `kSigPtabScriptedTrigger` matches from the db
+  load to the Find call; `kCodePtabScriptedValid` (SigFindIn 0x100) the valid test.
+- `CScriptedTrigger::Evaluate` (RTTI slot 22, `0x14143e120`): `template->vtable[0x18](template, scope)
+  == (yes/no byte +0x58)`. `kCodePtabScriptedEval` there gives the template field and the slot.
+- A country scope: the `CEventScope` constructor and SetCountry the loader already has (player_scope,
+  on_game_loaded). For a UI condition it is built with seed 0, **not** through SyncedRandom (that
+  RNG is checked for multiplayer sync; a UI call there would desync).
+
+**Design:**
+```
+artillery_tab = {
+    button = artillery_tab_button
+    visible = my_artillery_tab_visible   # a scripted trigger; ROOT/THIS = the player's country
+    add = { ... }
+}
+naval = { visible = has_navy_tabs }      # the vanilla tabs too
+```
+- The button (and its glow) hides while the trigger is false for the player's country, shows again
+  when it is true. Evaluated when the production view sets its buttons up and on every update of
+  their state (the game's own moments), so it follows changes when the screen updates.
+- No `visible`: always shown (as now). An unknown or invalid scripted trigger name: logged when the
+  game starts, the condition ignored (the tab shows).
+- Only the button: a hidden tab's list that is open stays open until closed; the add-line command,
+  saves and multiplayer are untouched (the condition is evaluated locally, UI only).
+- Merging: `visible` like `button`: the first definition wins, a different later one is logged.
+- Fail safe: no signature: `visible` logged as unavailable, tabs always shown; a fault while
+  evaluating: the feature's usual fault path (game tabs from then on).
