@@ -1486,6 +1486,10 @@ small_arms_designer = {
     }
     xp = army                              # optional: army | navy | air (a game rule, see below)
     hide = { select3d_button }             # optional: elements of the tank window to hide
+    roles = {                              # optional, land window: the role dropdown (see "Roles")
+        infantry_equipment = { name = ROLE_RIFLE }
+        infantry_equipment_smg = { name = ROLE_SMG stats = { combat = { soft_attack breakthrough } } }
+    }
 }
 ```
 - `archetypes`: archetype names (not their `_1`, `_2` types).
@@ -1510,6 +1514,57 @@ small_arms_designer = {
   Model", `historical_design_button`, `designer_title`, `production_value`, `plane_role`; buttons,
   texts, icons and container windows. Hidden while this designer's design is shown and shown again
   for every other design. A name the window doesn't have is logged once.
+- `roles`: the entries of the tank window's role dropdown, in order (see "Roles" below). With
+  `roles` the dropdown shows (`hide_roles` doesn't apply).
+
+**Roles.** In vanilla a role (Light Tank, Tank Destroyer, ...) is a **copy of the archetype with
+its own types**, made with `duplicate_archetypes` (`common/units/equipment/x_tank_chassis.txt`).
+Choosing a role in the designer gives the design that copy's types, so the design belongs to the
+copy, and units ask for the copy (`need = { light_tank_destroyer_chassis = 40 }`). The game's
+dropdown only knows its seven tank roles and their fixed names; `roles` lists yours instead:
+```
+# common/units/equipment/my_field_gun.txt
+equipments = {
+    my_field_gun = { is_archetype = yes type = { artillery infantry } module_slots = { ... } ... }
+    my_field_gun_1 = { archetype = my_field_gun ... }
+}
+# common/units/equipment/x_my_field_gun.txt (read after the archetype's file)
+duplicate_archetypes = {
+    my_field_gun_at = { archetype = my_field_gun type = { anti_tank infantry } }
+    my_field_gun_aa = { archetype = my_field_gun type = { anti_air infantry } }
+}
+# common/hoi4_loader_equipment_designers/my_designers.txt
+artillery_designer = {
+    archetypes = { my_field_gun }
+    title = ARTILLERY_DESIGNER
+    roles = {
+        my_field_gun = { name = ROLE_HOWITZER }                                   # the default role
+        my_field_gun_at = { name = ROLE_ANTI_TANK stats = { combat = { hard_attack ap_attack } } }
+        my_field_gun_aa = { name = ROLE_ANTI_AIR }
+    }
+}
+```
+- Each role is the archetype or a `duplicate_archetypes` copy of it, and **each role needs its own
+  type set**: the game tells roles apart by type (a role with the same types as another is logged
+  and left out).
+- **Which roles a design may take** stays vanilla (all three are needed, as for tank roles):
+  - a type the archetype doesn't have must be allowed by a module (`allow_equipment_type =
+    anti_tank` on the AT barrel), and a module can forbid one; a disabled role's tooltip is the loc
+    key `<name>_role_disallowed` (vanilla's naming);
+  - the role's equipment must be researched (`enable_equipments = { my_field_gun_at_1 }`; the copies
+    of the `_1`, `_2` types are named like that);
+  - the country must have a **battalion that uses the role's equipment** (`need = { my_field_gun_at
+    = 12 }`, unlocked). Otherwise the game refuses the switch and writes `Failed to change role to
+    "Anti-Tank" on "..."` to `error.log`.
+- A copy gets the archetype's `default_modules`; give it its own (e.g. the AT barrel) so the game's
+  default design of that role is valid.
+- `name`: a loc key; without it the role equipment's own name. `stats`: that role's panels
+  (the same form as `stats` above); a panel left out uses the designer's `stats`, then the window's.
+- Each role equipment can have its own blueprint layout (`equipment_designer_<role equipment>`), as
+  vanilla's tank destroyers have; the window shows the layout of the design's role.
+- Units, techs and production use the copies by name, as for vanilla tank roles
+  (`enable_equipments`, `need`); designs of each role are listed apart in production.
+- UI only: the role is the design's types, saved by the game's own command.
 
 **What happens:**
 - **Production tab:** the game lists equipment by its type, so an `infantry` archetype is in the
@@ -1566,7 +1621,9 @@ can't be read. An archetype listed by two designers goes to the later one (logge
 - A slot that lands on an added window without a position, a position for a slot the archetype
   doesn't have, a title key without localisation.
 - Problems in the files, with file and line: syntax, unknown keys, values out of range, unknown
-  stat names, an `xp` other than army, navy or air.
+  stat names, an `xp` other than army, navy or air, `roles` outside the land window.
+- With `roles`: `small_arms_designer: 2 role(s) in the dropdown`, or why a role is left out (not the
+  archetype or a copy of it, the same types as another role).
 - When `xp` is used: `` `xp` is used: designs pay from the chosen pool; in multiplayer every player
   needs the loader and these mods``. If a part can't be resolved on a build, that option is logged
   as ignored and the rest works.

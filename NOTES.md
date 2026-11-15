@@ -6648,3 +6648,47 @@ optional `name` and per-role `stats`). `production_tab` afterwards, possibly wit
    then the designer's.
 4. **Multiplayer and saves:** unchanged; the role is the design's type mask, saved by the game's own
    command, as for vanilla tank roles.
+
+## N17: custom roles: implementation and in-game test (2026-11-15)
+
+**Code** (as decided in N16):
+- `kSigEqdRoleBuild` gives the entry function (`kCodeEqdRoleEntry`), its label call
+  (`kCodeEqdRoleLabel`), the design's mask offset and, from the builder, the base hop
+  (`kCodeEqdRoleBase`: design type `+0x548` (a `duplicate_archetypes` copy's original) `+0x538`).
+- **A role's mask** is the game's own `TypeMask(type)` (`FUN_140cf2e70`, from DesignTypes
+  `kCodeEqdDesignTypes`). The first try read `type+0x5a8`: 0 for archetypes (their types are in
+  `+0x5a0`), so every role clashed; the log showed it.
+- Entry hook: for a listed archetype with roles, the builder's first call lists the roles (each
+  through the original entry), the six role-bit calls are skipped. Label hook: by archetype token and
+  mask, the role's loc key (built as a std::string).
+- `DesignerBaseArchetype`: a design of a role copy maps to the listed archetype (title, slots,
+  stats, `xp`, `hide` and roles keep working on it). Per-role stats read the design's mask.
+
+**Finding: when the game accepts a role switch** (diagnostic hooks on the click handler, the
+set-role function and the design update, removed afterwards). Choosing a role sets the design's mask
+and type (`hoi4_loader_test_field_gun_at_1`), then `FUN_14152e1c0` looks in the country's sub-unit
+list (`country+0xf70` `+0x20`) for an unlocked battalion (`+0x5bf`) whose `need` contains the design's
+type and whose type mask meets the design's (`FUN_1410a0ca0`). None: `Failed to change role to "..." on
+"..."` in `error.log`, the design stays. Vanilla's Panzer II switched to Anti-Air because Germany has
+the light SP anti-air battalion. So a role needs (vanilla, for tanks too): a module allowing its
+types, its equipment researched, and a battalion that uses it.
+
+**In-game test** (1.19.5, Germany 1936, branch build, test mod only; screenshots):
+1. `loader.log`: `hoi4_loader_test_artillery_designer: 3 role(s) in the dropdown`; no ERROR.
+2. Production > infantry/artillery: one "Test Field Gun" entry; its designer "Artillery Designer"
+   shows the dropdown Howitzer / Anti-Tank / Anti-Air (the definition's names, vanilla's role icons);
+   Anti-Tank and Anti-Air disabled with the definition's `_role_disallowed` tooltip.
+3. The AT barrel enables Anti-Tank; choosing it makes the design "Test Anti-Tank Gun" with the
+   Anti-Tank layout (its background), the role's stats (hard attack, piercing) and the battalion's
+   model; saved as "Test Anti-Tank Gun A" (army 50 -> 44), listed apart.
+4. The design "Test AT Gun M36" (made by the decision) opens in the Anti-Tank role with its layout and
+   stats.
+5. A vanilla Panzer II: Light Tank / Tank Destroyer / Artillery / Anti-Air, unchanged; with the basic
+   anti-air gun it switches to Anti-Air ("FlakPz Luchs").
+
+**Offline:** both checkers and the smoke test (`2/148`) on 1.19.5 and 1.19.4.2. **Not tested:**
+multiplayer (the role is the design's types, saved by the game's own command, as vanilla's).
+
+**Loading:** several launches in this session took 10-15 minutes to reach the menu (one core busy
+between interface files, also with builds that only changed in-game code); the run before loaded in
+seconds with the same mod. Not caused by the role code (it runs only in the designer); to watch.
