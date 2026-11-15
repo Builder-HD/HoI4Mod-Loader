@@ -1,13 +1,25 @@
-# hoi4_loader test: unlocks the test small arms and their modules (set by a decision only).
+# hoi4_loader test: unlocks the test small arms, the test drone and their modules (set by a decision only).
 technologies = {
 	hoi4_loader_test_small_arms_tech = {
-		enable_equipments = { hoi4_loader_test_small_arms_1 }
+		enable_equipments = { hoi4_loader_test_small_arms_1 hoi4_loader_test_drone_1 hoi4_loader_test_field_gun_1
+			hoi4_loader_test_field_gun_at_1 hoi4_loader_test_field_gun_aa_1 }   # the role copies: a role needs its equipment researched, as in vanilla
 		enable_equipment_modules = {
+			hoi4_loader_test_fg_howitzer
+			hoi4_loader_test_fg_at_gun
+			hoi4_loader_test_fg_aa_mount
+			hoi4_loader_test_fg_split_trail
+			hoi4_loader_test_drone_engine
+			hoi4_loader_test_drone_pod
 			hoi4_loader_test_sa_rifle
 			hoi4_loader_test_sa_smg
 			hoi4_loader_test_sa_grenades
 			hoi4_loader_test_sa_bayonet
 			hoi4_loader_test_sa_scope
+		}
+		enable_subunits = {   # a role needs a battalion that uses its equipment
+			hoi4_loader_test_fg_howitzer_battalion
+			hoi4_loader_test_fg_at_battalion
+			hoi4_loader_test_fg_aa_battalion
 		}
 		research_cost = 1
 		start_year = 1936

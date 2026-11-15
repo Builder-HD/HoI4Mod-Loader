@@ -6495,6 +6495,203 @@ game: the title stays on every reopening.
 
 **Not tested:** multiplayer with `xp`, `xp = air`.
 
+## N14: air and naval windows, backgrounds and module pictures (2026-11-15, branch `feature/equipment-designers-air-naval`)
+
+**Owner (2026-11-15):** a test of a custom background and module pictures (vanilla mechanism,
+checked in game); the air and naval windows as planned; more ideas for what is hard-coded or could
+improve the designers.
+
+### Findings (1.19.5; same addresses on 1.19.4.2)
+
+**Backgrounds and module pictures are vanilla.** In each designer GUI the window `equipment_preview`
+(508x248) has the generic blueprint background, and the archetype's layout window
+(`equipment_designer_<archetype>`) is inserted into it by code ("inserted here by code"). A layout
+whose first element is a full-size picture covers the background; the `module_slots` windows show a
+picture per installed module (`_documentation.info`). No loader key is needed; a see-through
+background would be the only case for one (not planned).
+
+**The three windows share one class** (N2) and one GUI structure: `designer_title`, `experience`,
+`base_stats` / `combat_stats` / `misc_stats` and their `ref_*` twins, `historical_design_button`,
+`equipment_preview` and the `pos_custom_module_slot_window_N` / `pos_fixed_module_slot_window_N`
+positionTypes. Files: ships `equipmentdesignerview.gui` (`countryequipmentdesignerview`, 7 custom
+and 7 fixed positions), tanks `tank_designer_view.gui` (9 custom), planes `plane_designer_view.gui`
+(7 custom, 5 fixed). Only the tank window has the role dropdown and "Select Model".
+- Kind `view+0x3ce0`: TitleText (`FUN_141813d40`) gives kind 0 `SHIP_DESIGNER_TITLE`, 1
+  `TANK_DESIGNER_TITLE`, 2 `PLANE_DESIGNER_TITLE`, else `EQUIPMENT_DESIGNER_TITLE`.
+- **Which DLC:** the DLC designer mask (`FUN_14100bfe0`) is `(DLC 0x14 ? imm64 at +0x1d : 0) |
+  (DLC 0x1d ? imm8 at +0x3b : 0) | (DLC 0x26 ? imm64 at +0x4e : 0)`: Man the Guns
+  `0x80004001c0` (ships), No Step Back `4` (tanks), By Blood Alone `0x1d0026fc00` (planes).
+  The window picker's masks (N2) are wider: naval `0x80004003c1`, air `0x1f0037fc00`. So some naval
+  (bits 0, 9) and air (bits 16, 20, 33) types route to a window but are never designable: the same
+  gap as `infantry` for the tank window.
+- **Stats:** the dispatcher `FUN_141823510(view)` (from the refresh) calls by kind the ship filler
+  `FUN_141823c70` (same arguments as the tank's `FUN_141823950`), the tank filler, or the plane
+  filler `FUN_141823790(view)` (builds its arguments itself; also writes the air experience line).
+  The comparison panels (`ref_*`, `view+0x133c0..`) come from `FUN_1418247c0(view)`, which calls the
+  ship or tank filler or, for planes, Fill itself. Fill (`FUN_141e57270`) has 12 callers, all these;
+  each filler calls it three times, base, combat, misc, in that order. Arrays: ships `0x142a75a98`
+  / `ad0` / `b20`, tanks `b68` / `b90` / `bd0`, planes `c48` / `c70` / `cb0`; the ship's combat list
+  is filtered for some hulls, the ship's and plane's misc list is two rows shorter without DLC 0x13.
+
+### Decisions
+
+1. **`window = air | naval`**: the plane or ship window. As for `land`, the archetype's own `type`
+   must route there (the game's window picker, unchanged): `naval` needs a type the naval test
+   accepts, `air` a type the air test accepts and neither the naval nor the land test. The window's
+   DLC is required as vanilla requires it: Man the Guns for ships, By Blood Alone for planes (read
+   from the DLC mask, +0x1d / +0x4e). An archetype vanilla already designs (e.g. a fighter airframe)
+   simply gets the customisation.
+2. **Per window:** `title`, `slots` (positions in that window's coordinates; up to 20 + 20 windows,
+   added to that window's GUI file at load), `stats`, `xp`, `hide` (names from that window's GUI
+   file). `hide_roles` applies to the tank window only (the others have no dropdown).
+3. **Stats, one mechanism for all windows:** Fill is hooked; the dispatcher, the comparison function
+   and the plane filler mark the view being filled (main thread, nested calls restore the previous
+   mark); Fill's n-th call during a mark is panel n (base, combat, misc). For a listed archetype
+   with that panel in `stats`, Fill gets the definition's rows. This replaces the tank-only stats
+   hook and also covers the comparison panels. SIGs: dispatcher (kind at +0xf; tank filler call at
+   +0x1e5), comparison function (tank filler call at +0x1bb); the plane filler from the dispatcher's
+   `cmp eax,2; jne; call`. Cross-checks: both tank calls reach `kSigEqdStats`, the ship calls of
+   both agree, the plane filler calls Fill three times.
+4. **Test mod:** the small arms layout gets its own background and pictures per module (bayonet,
+   grenades, scope); a test air archetype (a type the plane window serves but By Blood Alone doesn't
+   design) with an air designer; a naval example in the docs. **Man the Guns is not installed here**,
+   so the naval window can be checked offline only; that stays open for the owner.
+
+## N15: air and naval windows: implementation and in-game test (2026-11-15)
+
+**Code** (as decided in N14):
+- `DesignerFind_t` returns the wanted window kind; the "can open" detour allows a listed type when
+  it has slots, the kind's DLC bit is set (`kCodeEqdDlcMask` +0x1d / +0x3b / +0x4e) and the game's
+  window picker sends it there (`DesignerWindowOf`: naval test +0x23, land tests, air test +0x68).
+- TitleText's three branches are checked (ship / tank / plane keys).
+- Stats: `kSigEqdStatsDispatch`, `kSigEqdStatsRef` and the plane filler (`kCodeEqdStatsPlane`) mark
+  the view; the Fill hook counts calls (base, combat, misc). The tank filler is no longer hooked.
+- Per kind: the GUI file patched (only for kinds a definition uses), its slot window counts, the
+  plugin's look restored only in kinds a definition uses; `hide_roles` only for the tank window.
+- `hide` and containers: the root's container lookup (`+0x1b8`, from setup's `plane_role` lookup,
+  `kAnchorEqdPlaneRole` / `kCodeEqdRootFindContainer`, rcx checked to be the root) returns a
+  container window; its element part is at `+0x30` (the slot windows' `kCodeEqdSlotGuiBase`, and the
+  game's own `add rcx,0x30` before showing `equipment_preview`). The first try hid the container
+  itself: its vtable `+0x78/+0x80` are lookups, not show/hide, so showing it again threw (C++
+  exception in the refresh hook; the fail-safe switched the feature off and logged the frames).
+
+**Routing of vanilla types** (temporary log, 1.19.5): ship window: `convoy`, `support_ship`,
+`floating_harbor`; tank window: `train`, `railway_gun`; plane window: `air_transport`, `missile`,
+`ballistic_missile`, `nuclear_missile`, `sam_missile`, `emplacement_gun_ammo`, `fighter`. The test
+drone (`air_transport` with slots) is not designable in vanilla even with By Blood Alone.
+
+**In-game test** (1.19.5, Germany 1936, branch build, test mod only; screenshots):
+1. `loader.log`: both used GUI files patched (plane 7 + 5, tank 9 + 0 windows before), "serves ...
+   in the plane window", no ERROR.
+2. Production > air lists "Test Drone" with the designer button; it opens "Drone Designer": the mod's
+   hangar background, the frame and the default engine's picture, the engine slot top left, the
+   three cargo slots at x 220/293/366 on the bottom row, 4 base and 2 combat rows, misc empty, air
+   experience 50, no role line, no historical design button.
+3. A cargo pod adds its picture and raises the range 800 -> 900 km; saving costs air 50 -> 45.
+4. The small arms window: the mod's workbench background, the rifle's body and barrel; bayonet, two
+   grenades side by side and the scope add their pictures; stats (3 + 5 + 0) and navy experience
+   as before (now through the Fill hook).
+5. A vanilla Bf 109 D after the drone: "Plane Designer", "Fighter", 5 + 7 slot windows (locks
+   included), all vanilla stats, the historical picture. A vanilla Panzer II: unchanged.
+
+**Offline:** both checkers on 1.19.5 and 1.19.4.2; the GUI patch on all three vanilla designer
+files (ship 7 + 7 windows before). **Not tested:** the ship window in game (Man the Guns is not
+installed here), multiplayer.
+
+## N16: custom roles (owner 2026-11-15; branch `feature/equipment-designer-roles`)
+
+**Owner:** the `roles` syntax is approved (role twins in script, the archetype is the default role,
+optional `name` and per-role `stats`). `production_tab` afterwards, possibly with custom tabs.
+
+### Findings (1.19.5; same bytes on 1.19.4.2)
+
+- **A role is a type mask, not an equipment.** The dropdown builder (`FUN_1418268b0`) takes the
+  design's type mask (`view+0x5058` is the design being edited, `+0x408` its mask; `view+0x5448` =
+  design `+0x3f0`) without the six role bits (`& 0x81ffffff`, bits 25-30) and calls the entry
+  function `FUN_14180f740(ctx, mask)` seven times: the base, then base | bit 29, 28, 27, 30, 26 (only
+  with DLC 0x17) and 25 (`48 8B 9E disp32; 48 81 E3 FF FF FF 81; ...; E8`, unique). ctx = {view,
+  archetype token, ...}.
+- **Entry** (`FUN_14180f740`): a mask with role bits is only listed when some equipment of the list
+  `ctx[3]` covers them; it is enabled when no module forbids it (`FUN_140c33d50`) and the mask lies
+  within what the design can be (`FUN_140c2ee50`: the type's masks plus what the modules allow);
+  selected when it equals the design's mask. Label: `FUN_14100de60(out, mask, token)` (E8 at +0xba),
+  a loc key; the disabled tooltip is that key plus `_role_disallowed`; icon `FUN_14100e800`.
+- **Labels are a hard-coded switch** on the exact mask (`4` gives `tank_designer_<archetype>`, other
+  masks fixed keys, unknown masks "unknown").
+- **Choosing a role** (the entry's click handler, vtable `0x142a784e0` slot 2) calls
+  `FUN_14152d710(view+0x3ce8, mask)`: if allowed, the design's mask becomes the mask plus the
+  modules' types (`FUN_140c37170` / `FUN_140c29730`), then the window refreshes. The design then
+  belongs to the equipment whose type mask (`+0x5a8` without bit 24, the builder's own comparison)
+  equals it: the role twin (`archetype = X`, `type = { ... }`, vanilla `x_tank_chassis.txt`).
+- So the game's own mechanism already handles any twin; only the list (seven fixed masks) and the
+  labels (fixed keys) are hard-coded.
+
+### Decisions
+
+1. **Syntax** (as approved; one correction): each role is an equipment, the archetype or a twin of
+   it (`archetype = <archetype>`), and **each role needs its own type set**, because the game tells
+   roles apart by type. A role's types beyond the archetype's must be allowed by a module
+   (`allow_equipment_type`), as in vanilla.
+   ```
+   roles = {
+       field_gun = { name = ROLE_HOWITZER }                      # the archetype: default role
+       field_gun_at = { name = ROLE_ANTI_TANK stats = { combat = { hard_attack ap_attack } } }
+       field_gun_aa = { name = ROLE_ANTI_AIR }
+   }
+   ```
+2. **Hooks** (UI only, tank window): the entry function, for a design of a listed archetype with
+   `roles`: the base call lists the definition's roles instead (each role's mask, through the game's
+   own entry: allowed / disabled / selected as vanilla), the six role-bit calls are skipped; the
+   label function, for a listed archetype (by token) and a role's mask: the role's `name` (default:
+   the role equipment's own loc key). With `roles`, the dropdown shows (`hide_roles` is ignored).
+3. **Per-role `stats`:** the stats hook reads the design's mask and uses the role's panels first,
+   then the designer's.
+4. **Multiplayer and saves:** unchanged; the role is the design's type mask, saved by the game's own
+   command, as for vanilla tank roles.
+
+## N17: custom roles: implementation and in-game test (2026-11-15)
+
+**Code** (as decided in N16):
+- `kSigEqdRoleBuild` gives the entry function (`kCodeEqdRoleEntry`), its label call
+  (`kCodeEqdRoleLabel`), the design's mask offset and, from the builder, the base hop
+  (`kCodeEqdRoleBase`: design type `+0x548` (a `duplicate_archetypes` copy's original) `+0x538`).
+- **A role's mask** is the game's own `TypeMask(type)` (`FUN_140cf2e70`, from DesignTypes
+  `kCodeEqdDesignTypes`). The first try read `type+0x5a8`: 0 for archetypes (their types are in
+  `+0x5a0`), so every role clashed; the log showed it.
+- Entry hook: for a listed archetype with roles, the builder's first call lists the roles (each
+  through the original entry), the six role-bit calls are skipped. Label hook: by archetype token and
+  mask, the role's loc key (built as a std::string).
+- `DesignerBaseArchetype`: a design of a role copy maps to the listed archetype (title, slots,
+  stats, `xp`, `hide` and roles keep working on it). Per-role stats read the design's mask.
+
+**Finding: when the game accepts a role switch** (diagnostic hooks on the click handler, the
+set-role function and the design update, removed afterwards). Choosing a role sets the design's mask
+and type (`hoi4_loader_test_field_gun_at_1`), then `FUN_14152e1c0` looks in the country's sub-unit
+list (`country+0xf70` `+0x20`) for an unlocked battalion (`+0x5bf`) whose `need` contains the design's
+type and whose type mask meets the design's (`FUN_1410a0ca0`). None: `Failed to change role to "..." on
+"..."` in `error.log`, the design stays. Vanilla's Panzer II switched to Anti-Air because Germany has
+the light SP anti-air battalion. So a role needs (vanilla, for tanks too): a module allowing its
+types, its equipment researched, and a battalion that uses it.
+
+**In-game test** (1.19.5, Germany 1936, branch build, test mod only; screenshots):
+1. `loader.log`: `hoi4_loader_test_artillery_designer: 3 role(s) in the dropdown`; no ERROR.
+2. Production > infantry/artillery: one "Test Field Gun" entry; its designer "Artillery Designer"
+   shows the dropdown Howitzer / Anti-Tank / Anti-Air (the definition's names, vanilla's role icons);
+   Anti-Tank and Anti-Air disabled with the definition's `_role_disallowed` tooltip.
+3. The AT barrel enables Anti-Tank; choosing it makes the design "Test Anti-Tank Gun" with the
+   Anti-Tank layout (its background), the role's stats (hard attack, piercing) and the battalion's
+   model; saved as "Test Anti-Tank Gun A" (army 50 -> 44), listed apart.
+4. The design "Test AT Gun M36" (made by the decision) opens in the Anti-Tank role with its layout and
+   stats.
+5. A vanilla Panzer II: Light Tank / Tank Destroyer / Artillery / Anti-Air, unchanged; with the basic
+   anti-air gun it switches to Anti-Air ("FlakPz Luchs").
+
+**Offline:** both checkers and the smoke test (`2/148`) on 1.19.5 and 1.19.4.2. **Not tested:**
+multiplayer (the role is the design's types, saved by the game's own command, as vanilla's).
+
+**Loading:** several launches in this session took 10-15 minutes to reach the menu (one core busy
+between interface files, also with builds that only changed in-game code); the run before loaded in
+seconds with the same mod. Not caused by the role code (it runs only in the designer); to watch.
 # Part O: production tabs (`production_tabs`, investigation)
 
 Branch `feature/production-tabs` (from `feature/equipment-designers`, for its shared definition
@@ -6829,15 +7026,3 @@ air = { enabled = my_has_air_tabs }   # the vanilla tabs too
 - Unknown trigger name, merging, unavailable signature, faults: as `visible` (logged; the tab stays
   enabled; first definition wins; the feature's fault path).
 - Engine API: `PtabCondition_t` gets the condition kind (`kPtabVisible`, `kPtabEnabled`).
-
-**Implementation and in-game test** (2026-11-15):
-- `ConditionHolds(tab, kind)` evaluates either condition (O8's path); `ApplyConditions` runs after
-  the button's state: `visible` first, then, for a shown button that isn't the open one, a false
-  `enabled` calls the disable slot, sets frame 3 and hides the glow. The new tabs' click handler
-  refuses a disabled tab unless its button is the open one (kept from the last state update), so
-  an open tab still closes.
-- In game (1.19.5, Germany 1936, combined test build): `enabled while hoi4_loader_test_tabs_enabled`
-  for the air tab and the ship tab; all six buttons enabled. "Tabs: lock the ship and air tabs":
-  reopened, both show the disabled look, the others are unchanged; clicking either opens nothing.
-  "Tabs: unlock them": both enabled again, the ship tab opens the dockyard list. No fault, no ERROR.
-- Offline: 40 unit checks (3 new), smoke OVERALL PASSED; no new signatures.

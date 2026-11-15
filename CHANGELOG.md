@@ -23,6 +23,26 @@ A–F; NOTES.md has the findings and test results behind each.
   variant commands, the cost tooltip and icon; 13 new signatures and 2 anchors (smoke `2/144`).
   Checked on 1.19.4.2 and 1.19.5; tested in game on 1.19.5 (2026-11-14). The test mod has a small
   arms designer (decision "Unlock the test small arms").
+- **`equipment_designers`: the plane and ship windows** (NOTES.md N14/N15). `window = air` opens the
+  plane window, `window = naval` the ship window, for archetypes whose type the game sends there but
+  never makes designable (e.g. `air_transport` and the missile types; `convoy`, `support_ship`,
+  `floating_harbor`), with the window's DLC (By Blood Alone, Man the Guns). Title, slots (the plane
+  and ship GUI files get up to 20 + 20 slot windows too), `stats`, `xp` and `hide` work in every
+  window; `hide` also finds container windows (e.g. the plane window's role line `plane_role`).
+  Stats now go through the game's Fill function for all three windows and the comparison panels (the
+  tank-only stats hook is gone). Vanilla-designable archetypes can be listed too, to change their
+  window. Backgrounds and module pictures are vanilla (the layout file); documented, and shown in the
+  test mod. 2 new signatures and 1 anchor (smoke `2/147`). Checked on 1.19.4.2 and 1.19.5; the plane
+  window tested in game on 1.19.5 (2026-11-15); the ship window offline only (no Man the Guns here).
+  The test mod has a test drone (`type = air_transport`) and pictures for the small arms.
+- **`equipment_designers`: custom roles** (NOTES.md N16/N17). `roles = { <equipment> = { name = <loc>
+  stats = { ... } } ... }` lists the tank window's role dropdown for a designer: the archetype and its
+  `duplicate_archetypes` copies (each with its own types), with the mod's names and optional
+  per-role stats, instead of the game's seven fixed tank roles and names. E.g. one artillery
+  designer with howitzer, anti-tank and anti-air roles. Which role a design may take, the save and
+  the layouts per role stay vanilla. Hooks the dropdown's entry and label functions; 1 new signature
+  (smoke `2/148`). Checked on 1.19.4.2 and 1.19.5; tested in game on 1.19.5 (2026-11-15). The test
+  mod has a field gun with three roles and battalions for them.
 - **New feature `production_tabs`** (engine tier; guard `hoi4_loader_feature_production_tabs`; no
   script commands; NOTES.md Part O, MODDING.md "Production tabs"). Which archetypes the production
   screen's "add production line" tabs list: `add` and `remove` lists per vanilla tab (`infantry`,
@@ -32,8 +52,7 @@ A–F; NOTES.md has the findings and test results behind each.
   `remove_types` select by equipment type (`type = { ... }` names, through the game's own name
   lookup), the more specific archetype entries win. `visible = <scripted trigger>` (any tab, vanilla
   ones too) shows the button only while the trigger is true for the player's country (evaluated in
-  the UI, outside the synced RNG); `enabled = <scripted trigger>` keeps the button but greys it out
-  while the trigger is false. The game's own checks
+  the UI, outside the synced RNG). The game's own checks
   (research, `can_be_produced`, outdated) and the add-line command stay; UI only. Hooks the view's
   setup (binds the new buttons), the buttons' state and the two add-line lists; 7 new signatures
   (smoke `2/151`). Checked on 1.19.4.2 and 1.19.5; tested in game on 1.19.5 (2026-11-15). The test

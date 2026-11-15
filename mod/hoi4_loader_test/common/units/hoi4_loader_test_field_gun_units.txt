@@ -1,0 +1,65 @@
+# hoi4_loader test: battalions for the field gun's roles (NOTES.md N16). The game lets a design take a
+# role only when the country has a battalion that uses that role's equipment (as vanilla's light SP
+# anti-air battalion for the light tank's Anti-Air role). Unlocked with the test small arms.
+sub_units = {
+	hoi4_loader_test_fg_howitzer_battalion = {
+		abbreviation = "TFG"
+		sprite = anti_tank
+		map_icon_category = infantry
+		priority = 1197
+		ai_priority = 0
+		active = no
+		type = { infantry artillery }
+		group = combat_support
+		categories = { category_front_line category_army category_line_artillery category_artillery }
+		combat_width = 1
+		need = { hoi4_loader_test_field_gun = 12 }
+		manpower = 300
+		max_organisation = 0
+		default_morale = 0
+		max_strength = 1.6
+		training_time = 120
+		weight = 0.5
+		supply_consumption = 0.1
+	}
+	hoi4_loader_test_fg_at_battalion = {
+		abbreviation = "TFG"
+		sprite = anti_tank
+		map_icon_category = infantry
+		priority = 1197
+		ai_priority = 0
+		active = no
+		type = { infantry anti_tank }
+		group = combat_support
+		categories = { category_front_line category_army category_line_artillery category_anti_tank }
+		combat_width = 1
+		need = { hoi4_loader_test_field_gun_at = 12 }
+		manpower = 300
+		max_organisation = 0
+		default_morale = 0
+		max_strength = 1.6
+		training_time = 120
+		weight = 0.5
+		supply_consumption = 0.1
+	}
+	hoi4_loader_test_fg_aa_battalion = {
+		abbreviation = "TFG"
+		sprite = anti_tank
+		map_icon_category = infantry
+		priority = 1197
+		ai_priority = 0
+		active = no
+		type = { infantry anti_air }
+		group = combat_support
+		categories = { category_front_line category_army category_line_artillery category_anti_air }
+		combat_width = 1
+		need = { hoi4_loader_test_field_gun_aa = 12 }
+		manpower = 300
+		max_organisation = 0
+		default_morale = 0
+		max_strength = 1.6
+		training_time = 120
+		weight = 0.5
+		supply_consumption = 0.1
+	}
+}

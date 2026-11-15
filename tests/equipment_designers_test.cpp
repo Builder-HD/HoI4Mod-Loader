@@ -43,7 +43,7 @@ static size_t Count(const std::string& s, const std::string& needle) {
 
 static void CheckPatched(const std::string& original, const char* label) {
     int custom = -1, fixed = -1;
-    std::string out = Engine::PatchTankDesignerViewGui(original, kMaxSlotWindows, &custom, &fixed);
+    std::string out = Engine::PatchDesignerViewGui(original, kMaxSlotWindows, &custom, &fixed);
     std::string what = std::string(label) + ": patched";
     Check(!out.empty(), what.c_str());
     for (int k = 0; k < 2; ++k)
@@ -61,7 +61,7 @@ static void CheckPatched(const std::string& original, const char* label) {
     Check(braces == 0, what.c_str());
     int c2 = -1, f2 = -1;
     what = std::string(label) + ": patching twice changes nothing";
-    Check(Engine::PatchTankDesignerViewGui(out, kMaxSlotWindows, &c2, &f2).empty() && c2 == kMaxSlotWindows &&
+    Check(Engine::PatchDesignerViewGui(out, kMaxSlotWindows, &c2, &f2).empty() && c2 == kMaxSlotWindows &&
               f2 == kMaxSlotWindows,
           what.c_str());
     std::printf("  %s: %d custom and %d fixed slot window(s) before\n", label, custom, fixed);
@@ -161,6 +161,38 @@ int main(int argc, char** argv) {
               !defs[0].hasStats[kStatsMisc] && defs[0].hide.empty(),
           "options: all optional (the game's experience, the window's stats, nothing hidden)");
 
+    // --- roles ------------------------------------------------------------------------------------
+    problems.clear();
+    defs = Parse(
+        "guns = {\n"
+        "\tarchetypes = { field_gun }\n"
+        "\troles = {\n"
+        "\t\tfield_gun = { name = ROLE_HOWITZER }\n"
+        "\t\tfield_gun_at = { name = ROLE_AT stats = { combat = { hard_attack ap_attack } } }\n"
+        "\t\tfield_gun_aa = { }\n"
+        "\t}\n"
+        "}\n"
+        "twice_role = { archetypes = { a } roles = { x = { } X = { } } }\n"
+        "bad_role_key = { archetypes = { a } roles = { x = { icon = 3 } } }\n"
+        "loose_role = { archetypes = { a } roles = { x } }\n"
+        "empty_roles = { archetypes = { a } roles = { } }\n"
+        "air_roles = { archetypes = { p } window = air roles = { p = { } } }\n",
+        &problems);
+    Check(defs.size() == 2 && defs[0].name == "guns" && defs[1].name == "air_roles", "roles: the valid entries remain");
+    if (defs.size() == 2) {
+        const std::vector<Role>& r = defs[0].roles;
+        Check(r.size() == 3 && r[0].equipment == "field_gun" && r[0].name == "ROLE_HOWITZER" && r[2].name.empty(),
+              "roles: kept in order, name optional");
+        Check(r.size() == 3 && r[1].hasStats[kStatsCombat] && r[1].stats[kStatsCombat].size() == 2 && !r[1].hasStats[kStatsBase],
+              "roles: per-role stats");
+        Check(defs[1].roles.empty(), "roles: dropped outside the land window");
+    }
+    Check(HasProblem(problems, "roles: X is listed twice"), "roles: a role twice (any case)");
+    Check(HasProblem(problems, "unknown key 'icon'"), "roles: unknown role key");
+    Check(HasProblem(problems, "must be <equipment> = { ... }"), "roles: a loose value");
+    Check(HasProblem(problems, "list at least one role"), "roles: an empty list");
+    Check(HasProblem(problems, "roles need the land window"), "roles: other windows reported");
+
     // --- The stat names ---------------------------------------------------------------------------
     Check(StatNameCount() == 78, "stats: 78 names (the game's table has ids 0..77)");
     Check(std::string(StatLocKey("ap_attack")) == "STAT_COMMON_PIERCING" && std::string(StatLocKey("ARMOR_VALUE")) == "STAT_COMMON_ARMOR" &&
@@ -206,7 +238,7 @@ int main(int argc, char** argv) {
         "\t}\r\n"
         "}\r\n";
     int custom = -1, fixed = -1;
-    std::string out = Engine::PatchTankDesignerViewGui(gui, kMaxSlotWindows, &custom, &fixed);
+    std::string out = Engine::PatchDesignerViewGui(gui, kMaxSlotWindows, &custom, &fixed);
     Check(custom == 2 && fixed == 0, "gui: counts the windows the engine makes (stops at the gap)");
     Check(Count(out, "\"pos_custom_module_slot_window_3\"") == 1 && Count(out, "\"pos_custom_module_slot_window_2\"") == 1 &&
               Count(out, "\"pos_custom_module_slot_window_19\"") == 1 && Count(out, "\"pos_fixed_module_slot_window_19\"") == 1 &&
@@ -218,7 +250,7 @@ int main(int argc, char** argv) {
           "gui: inserted after the last slot position, inside its container");
     Check(out.find("\r\n\t\t\tpositionType = { name = \"pos_fixed_module_slot_window_0\"") != std::string::npos,
           "gui: CRLF and the container's indentation kept");
-    Check(Engine::PatchTankDesignerViewGui("guiTypes = { }", kMaxSlotWindows, &custom, &fixed).empty(),
+    Check(Engine::PatchDesignerViewGui("guiTypes = { }", kMaxSlotWindows, &custom, &fixed).empty(),
           "gui: a file without slot positions is left alone");
     CheckPatched(gui, "snippet");
 

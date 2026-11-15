@@ -1,0 +1,5 @@
+# hoi4_loader test: modules for the test drone (equipment_designers, plane window).
+equipment_modules = {
+	hoi4_loader_test_drone_engine = { category = hoi4_loader_test_drone_engine add_stats = { maximum_speed = 50 build_cost_ic = 1 } }
+	hoi4_loader_test_drone_pod = { category = hoi4_loader_test_drone_cargo add_stats = { air_range = 100 build_cost_ic = 0.5 } }
+}

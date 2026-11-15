@@ -1,6 +1,6 @@
 // Engine access for equipment_designers (NOTES.md Part N): which equipment may open a designer
-// window, the window's title, role dropdown and slot windows. UI only: the save goes through the
-// game's own variant commands, which don't look at the window.
+// window (ship, tank or plane), the window's title, role dropdown, slot windows and stats. UI only
+// (but `xp`): the save goes through the game's own variant commands, which don't look at the window.
 #include <windows.h>
 #include <intrin.h>
 #include <string.h>
@@ -37,7 +37,6 @@ using Find_t = void*(__fastcall*)(void* container, const NameView* name, int fla
 using IsMissing_t = bool(__fastcall*)(const void* found);
 using SetPosition_t = void(__fastcall*)(void* window, const int64_t* position);
 
-using StatsFn_t = void(__fastcall*)(void* view, void* a, const void* b, void* basePanel, void* combatPanel, void* miscPanel);
 struct StatRange {
     const uint64_t* begin;
     const uint64_t* end;
@@ -63,8 +62,11 @@ uint8_t* g_openFn = nullptr;
 ViewFn_t g_openOrig = nullptr;
 uint8_t* g_refreshFn = nullptr;
 ViewFn_t g_refreshOrig = nullptr;
-uint8_t* g_statsFn = nullptr;
-StatsFn_t g_statsOrig = nullptr;
+uint8_t* g_statsFn = nullptr;  // the tank filler: not hooked, gives Fill and the checks
+uint8_t* g_fillFn = nullptr;
+Fill_t g_fillOrig = nullptr;
+uint8_t* g_markFn[3] = {};  // the stats dispatcher, the comparison panels, the plane filler: mark the view
+ViewFn_t g_markOrig[3] = {};
 uint8_t* g_poolFn = nullptr;
 Pool_t g_poolOrig = nullptr;
 uint8_t* g_isAirFn = nullptr;
@@ -77,12 +79,31 @@ uint8_t* g_xpIconFn = nullptr;
 XpIcon_t g_xpIconOrig = nullptr;
 uint8_t* g_buttonsFn = nullptr;
 ViewFn_t g_buttonsOrig = nullptr;
+using RoleEntry_t = void(__fastcall*)(void* ctx, uint64_t mask);
+using RoleLabel_t = EngineString*(__fastcall*)(EngineString* out, uint64_t mask, int token);
+uint8_t* g_roleEntryFn = nullptr;
+RoleEntry_t g_roleEntryOrig = nullptr;
+uint8_t* g_roleLabelFn = nullptr;
+RoleLabel_t g_roleLabelOrig = nullptr;
+using TypeMask_t = uint64_t(__fastcall*)(const void* type);
+TypeMask_t g_typeMaskFn = nullptr;         // a type's mask as roles compare it
+uint32_t g_typeMask = 0, g_viewMask = 0;  // (the builder's comparison, checks only); the edited design's mask in the view
+uint32_t g_typeBase = 0;                   // a duplicate_archetypes copy -> the type it was made from
+const uint64_t kRoleBits = 0x7e000000;
+DesignerRoles_t g_rolesFor = nullptr;
+DesignerRoleName_t g_roleName = nullptr;
 DesignerRefreshed_t g_afterButtons = nullptr;
 
 // Stats.
 Fill_t g_fill = nullptr;
-uint32_t g_statsExtra = 0;
-StatRange g_vanillaStats[3] = {};
+StatRange g_vanillaStats[3] = {};  // the tank window's lists (checks only)
+// The view whose panels Fill is filling now, and how many it filled (main thread).
+struct FillMark {
+    void* view;
+    int calls;
+    DWORD thread;
+};
+FillMark g_mark = {};
 const char* const* g_statKeys = nullptr;  // the game's id -> loc key table
 int g_statCount = 0;
 
@@ -106,12 +127,13 @@ uint32_t g_findSlots[8] = {};  // the root's lookup slots (one per element class
 int g_findSlotCount = 0;
 void* g_findRoot = nullptr;       // the root the placeholders below belong to
 void* g_findMissing[8] = {};      // per slot: what a missing name gives
+int g_containerSlot = -1;         // the slot that finds container windows (their element part is at +g_guiBase)
 
 // Called.
-TypeTest_t g_designable = nullptr, g_landA = nullptr, g_landB = nullptr;
+TypeTest_t g_designable = nullptr, g_landA = nullptr, g_landB = nullptr, g_navalTest = nullptr, g_airTest = nullptr;
 Layout_t g_layout = nullptr;
 DlcMask_t g_dlcMask = nullptr;
-uint64_t g_tankBit = 0;
+uint64_t g_windowMask[3] = {0, 0, 0};  // per window kind: its DLC's bits in the DLC designer mask
 SetText_t g_setText = nullptr;
 IsMissing_t g_isMissing = nullptr;
 SetPosition_t g_setPosition = nullptr;
@@ -124,7 +146,6 @@ uint32_t g_vec[2] = {0, 0};  // custom, fixed slot window vectors {data, cap, co
 uint32_t g_slotOfWindow = 0, g_windowElement = 0;  // slot window -> its slot (null: locked), its window
 uint32_t g_guiBase = 0;                            // that window -> its GUI object
 int g_viewDelta = 0;         // refresh argument -> view
-const int kTankKind = 1;     // TitleText: kind 1 is the tank designer (checked in Resolve)
 
 DesignerFind_t g_find = nullptr;
 DesignerStats_t g_statsFor = nullptr;
@@ -155,8 +176,14 @@ bool ResolveAll() {
     uint8_t* mask = SigFollowRel32(designable + kCodeEqdDesignableMaskCall);
     if (!SigMatchAt(mask, kCodeEqdDlcMask)) return Fail("the DLC designer mask has an unexpected shape");
     g_dlcMask = (DlcMask_t)mask;
-    g_tankBit = Rd<uint8_t>(mask, kCodeEqdDlcTankBit);
-    if (!g_tankBit || (g_tankBit & (g_tankBit - 1))) return Fail("the tank designer's DLC bit is not a single bit");
+    g_windowMask[kDesignerShip] = Rd<uint64_t>(mask, kCodeEqdDlcShipMask);
+    g_windowMask[kDesignerTank] = Rd<uint8_t>(mask, kCodeEqdDlcTankBit);
+    g_windowMask[kDesignerPlane] = Rd<uint64_t>(mask, kCodeEqdDlcPlaneMask);
+    uint64_t tankBit = g_windowMask[kDesignerTank];
+    if (!tankBit || (tankBit & (tankBit - 1))) return Fail("the tank designer's DLC bit is not a single bit");
+    if (!g_windowMask[kDesignerShip] || !g_windowMask[kDesignerPlane] || (g_windowMask[kDesignerShip] & g_windowMask[kDesignerPlane]) ||
+        ((g_windowMask[kDesignerShip] | g_windowMask[kDesignerPlane]) & tankBit))
+        return Fail("the ship and plane designers' DLC masks are implausible");
 
     if (!(p = SigFindUnique("eqd_pick_window", kSigEqdPickWindow))) return false;
     g_pickWindow = p;
@@ -165,6 +192,10 @@ bool ResolveAll() {
         return Fail("the window picker's design type differs from production_data's");
     g_landA = (TypeTest_t)SigFollowRel32(p + kSigEqdPickLandACall);
     g_landB = (TypeTest_t)SigFollowRel32(p + kSigEqdPickLandBCall);
+    // The naval test decides first (+0x23), the air test last (+0x68); land between.
+    if (p[0x23] != 0xE8 || p[0x68] != 0xE8) return Fail("the window picker's naval and air tests moved");
+    g_navalTest = (TypeTest_t)SigFollowRel32(p + 0x23);
+    g_airTest = (TypeTest_t)SigFollowRel32(p + 0x68);
 
     if (!(g_openFn = SigFindUnique("eqd_open", kSigEqdOpenVariant))) return false;
     uint8_t* t = SigFindIn(g_openFn, 0x300, kCodeEqdTitle);
@@ -176,9 +207,13 @@ bool ResolveAll() {
     uint8_t* anchor = AnchorFindLea("eqd_title", kAnchorEqdTitle);
     if (!SigMatchAt(text, kCodeEqdTitleText) || !anchor || anchor < text || anchor >= text + 0x40)
         return Fail("the title text function has an unexpected shape");
-    uint8_t* tank = text + kCodeEqdTitleTankJump + 2 + (int8_t)text[kCodeEqdTitleTankJump + 1];
-    const char* tankKey = RipString(tank);
-    if (!tankKey || strcmp(tankKey, "TANK_DESIGNER_TITLE") != 0) return Fail("window kind 1 is not the tank designer");
+    // The kinds: 0 ship, 1 tank, 2 plane (the constants in engine.h).
+    const size_t jumps[3] = {kCodeEqdTitleShipJump, kCodeEqdTitleTankJump, kCodeEqdTitlePlaneJump};
+    const char* const keys[3] = {"SHIP_DESIGNER_TITLE", "TANK_DESIGNER_TITLE", "PLANE_DESIGNER_TITLE"};
+    for (int k = 0; k < 3; ++k) {
+        const char* key = RipString(text + jumps[k] + 2 + (int8_t)text[jumps[k] + 1]);
+        if (!key || strcmp(key, keys[k]) != 0) return Fail("the window kinds are not ship, tank, plane");
+    }
 
     if (!(g_refreshFn = SigFindUnique("eqd_refresh", kSigEqdRefresh))) return false;
     g_viewDelta = (int8_t)g_refreshFn[kSigEqdRefreshViewDisp];
@@ -248,6 +283,50 @@ bool ResolveAll() {
     bool rolesSlot = false;
     for (int i = 0; i < g_findSlotCount; ++i) rolesSlot = rolesSlot || g_findSlots[i] == g_rootFindSlot;
     if (!rolesSlot) g_findSlotCount = 0;  // `hide` unavailable: the idiom didn't match the roles lookup
+    // Container windows (e.g. the plane window's role line): the root's container lookup.
+    uint8_t* planeRole = AnchorFindLea("eqd_plane_role", kAnchorEqdPlaneRole);
+    if (g_findSlotCount && g_findSlotCount < 8 && planeRole && SigMatchAt(planeRole, kCodeEqdRootFindContainer) && planeRole[-10] == 0x48 &&
+        planeRole[-9] == 0x8B && planeRole[-8] == 0x8E && Rd<uint32_t>(planeRole - 7, 0) == g_root && planeRole[-3] == 0x48 &&
+        planeRole[-2] == 0x8B && planeRole[-1] == 0x01) {
+        uint32_t slot = Rd<uint32_t>(planeRole, kCodeEqdRootFindContainerSlot);
+        bool known = false;
+        for (int i = 0; i < g_findSlotCount; ++i) known = known || g_findSlots[i] == slot;
+        if (slot && slot % 8 == 0 && slot < 0x800 && !known && g_guiBase) {
+            g_containerSlot = g_findSlotCount;
+            g_findSlots[g_findSlotCount++] = slot;
+        }
+    } else {
+        Log("equipment_designers: the window's container lookup was not found; `hide` finds no container windows");
+    }
+    // Roles: the dropdown builder's entry and label functions, the masks it compares.
+    if (uint8_t* build = SigFindUnique("eqd_role_build", kSigEqdRoleBuild)) {
+        uint8_t* entry = build[kSigEqdRoleBuildEntryCall] == 0xE8 ? SigFollowRel32(build + kSigEqdRoleBuildEntryCall) : nullptr;
+        uint8_t* label = entry && SigMatchAt(entry, kCodeEqdRoleEntry) && entry[kCodeEqdRoleEntryLabelCall] == 0xE8
+                             ? SigFollowRel32(entry + kCodeEqdRoleEntryLabelCall)
+                             : nullptr;
+        uint8_t* cmp = SigFindIn(build - 0x200, 0x200, kCodeEqdRoleTypeMask);
+        uint8_t* base = SigFindIn(build - 0x400, 0x400, kCodeEqdRoleBase);
+        uint32_t maskDisp = Rd<uint32_t>(build, kSigEqdRoleBuildMaskDisp);
+        if (label && SigMatchAt(label, kCodeEqdRoleLabel) && cmp && Rd<uint32_t>(cmp, kCodeEqdRoleTypeMaskDesignDisp) == maskDisp &&
+            designType && g_archetype > designType && base && Rd<uint32_t>(base, kCodeEqdRoleBaseTypeDisp) == designType &&
+            TypeArchetypeOffset() && Rd<uint32_t>(base, kCodeEqdRoleBaseArchetypeDisp) == TypeArchetypeOffset() &&
+            entry[kCodeEqdRoleEntryTypesCall] == 0xE8) {
+            g_typeBase = Rd<uint32_t>(base, kCodeEqdRoleBaseDisp);
+            uint8_t* types = SigFollowRel32(entry + kCodeEqdRoleEntryTypesCall);
+            uint8_t* maskFn = SigMatchAt(types, kCodeEqdDesignTypes) ? SigFollowRel32(types + kCodeEqdDesignTypesJmp) : nullptr;
+            if (!maskFn || SigFollowRel32(types + kCodeEqdDesignTypesCall) != maskFn ||
+                Rd<uint32_t>(types, kCodeEqdDesignTypesTypeDisp) != designType || Rd<uint8_t>(types, kCodeEqdDesignTypesCountDisp) != g_typeSlotCount ||
+                Rd<uint32_t>(types, kCodeEqdDesignTypesBaseDisp) != g_typeBase)
+                entry = nullptr;  // `roles` unavailable
+            g_typeMaskFn = (TypeMask_t)maskFn;
+            g_roleEntryFn = entry;
+            g_roleLabelFn = entry ? label : nullptr;
+            g_typeMask = Rd<uint32_t>(cmp, kCodeEqdRoleTypeMaskDisp);
+            g_viewMask = g_archetype - designType + maskDisp;  // the design in the view: its archetype, its mask
+        } else {
+            Log("equipment_designers: the role dropdown's functions have an unexpected shape; `roles` is unavailable");
+        }
+    }
     if ((g_buttonsFn = SigFindUnique("eqd_buttons", kSigEqdButtons)) != nullptr && Rd<uint32_t>(g_buttonsFn, kSigEqdButtonsRootDisp) != g_root) {
         Log("equipment_designers: the buttons update reads another root; `hide` is unavailable");
         g_buttonsFn = nullptr;
@@ -272,7 +351,27 @@ bool ResolveStats() {
     }
     if (p[kSigEqdStatsFillCall] != 0xE8) return Fail("the stats function's fill call moved");
     g_fill = (Fill_t)SigFollowRel32(p + kSigEqdStatsFillCall);
-    g_statsExtra = Rd<uint32_t>(p, kSigEqdStatsExtraDisp);
+    // Who marks the view: the dispatcher and the comparison panels (both reach this tank filler and
+    // the same ship filler), and the plane filler (from the dispatcher; it calls Fill itself).
+    uint8_t* dispatch = SigFindUnique("eqd_stats_dispatch", kSigEqdStatsDispatch);
+    uint8_t* ref = SigFindUnique("eqd_stats_ref", kSigEqdStatsRef);
+    if (!dispatch || !ref) return false;
+    const size_t calls[4] = {kSigEqdStatsDispatchShipCall, kSigEqdStatsDispatchTankCall, kSigEqdStatsRefShipCall, kSigEqdStatsRefTankCall};
+    for (size_t i = 0; i < 4; ++i)
+        if ((i < 2 ? dispatch : ref)[calls[i]] != 0xE8) return Fail("the stats dispatcher's calls moved");
+    if (Rd<uint32_t>(dispatch, kSigEqdStatsDispatchKindDisp) != g_kind || SigFollowRel32(dispatch + kSigEqdStatsDispatchTankCall) != p ||
+        SigFollowRel32(ref + kSigEqdStatsRefTankCall) != p ||
+        SigFollowRel32(dispatch + kSigEqdStatsDispatchShipCall) != SigFollowRel32(ref + kSigEqdStatsRefShipCall))
+        return Fail("the stats dispatcher and the comparison panels don't reach the same fillers");
+    uint8_t* planeCall = SigFindIn(dispatch, 0x300, kCodeEqdStatsPlane);
+    uint8_t* plane = planeCall ? SigFollowRel32(planeCall + kCodeEqdStatsPlaneCall) : nullptr;
+    int planeFills = 0;
+    for (uint8_t* c = plane; c && c < plane + 0x180; ++c)
+        if (c[0] == 0xE8 && SigFollowRel32(c) == (uint8_t*)g_fill) ++planeFills;
+    if (planeFills != 3) return Fail("the plane window's stats don't fill three panels");
+    g_markFn[0] = dispatch;
+    g_markFn[1] = ref;
+    g_markFn[2] = plane;
     g_statKeys = (const char* const*)SigRipTarget(name + kSigEqdStatNameTableLea, 3, 7);
     uint8_t* rdata = nullptr;
     size_t rsize = 0;
@@ -288,6 +387,7 @@ bool ResolveStats() {
         for (const uint64_t* e = g_vanillaStats[g].begin; e < g_vanillaStats[g].end; ++e)
             if ((int8_t)(*e >> 32) == 0 && (int)(uint32_t)*e >= g_statCount) return Fail("a stats array names an unknown stat");
     g_statsFn = p;
+    g_fillFn = (uint8_t*)g_fill;
     return true;
 }
 
@@ -398,8 +498,8 @@ void* SlotWindow(const void* view, bool fixed, int i) {
 
 bool ExtraAllowed(void* ctx, const void* type) {
     __try {
-        if (!type || !g_find(type)) return false;
-        if (TypeSlotCount(type) <= 0 || !TankDesignerUnlocked() || !DesignerLandType(type)) return false;
+        int kind = type ? g_find(type) : -1;
+        if (kind < 0 || TypeSlotCount(type) <= 0 || !DesignerWindowUnlocked(kind) || DesignerWindowOf(type) != kind) return false;
         return g_layout(ctx, type);
     } __except (FaultFilter(GetExceptionInformation())) {
         LogFaultOnce("designer check");
@@ -448,41 +548,39 @@ void __fastcall ButtonsDetour(void* view, void* b, void* c, void* d) {
     if (!g_off && g_afterButtons && view) AfterButtons(view);
 }
 
-// Stats: the definition's lists for a listed archetype, the game's arrays for the other panels.
-bool StatsCustom(void* view, void* a, const void* b, void* const panels[3]) {
+// Stats: while a marked function fills a view's panels, Fill's n-th call is panel n (base, combat,
+// misc); a listed archetype with that panel in `stats` gets the definition's rows.
+bool CustomRows(void* view, int panel, StatRange* r) {
     __try {
         const void* arch = Rd<const void*>(view, g_archetype);
-        if (!arch) return false;
-        StatRange r[3];
-        bool any = false;
-        for (int g = 0; g < 3; ++g) {
-            int n = 0;
-            const uint64_t* e = g_statsFor(arch, g, &n);
-            if (e) {
-                r[g] = StatRange{e, e + n};
-                any = true;
-            } else {
-                r[g] = g_vanillaStats[g];
-            }
-        }
-        if (!any) return false;
-        int extra = Rd<int>(view, g_statsExtra);
-        for (int g = 0; g < 3; ++g) {
-            StatContext ctx{};
-            memcpy(ctx.b, b, sizeof ctx.b);
-            ctx.one = 1;
-            g_fill(panels[g], &r[g], a, &ctx, extra);
-        }
+        int n = 0;
+        uint64_t mask = g_viewMask ? Rd<uint64_t>(view, g_viewMask) : 0;
+        const uint64_t* e = arch ? g_statsFor(Rd<int>(view, g_kind), arch, mask, panel, &n) : nullptr;
+        if (!e) return false;
+        *r = StatRange{e, e + n};
         return true;
     } __except (FaultFilter(GetExceptionInformation())) {
         LogFaultOnce("stats hook");
         return false;
     }
 }
-void __fastcall StatsDetour(void* view, void* a, const void* b, void* basePanel, void* combatPanel, void* miscPanel) {
-    void* const panels[3] = {basePanel, combatPanel, miscPanel};
-    if (!g_off && g_statsFor && view && b && StatsCustom(view, a, b, panels)) return;
-    g_statsOrig(view, a, b, basePanel, combatPanel, miscPanel);
+void __fastcall FillDetour(void* panel, const StatRange* range, void* a, const StatContext* ctx, int extra) {
+    if (!g_off && g_statsFor && g_mark.view && g_mark.thread == GetCurrentThreadId()) {
+        int n = g_mark.calls++;
+        StatRange r;
+        if (n < 3 && CustomRows(g_mark.view, n, &r)) {
+            g_fillOrig(panel, &r, a, ctx, extra);
+            return;
+        }
+    }
+    g_fillOrig(panel, range, a, ctx, extra);
+}
+template <int I>
+void __fastcall MarkDetour(void* view, void* b, void* c, void* d) {
+    FillMark saved = g_mark;
+    g_mark = FillMark{view, 0, GetCurrentThreadId()};
+    g_markOrig[I](view, b, c, d);
+    g_mark = saved;
 }
 
 // Experience: the definition's pool for listed archetypes, wherever the game asks for the pool, and
@@ -521,6 +619,43 @@ bool __fastcall IsNavalDetour(const void* type) {
     }
     return g_isNavalOrig(type);
 }
+// Roles: the dropdown builder's first call (the design's mask without role bits) lists the
+// definition's roles instead, each through the game's own entry; its role-bit calls are skipped.
+const uint64_t* RolesSafe(void* ctx, int* n) {
+    __try {
+        void* view = Rd<void*>(ctx, 0);
+        const void* arch = view && DesignerKind(view) == kDesignerTank ? Rd<const void*>(view, g_archetype) : nullptr;
+        return arch ? g_rolesFor(arch, n) : nullptr;
+    } __except (FaultFilter(GetExceptionInformation())) {
+        LogFaultOnce("role list hook");
+        return nullptr;
+    }
+}
+void __fastcall RoleEntryDetour(void* ctx, uint64_t mask) {
+    int n = 0;
+    const uint64_t* roles = !g_off && g_rolesFor && ctx ? RolesSafe(ctx, &n) : nullptr;
+    if (!roles) {
+        g_roleEntryOrig(ctx, mask);
+        return;
+    }
+    if (mask & kRoleBits) return;  // the game's fixed roles
+    for (int i = 0; i < n; ++i) g_roleEntryOrig(ctx, roles[i]);
+}
+const char* RoleNameSafe(uint64_t mask, int token) {
+    __try {
+        return g_roleName(token, mask);
+    } __except (FaultFilter(GetExceptionInformation())) {
+        LogFaultOnce("role name hook");
+        return nullptr;
+    }
+}
+EngineString* __fastcall RoleLabelDetour(EngineString* out, uint64_t mask, int token) {
+    const char* key = !g_off && g_roleName ? RoleNameSafe(mask, token) : nullptr;
+    if (!key) return g_roleLabelOrig(out, mask, token);
+    ConstructEngineString(out, key, strlen(key));
+    return out;
+}
+
 // While the tank window is open on a listed design with `xp`, the cost texts (tooltip and icon,
 // called only by the designer and its module picker) get one bit of that pool's mask.
 bool ShownPoolMask(uint64_t* mask) {
@@ -562,24 +697,41 @@ void ResolveDesigners() {
         g_xpIconFn ? SigDescribe(g_xpIconFn).c_str() : "-", g_buttonsFn ? SigDescribe(g_buttonsFn).c_str() : "unavailable");
     Log("equipment_designers: can-open %s, open %s, refresh %s (view %d), kind +0x%x, title +0x%x, archetype +0x%x, roles "
         "+0x%x, slot windows +0x%x/+0x%x (slot +0x%x, element +0x%x, GUI object +0x%x), positions +0x%x (find slot +0x%x, position +0x%x), type slots +0x%x/+0x%x "
-        "(name +0x%x), tank DLC bit 0x%llx",
+        "(name +0x%x), DLC masks ship 0x%llx tank 0x%llx plane 0x%llx",
         SigDescribe(g_canOpenFn).c_str(), SigDescribe(g_openFn).c_str(), SigDescribe(g_refreshFn).c_str(), g_viewDelta, g_kind,
         g_title, g_archetype, g_roles, g_vec[0], g_vec[1], g_slotOfWindow, g_windowElement, g_guiBase, g_container, g_lookupSlot, g_position, g_typeSlots, g_typeSlotCount,
-        g_slotToken, (unsigned long long)g_tankBit);
+        g_slotToken, (unsigned long long)g_windowMask[0], (unsigned long long)g_windowMask[1], (unsigned long long)g_windowMask[2]);
 }
 
 bool HaveDesigners() {
-    return g_canOpenFn && g_designable && g_layout && g_dlcMask && g_tankBit && g_landA && g_landB && g_openFn && g_setText &&
+    return g_canOpenFn && g_designable && g_layout && g_dlcMask && g_windowMask[1] && g_landA && g_landB && g_navalTest && g_airTest &&
+           g_openFn && g_setText &&
            g_kind && g_title && g_refreshFn && g_archetype && g_typeSlots && g_typeSlotCount && g_slotToken && g_slotOfWindow && g_windowElement && g_guiBase &&
            g_vec[0] && g_vec[1] && g_container && g_lookupSlot && g_position && g_setPosition && g_isMissing && g_roles &&
            HaveTokens() && HaveProduction() && TypeArchetypeOffset() && HaveElementVisibility();
 }
 
 bool HaveDesignerButtons() { return g_buttonsFn != nullptr && g_findSlotCount > 0; }
-bool HaveDesignerStats() { return g_statsFn && g_fill && g_statKeys && g_statCount; }
+bool HaveDesignerStats() { return g_statsFn && g_fillFn && g_markFn[0] && g_markFn[1] && g_markFn[2] && g_statKeys && g_statCount; }
 bool HaveDesignerXp() {
     return g_poolFn && g_copy && g_isAirFn && g_isNavalFn && g_tooltipFn && g_xpIconFn && g_session && g_container_ && g_xpText && g_airRet[0] &&
            g_airRet[1] && g_navalRet[0] && g_navalRet[1];
+}
+
+bool HaveDesignerRoles() { return g_roleEntryFn && g_roleLabelFn && g_typeMaskFn && g_viewMask && g_typeBase; }
+
+uint64_t DesignerTypeMask(const void* type) { return type && g_typeMaskFn ? g_typeMaskFn(type) : 0; }
+
+bool HookDesignerRoles(DesignerRoles_t rolesFor, DesignerRoleName_t roleName) {
+    if (!HaveDesignerRoles()) return false;
+    if (!HookQueue(g_roleEntryFn, (void*)&RoleEntryDetour, (void**)&g_roleEntryOrig, "eqd_role_entry")) return false;
+    if (!HookQueue(g_roleLabelFn, (void*)&RoleLabelDetour, (void**)&g_roleLabelOrig, "eqd_role_label")) {
+        HookUnqueue(g_roleEntryFn);
+        return false;
+    }
+    g_rolesFor = rolesFor;
+    g_roleName = roleName;
+    return true;
 }
 
 bool HookDesignerExtras(DesignerStats_t statsFor, DesignerXp_t xpFor, DesignerRefreshed_t afterButtons) {
@@ -590,7 +742,12 @@ bool HookDesignerExtras(DesignerStats_t statsFor, DesignerXp_t xpFor, DesignerRe
         const char* name;
     };
     std::vector<One> hooks;
-    if (statsFor && HaveDesignerStats()) hooks.push_back({g_statsFn, (void*)&StatsDetour, (void**)&g_statsOrig, "eqd_stats"});
+    if (statsFor && HaveDesignerStats()) {
+        hooks.push_back({g_fillFn, (void*)&FillDetour, (void**)&g_fillOrig, "eqd_stats_fill"});
+        hooks.push_back({g_markFn[0], (void*)&MarkDetour<0>, (void**)&g_markOrig[0], "eqd_stats_dispatch"});
+        hooks.push_back({g_markFn[1], (void*)&MarkDetour<1>, (void**)&g_markOrig[1], "eqd_stats_ref"});
+        hooks.push_back({g_markFn[2], (void*)&MarkDetour<2>, (void**)&g_markOrig[2], "eqd_stats_plane"});
+    }
     if (xpFor && HaveDesignerXp()) {
         hooks.push_back({g_poolFn, (void*)&PoolDetour, (void**)&g_poolOrig, "eqd_pool"});
         hooks.push_back({g_isAirFn, (void*)&IsAirDetour, (void**)&g_isAirOrig, "eqd_is_air"});
@@ -633,8 +790,21 @@ const void* TypeArchetypeOf(const void* type) {
     return a ? a : type;
 }
 
-bool DesignerLandType(const void* type) { return type && (g_landA(type) || g_landB(type)); }
-bool TankDesignerUnlocked() { return (g_dlcMask() & g_tankBit) != 0; }
+const void* DesignerBaseArchetype(const void* type) {
+    const void* a = TypeArchetypeOf(type);
+    const void* base = a && g_typeBase ? Rd<const void*>(a, g_typeBase) : nullptr;  // as the role dropdown reads it
+    return base ? TypeArchetypeOf(base) : a;
+}
+
+int DesignerWindowOf(const void* type) {
+    if (!type) return -1;
+    if (g_navalTest(type)) return kDesignerShip;
+    if (g_landA(type) || g_landB(type)) return kDesignerTank;
+    if (g_airTest(type)) return kDesignerPlane;
+    return -1;
+}
+bool DesignerWindowUnlocked(int kind) { return kind >= 0 && kind < 3 && (g_dlcMask() & g_windowMask[kind]) != 0; }
+bool DesignerDesignable(const void* type) { return type && g_designable(type); }
 
 int TypeSlotCount(const void* type) {
     int n = type ? Rd<int>(type, g_typeSlotCount) : 0;
@@ -646,7 +816,10 @@ const char* TypeSlotName(const void* type, int i) {
     return TokenName(Rd<int>(slot, g_slotToken));
 }
 
-bool IsTankDesigner(const void* view) { return view && Rd<int>(view, g_kind) == kTankKind; }
+int DesignerKind(const void* view) {
+    int k = view ? Rd<int>(view, g_kind) : -1;
+    return k >= 0 && k < 3 ? k : -1;
+}
 
 void DesignerSetTitle(void* view, const EngineString* text) {
     void* e = Rd<void*>(view, g_title);
@@ -659,7 +832,9 @@ void DesignerSetTitle(void* view, const EngineString* text) {
     FreeEngineString(&s);
 }
 
-void DesignerShowRoles(void* view, bool show) { SetElementVisible(Rd<void*>(view, g_roles), show); }
+void DesignerShowRoles(void* view, bool show) {
+    if (DesignerKind(view) == kDesignerTank) SetElementVisible(Rd<void*>(view, g_roles), show);
+}
 
 int DesignerSlotWindows(const void* view, bool fixed) {
     int n = Rd<int>(view, g_vec[fixed ? 1 : 0] + 0xc);
@@ -735,7 +910,8 @@ void* DesignerElement(void* view, const char* name) {
     NameView nv{name, strlen(name)};
     for (int i = 0; i < g_findSlotCount; ++i) {
         void* e = ((ElementFind_t)vt[g_findSlots[i] / 8])(root, &nv, 0);
-        if (e && e != g_findMissing[i]) return e;
+        // A container window is shown and hidden through its element part, as the game does.
+        if (e && e != g_findMissing[i]) return i == g_containerSlot ? (uint8_t*)e + g_guiBase : e;
     }
     return nullptr;
 }

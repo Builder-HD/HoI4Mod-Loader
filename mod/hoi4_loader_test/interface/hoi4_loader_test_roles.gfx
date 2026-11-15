@@ -1,0 +1,10 @@
+# hoi4_loader test: pictures for the field gun roles test (equipment_designers roles; NOTES.md N16).
+spriteTypes = {
+	spriteType = { name = "GFX_hoi4_loader_test_fg_background_how" texturefile = "gfx/interface/equipmentdesigner/hoi4_loader_test/fg_background_how.dds" }
+	spriteType = { name = "GFX_hoi4_loader_test_fg_background_at" texturefile = "gfx/interface/equipmentdesigner/hoi4_loader_test/fg_background_at.dds" }
+	spriteType = { name = "GFX_hoi4_loader_test_fg_background_aa" texturefile = "gfx/interface/equipmentdesigner/hoi4_loader_test/fg_background_aa.dds" }
+	spriteType = { name = "GFX_hoi4_loader_test_fg_carriage" texturefile = "gfx/interface/equipmentdesigner/hoi4_loader_test/fg_carriage.dds" }
+	spriteType = { name = "GFX_hoi4_loader_test_fg_barrel_how" texturefile = "gfx/interface/equipmentdesigner/hoi4_loader_test/fg_barrel_how.dds" }
+	spriteType = { name = "GFX_hoi4_loader_test_fg_barrel_at" texturefile = "gfx/interface/equipmentdesigner/hoi4_loader_test/fg_barrel_at.dds" }
+	spriteType = { name = "GFX_hoi4_loader_test_fg_barrel_aa" texturefile = "gfx/interface/equipmentdesigner/hoi4_loader_test/fg_barrel_aa.dds" }
+}
