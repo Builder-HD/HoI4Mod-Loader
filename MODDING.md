@@ -46,6 +46,7 @@ Current features:
 | `equipment_conversion` | engine (needs `lifecycle`) | `hoi4_loader_plugin_equipment_conversion` | tools a mod switches on with global flags: "Convert from Stockpile" from every earlier generation, a cost factor, "same role only"; off until a mod sets them, see below |
 | `air_scenarios` | engine | `hoi4_loader_plugin_air_scenarios` | new air scenarios (the 3D air animations on the map) for chosen missions, planes and countries, defined in `common/hoi4_loader_air_scenarios/`; no script commands, see below |
 | `equipment_designers` | engine | `hoi4_loader_plugin_equipment_designers` | designer windows for equipment the game gives none (e.g. `type = infantry`): the tank designer window with the mod's title, slot count and slot places, defined in `common/hoi4_loader_equipment_designers/`; no script commands, see below |
+| `production_tabs` | engine | `hoi4_loader_plugin_production_tabs` | which archetypes the production screen's "add production line" tabs list (`add` / `remove` per tab), and new tabs with the mod's own buttons, defined in `common/hoi4_loader_production_tabs/`; no script commands, see below |
 | `attention_area` | engine (needs `lifecycle`) | `hoi4_loader_plugin_attention_area` | `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area`: mark any set of provinces on the map (a line and a fill shader each, built-in or a mod's own) and move the camera to it; display only, not saved, see below |
 
 On an unknown build the file tier stays on, the engine tier is off, and `loader.log` lists the
@@ -155,6 +156,7 @@ when the loader is missing or a feature is off. Without them, using a loader tri
 | `equipment_conversion` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_equipment_conversion.txt` |
 | `air_scenarios` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_air_scenarios.txt` |
 | `equipment_designers` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_equipment_designers.txt` |
+| `production_tabs` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_production_tabs.txt` |
 | `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area` | `scripted_triggers/hoi4_loader_feature_attention_area.txt` |
 
 - **Combinations:** a block that combines features needs each feature's stub and guard, e.g.
@@ -1559,6 +1561,100 @@ experience (`common/hoi4_loader_equipment_designers/hoi4_loader_test_designer.tx
 infantry/artillery: "Test Small Arms" opens the "Small Arms Designer" with eleven slots in two rows,
 its own stats (3 base, 5 combat, no misc), navy experience, and without the "Select Model" and
 historical design buttons; a design costs navy experience. Its modules have no icons (a pink "?").
+
+## Production tabs (`production_tabs`)
+
+The production screen has four buttons for adding a production line: infantry/artillery, armor,
+air and naval. Which equipment each one lists is fixed in the game by the equipment's `type`
+(towed artillery is `type = { artillery infantry }` only so that the infantry tab lists it; pure
+`artillery` or `anti_tank` is listed nowhere). Mods can't add a fifth button that does anything
+(NOTES.md Part O).
+
+With the loader, a mod changes **which archetypes a tab lists**, for the vanilla tabs and for
+**new tabs** with its own buttons. Two lists per tab, `add` and `remove`; everything else is the
+mod's choice:
+- **move** an archetype: `add` it to one tab, `remove` it from the tab the game lists it in;
+- **copy** it into a second tab: `add` only;
+- **hide** it from a tab: `remove` only (e.g. a tab of its own for the guns, without them in
+  infantry).
+
+**The definitions** (`common/hoi4_loader_production_tabs/*.txt`):
+```
+# The vanilla tabs are infantry | armor | air | naval; any other name is a new tab.
+artillery_tab = {
+    button = artillery_tab_button        # required for a new tab: a buttonType in the production view
+    glow = artillery_tab_button_glow     # optional iconType, shown while a design of the tab is new
+    add = { artillery_equipment anti_tank_equipment anti_air_equipment }
+}
+infantry = {
+    remove = { artillery_equipment anti_tank_equipment anti_air_equipment }
+}
+```
+- **A design is in a tab** when its archetype is in the tab's `add`, or (vanilla tabs) its type is
+  one the game lists there; and its archetype is not in the tab's `remove`. `remove` wins over
+  `add`, also across mods.
+- **Archetypes** by name (`is_archetype = yes`), with all their designs. `duplicate_archetypes`
+  copies (vanilla's `light_tank_destroyer_chassis`, ...) are archetypes of their own: list them too.
+  An archetype may be in any number of tabs.
+- **Ships and the rest:** a new tab whose archetypes are all ships opens the dockyard list (as the
+  naval tab), every other one the military factory list. A list never shows designs of the other
+  kind: a ship added to `armor`, or a tank to `naval`, is not listed there.
+- **Vanilla rules stay:** research, `can_be_produced`, `is_buildable`, the "show outdated" box, the
+  designer button on each entry. The buttons behave as the vanilla ones: disabled when the country
+  has no design of the tab (or no factories / dockyards), the glow while one is new, "selected"
+  while open. The list a line's own equipment button opens (to switch a line) stays the game's.
+
+**The button** is the mod's: add a `buttonType` (and optionally an `iconType` for the glow) to
+`interface/countryproductionlineview.gui`, as for any GUI change; sprite, position and
+`pdx_tooltip` are yours. The loader finds them by name anywhere in the production view; next to
+the vanilla buttons (`production_win_top`) is the natural place. The vanilla row has room for one
+more button at `x = 265`:
+```
+buttonType = {
+    name = "artillery_tab_button"
+    position = { x=265 y=122 }
+    quadTextureSprite ="GFX_add_prod_inf_art_line"
+    pdx_tooltip = "ARTILLERY_TAB"
+    clicksound = click_checkbox
+}
+iconType = {
+    name = "artillery_tab_button_glow"
+    position = { x = 268 y = 123 }
+    spriteType = "GFX_prod_new_equipment_glow"
+    alwaystransparent = yes
+}
+```
+More buttons need room (move the vanilla ones in the same file). At most 16 new tabs.
+
+**Files and mods:** the game folder, then every enabled mod in launcher order; a file of the same
+name replaces the earlier one, `replace_path = "common/hoi4_loader_production_tabs"` drops the
+earlier mods' files, zipped mods can't be read. The **same tab in several files or mods merges**:
+their `add` and `remove` lists add up, so a submod can add its equipment to its parent mod's tab.
+`button` and `glow` keep the first definition's (a different later one is logged).
+
+**Checks and messages** (`loader.log`):
+- At start: `production_tabs: 1 new tab(s), 1 vanilla tab(s) changed, from 1 file(s) ...`.
+- When the production view is built: `production_tabs: artillery_tab: button artillery_tab_button
+  bound (with glow)`, or `the production view has no button ...; the tab is off`.
+- Before the game starts: per tab `N archetype(s) added, M removed`, and every name that is not
+  found or is an equipment type instead of an archetype.
+- Problems in the files, with file and line: syntax, unknown keys, `button` on a vanilla tab, a new
+  tab without `button`, the same archetype in a tab's `add` and `remove`.
+- Without definitions the feature stays idle: `no tab definitions; the production tabs are left
+  alone` (no hooks).
+
+**Multiplayer:** UI only. Adding a line goes through the game's own command, which checks the
+country and the design, never the tab; each player sees the tabs of their own mods.
+
+**Without the loader:** the definition files are ignored (a folder the game doesn't read); a new
+tab's button shows but does nothing. Guard: `hoi4_loader_feature_production_tabs`.
+
+**Test mod** (`common/hoi4_loader_production_tabs/hoi4_loader_test_tabs.txt`): towed artillery,
+rocket artillery, anti-tank and anti-air move from the infantry tab to a "Towed guns" tab, and the
+test small arms (decision "Unlock the test small arms") also show in the armor tab. The test mod
+doesn't ship a copy of `countryproductionlineview.gui`: add the two elements above with the names
+`hoi4_loader_test_guns_button` / `hoi4_loader_test_guns_button_glow` (tooltip
+`HOI4_LOADER_TEST_GUNS_TAB`) to test the new tab; without them only the vanilla tab changes apply.
 
 ## Attention areas (`attention_area`)
 

@@ -6635,3 +6635,46 @@ infantry = {
 - Patterns: the four click thunks (their masks give the vanilla tab table), the two list builders
   (mask test shape), the button-state functions, the setup (button name `lea`s). Unique on 1.19.5
   and 1.19.4.2.
+
+## O6: implementation and in-game test (2026-11-15)
+
+**Code** (as O5): `src/production_tabs.cpp` (parser, merge; `tests/production_tabs_test.cpp`, 29
+checks), `src/plugin_production_tabs.cpp` (definitions, archetype names resolved before game entry,
+the membership answer), `src/engine_production_tabs.cpp`.
+- Resolve reads everything from the game's own code: the four buttons and glow icons by name from
+  the setup's lookups (`kCodePtabFindA/B/C`), each click thunk's mask, window and naval flag, each
+  state call's mask and glow; the state function's design loop (`+0xf68` -> `+0xa0`/`+0xac`, design
+  mask `+0x408`, new `+0x426`, type `+0x3f0` (= production_data's), buildable `+0x445`), its enable /
+  disable / frame slots (`0x298`/`0x2a0`/`0xb0`, frames 2 open / 1 / 3) and the glow's show / hide
+  (`0x78`/`0x80`, flags `+0x75` bit `0x10`); the lists' mask test (window `+0x1120`).
+- New buttons are found by name in `production_win_top`, then `military_tab`, then the view's root
+  (lookup slot `0x68` buttons, `0x88` icons, `0x1b8` containers; a missing name gives a placeholder,
+  compared against a probe with a name that can't exist). A click goes through `CButtonWrapper`
+  (`Engine::BindButtonClick`, shared with province_building_removal), never freed.
+- Lists: for a tab's mask, the original runs with the tab's members (a filtered copy of the design
+  array) and the window's mask set to all bits for that call. A list never shows designs of the
+  other window (naval mask bits).
+- First run: `the production view's container lookups have an unexpected shape`, feature off,
+  vanilla tabs (the second lookup is 0x5d bytes after the first and 0x2f long: SigFindIn 0x80 was too
+  short, whole match needed; now 0x100). The fail-safe worked as intended.
+
+**In-game test** (1.19.5, Germany 1936, branch build, test mod only, its tabs file; for the new tab
+the installed test mod had a generated copy of `countryproductionlineview.gui` with the two elements
+of MODDING.md at x = 265, not in the repo; screenshots):
+1. `loader.log`: `1 new tab(s), 2 vanilla tab(s) changed`, `button hoi4_loader_test_guns_button bound
+   (with glow)`, per tab `4 removed` / `1 added` / `4 added`; no ERROR, no fault.
+2. Infantry: armored car, Karabiner 98k, civilian train, support equipment, truck; no towed
+   artillery or AA (Germany has a towed artillery line, so vanilla lists it).
+3. The new button (tooltip "Towed guns ...") opens a list with the 10.5 cm towed artillery and the
+   2 cm FlaK 30 and shows "selected". Clicking the howitzer: the game's MIO choice, "produce without":
+   line 22 "10,5-cm leichte Feldhaubitze 18" added, 20/28 -> 21/28 factories.
+4. A second click closes the list; then infantry opens and the new button is back to normal.
+5. After the decision "Unlock the test small arms": "Test Small Arms" in armor (with the tanks)
+   and still in infantry (add only: a copy).
+6. A line's own equipment button (the howitzer line) lists by the game's rule (infantry types and
+   the guns), unchanged; a destroyer line lists ships.
+7. Without the button in the GUI (first run of the generated file was broken): logged `the
+   production view has no button ...; the tab is off`, the vanilla tab changes still applied.
+
+**Offline:** check_signatures (5 new, unique) and check_code_shapes (6 new rows) on 1.19.5 and
+1.19.4.2; smoke `2/149`. **Not tested:** a naval new tab, multiplayer (UI only).

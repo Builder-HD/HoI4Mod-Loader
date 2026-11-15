@@ -23,6 +23,18 @@ A–F; NOTES.md has the findings and test results behind each.
   variant commands, the cost tooltip and icon; 13 new signatures and 2 anchors (smoke `2/144`).
   Checked on 1.19.4.2 and 1.19.5; tested in game on 1.19.5 (2026-11-14). The test mod has a small
   arms designer (decision "Unlock the test small arms").
+- **New feature `production_tabs`** (engine tier; guard `hoi4_loader_feature_production_tabs`; no
+  script commands; NOTES.md Part O, MODDING.md "Production tabs"). Which archetypes the production
+  screen's "add production line" tabs list: `add` and `remove` lists per vanilla tab (`infantry`,
+  `armor`, `air`, `naval`), and new tabs (up to 16) with the mod's own button and glow icon in
+  `countryproductionlineview.gui`, defined in `common/hoi4_loader_production_tabs/*.txt`. Move, copy
+  or hide equipment is the mod's choice; the same tab in several mods merges. The game's own checks
+  (research, `can_be_produced`, outdated) and the add-line command stay; UI only. Hooks the view's
+  setup (binds the new buttons), the buttons' state and the two add-line lists; 5 new signatures
+  (smoke `2/149`). Checked on 1.19.4.2 and 1.19.5; tested in game on 1.19.5 (2026-11-15). The test
+  mod moves the towed guns into a "Towed guns" tab and copies the test small arms into the armor tab.
+- **Shared code:** `Engine::BindButtonClick` (a click handler on a GUI button through the engine's
+  `CButtonWrapper`, from province_building_removal) for any feature.
 - **Shared code:** the Paradox script reader (`src/script_tree.cpp`) and the mod folder scan
   (`ModList::ScanFolder`) moved out of air_scenarios, which now uses them; `UserFolder()` and
   `GameFolder()` in `loader.h`.
