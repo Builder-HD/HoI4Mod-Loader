@@ -1,0 +1,90 @@
+# Test decisions for hoi4_loader's province_terrain (MODDING.md "Province terrain", NOTES.md Part P).
+# Brandenburg (state 64): plains 375 6487 11219 11359, forest, urban (Berlin 6521).
+# 1. "Terrain: status (hover)": the requirements show the current answers.
+# 2. "Terrain: Brandenburg's plains become marsh" (state form, if_terrain): 4 provinces; the province
+#    tooltip says Marsh; "Terrain: status" shows Brandenburg with marsh and without plains.
+# 3. "Terrain: province 6487 becomes jungle" (province form): has_terrain = jungle turns true for the
+#    owner (the country mask), province_has_terrain too.
+# 4. "Terrain: Ethiopia becomes marsh": every land province of Ethiopia's states; loader.log counts the
+#    battles of the Italian-Ethiopian war that switched with them.
+# 5. "Terrain: reset every state": all back to map/definition.csv's.
+# 6. "Terrain: invalid uses (see loader.log)": a water category, a sea province, a state without
+#    if_terrain, an unknown category: each is refused with a line in loader.log, nothing changes.
+# Save, load: the changes come back (flags hoi4_ptr_<province>_<category>).
+hoi4_loader_test_category = {
+	hoi4_loader_terrain_status = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_province_terrain = yes }
+		available = {
+			hoi4_loader_feature_province_terrain = yes
+			state_has_terrain = { state = 64 terrain = plains }
+			state_has_terrain = { state = 64 terrain = marsh }
+			province_has_terrain = { province = 6487 terrain = jungle }
+			has_terrain = jungle
+			64 = { state_has_terrain = { terrain = urban } }
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_terrain_brandenburg_marsh = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_province_terrain = yes
+			state_has_terrain = { state = 64 terrain = plains }
+		}
+		complete_effect = {
+			64 = { set_province_terrain = { if_terrain = plains terrain = marsh } }
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_terrain_province_jungle = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_province_terrain = yes
+			NOT = { province_has_terrain = { province = 6487 terrain = jungle } }
+		}
+		complete_effect = {
+			set_province_terrain = { province = 6487 terrain = jungle }
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_terrain_ethiopia_marsh = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_province_terrain = yes }
+		complete_effect = {
+			every_state = {
+				limit = { is_owned_by = ETH }
+				set_province_terrain = {
+					if_terrain = plains if_terrain = desert if_terrain = hills if_terrain = mountain
+					if_terrain = forest if_terrain = jungle if_terrain = urban
+					terrain = marsh
+				}
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_terrain_reset = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_province_terrain = yes }
+		complete_effect = {
+			every_state = { reset_province_terrain = { } }
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_terrain_invalid = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_province_terrain = yes }
+		complete_effect = {
+			set_province_terrain = { province = 375 terrain = ocean }
+			set_province_terrain = { province = 4 terrain = plains }
+			set_province_terrain = { state = 64 terrain = desert }
+			set_province_terrain = { province = 375 terrain = no_such_terrain }
+		}
+		ai_will_do = { base = 0 }
+	}
+}
