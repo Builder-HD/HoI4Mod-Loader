@@ -1,0 +1,30 @@
+# hoi4_loader test: a small arms designer (equipment_designers; MODDING.md "Equipment designers").
+# The archetype is type infantry, so the game lists it in the infantry/artillery production tab
+# and charges army XP; the loader lets it open the tank designer window, titled "Small Arms
+# Designer", without the tank role dropdown, with its eleven slots at these places.
+hoi4_loader_test_small_arms_designer = {
+	archetypes = { hoi4_loader_test_small_arms }
+	window = land
+	title = HOI4_LOADER_TEST_SMALL_ARMS_DESIGNER
+	hide_roles = yes
+	xp = navy                               # designs cost navy experience (a game rule)
+	stats = {                               # the stat rows shown, per panel
+		base = { reliability maximum_speed build_cost_ic }
+		combat = { soft_attack hard_attack ap_attack defense breakthrough }
+		misc = { }
+	}
+	hide = { select3d_button historical_design_button }   # elements of the tank window
+	slots = {
+		sa_main_slot = { x = 1 y = 1 }
+		sa_extra_slot_1 = { x = 74 y = 1 }
+		sa_extra_slot_2 = { x = 147 y = 1 }
+		sa_extra_slot_3 = { x = 220 y = 1 }
+		sa_extra_slot_4 = { x = 293 y = 1 }
+		sa_extra_slot_5 = { x = 366 y = 1 }
+		sa_extra_slot_6 = { x = 1 y = 300 }
+		sa_extra_slot_7 = { x = 74 y = 300 }
+		sa_extra_slot_8 = { x = 147 y = 300 }
+		sa_extra_slot_9 = { x = 220 y = 300 }
+		fixed_sa_sight_slot = { x = 293 y = 300 }
+	}
+}

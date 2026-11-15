@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <map>
 
 namespace ModList {
 
@@ -152,6 +153,58 @@ bool Enabled(const std::wstring& userDir, std::vector<EnabledMod>* out) {
         out->push_back(std::move(m));
     }
     return true;
+}
+
+namespace {
+
+bool ReplacesFolder(const ModDescriptor& d, const std::string& folder) {
+    for (std::string r : d.replacePaths) {
+        std::replace(r.begin(), r.end(), '\\', '/');
+        while (!r.empty() && r.back() == '/') r.pop_back();
+        if (r.size() == folder.size() && EqualsNoCase(r, folder.c_str())) return true;
+    }
+    return false;
+}
+
+void Collect(const std::wstring& dir, const std::string& label, std::map<std::wstring, FolderFile>* files) {
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((dir + L"\\*.txt").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return;
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        std::wstring key = fd.cFileName;
+        std::transform(key.begin(), key.end(), key.begin(), ::towlower);
+        (*files)[key] = FolderFile{dir + L"\\" + fd.cFileName, label + "/" + Narrow(fd.cFileName)};
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+}
+
+}  // namespace
+
+FolderScan ScanFolder(const std::wstring& gameDir, const std::wstring& userDir, const std::string& folder) {
+    FolderScan scan;
+    std::wstring sub = Slashes(Wide(folder));
+    std::map<std::wstring, FolderFile> files;
+    Collect(gameDir + L"\\" + sub, "game", &files);
+    std::vector<EnabledMod> mods;
+    scan.modListRead = Enabled(userDir, &mods);
+    scan.enabledMods = mods.size();
+    for (const EnabledMod& m : mods) {
+        if (m.status == EnabledMod::Status::Unreadable) {
+            scan.notes.push_back("mod descriptor " + m.file + " unreadable or without a path; skipped");
+            continue;
+        }
+        if (m.status == EnabledMod::Status::Archive) {
+            scan.notes.push_back("mod " + m.descriptor.name + " is a zip archive; its " + folder + " files can't be read");
+            continue;
+        }
+        if (ReplacesFolder(m.descriptor, folder)) files.clear();
+        std::wstring dir = m.root + L"\\" + sub;
+        if (GetFileAttributesW(dir.c_str()) != INVALID_FILE_ATTRIBUTES) ++scan.modsWithFolder;
+        Collect(dir, m.label(), &files);
+    }
+    for (auto& f : files) scan.files.push_back(std::move(f.second));
+    return scan;
 }
 
 }  // namespace ModList

@@ -1,0 +1,17 @@
+# hoi4_loader test: unlocks the test small arms and their modules (set by a decision only).
+technologies = {
+	hoi4_loader_test_small_arms_tech = {
+		enable_equipments = { hoi4_loader_test_small_arms_1 }
+		enable_equipment_modules = {
+			hoi4_loader_test_sa_rifle
+			hoi4_loader_test_sa_smg
+			hoi4_loader_test_sa_grenades
+			hoi4_loader_test_sa_bayonet
+			hoi4_loader_test_sa_scope
+		}
+		research_cost = 1
+		start_year = 1936
+		allow = { always = no }
+		categories = { infantry_weapons }
+	}
+}

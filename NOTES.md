@@ -6036,3 +6036,461 @@ happens at all.
 `air_scenarios_test`, `native_script_test`. **Not run in game:** the use detection (the log line
 "... the map shaders will be patched" or "... left alone"), the compile check in the game process
 ("compile check of N mod shader(s)"), the alpha guard, the hover mark's white slot.
+
+# Part N: equipment designers for other equipment (`equipment_designers`, investigation)
+
+Branch `feature/equipment-designers` (from `main`). Investigation only, nothing implemented.
+Owner's request (2026-11-14): an artillery (or infantry) equipment designer that lives in the
+infantry/artillery production tab instead of the tank tab (N part 1), and designer stats that fit
+the equipment (N part 2). The owner asked to be certain first that vanilla can't already do it.
+Addresses are from vanilla **1.19.5** (`v1.19.5.0.7c6c`) and only for orientation. **1.19.3 and
+1.19.2 are unchecked** (no copies of those exes).
+
+## N1: what vanilla script already has
+
+- **`interface_category`** on an archetype (`common/units/equipment/*.txt`): one of six values,
+  `interface_category_land | armor | air | capital_ships | screen_ships | other_ships`. The
+  production screen has one fixed filter checkbox per value (`countryproductionlineview.gui`:
+  `show_equipment`, `show_armor`, `show_air`, `show_capital_ships`, ...). The list of values is in
+  the exe (strings next to `interface_category_resources`, `_stockpiling`, ...); mods can't add one.
+- **Designer layout per archetype:** `interface/equipmentdesigner/_documentation.info`. The window
+  `equipment_designer_<TYPE|ARCHETYPE>[_TAG]` with a `module_slots` child draws the blueprint and
+  slots. It does not choose which designer opens (see N3: without it the old window opens).
+- **Role names per archetype:** `tank_designer_<archetype>` (localisation) names the role dropdown
+  entry, e.g. `tank_designer_light_tank_chassis: "Light Tank"`.
+- **AI designs:** `common/ai_equipment` supports `category = land` (since 1.11).
+- **Nothing** chooses the designer window, its title or its stats. The stat panels in
+  `tank_designer_view.gui` / `plane_designer_view.gui` / `equipmentdesignerview.gui` are empty
+  `stats_grid` grids that the code fills; the only designer defines are the two
+  `EQUIPMENT_DESIGNER_SHOW_MODULE_FORBIDS_*_ROLE_ICON` flags.
+- **Super-heavy artillery** (`artillery.txt`, Götterdämmerung) says `module_slots = inherit`, but
+  its archetype has no slots: it is not modular and opens no designer.
+
+**Existing mods** (both installed here as Workshop items, files read):
+- "Infantry Equipment Designer" (2936314314, 1.17) and "Infantry Equipment & Artillery Designer
+  (NCNS)" (3621358522, 1.17.3) give their archetypes `type = armor` with
+  `interface_category = interface_category_land` and ship `interface/equipmentdesigner/*.gui`
+  layouts. Their pages say it had to go "through the editor of tanks" and shows in the tank tab.
+- Web (wiki "Equipment modding", top-mods mirrors of the Workshop pages): no source shows a way to
+  pick the designer or its stats from script. Steam Workshop and the Paradox forum refused
+  automated reads, so their comments are unchecked.
+
+## N2: exe findings (1.19.5)
+
+- **Three designer windows, one class.** `CEquipmentDesignerView` is created three times:
+  `countryequipmentdesignerview` (ships), `tank_designer_view`, `plane_designer_view`
+  (strings at `0x142a768f8..`, used by `FUN_14180af20` and `FUN_14181d020`).
+- **Which window opens** (`FUN_140bbf870(view, variant, force)`; the only function that logs "The
+  variant's equipment type has no matching equipment designer."). It tests the archetype
+  (`variant+0x3f0`) with four type predicates and picks the window from `view`:
+
+  | predicate | type mask (`+0x5a0 \| +0x5a8`, normalised by `FUN_14100f620`) | window | flag |
+  |---|---|---|---|
+  | `FUN_140cf5570` | `0x80004003c1` | `view+0x258` (ships) | `0x10` |
+  | `FUN_140cf4fe0` or `FUN_140cf55e0` | `0x408000003c`, bit 19 | `view+0x260` (tanks) | `0x20` |
+  | `FUN_140cf4e10` | `0x1f0037fc00` | `view+0x268` (planes) | `0x40` |
+  | none | | error, nothing opens | |
+
+  Then `FUN_141820c00` (`FUN_140cf5670` "designable" and `FUN_141e58dc0` the DLC check) and
+  `FUN_14181ce00(window, variant)` open it.
+- **The window follows `type`, nothing else.** The MIO icon function (`FUN_141fe1c10`) uses the
+  same masks: bit 2 gives `GFX_idea_slot_tank_manufacturer`, bits 3/4/5/19/31 give
+  `materiel_manufacturer`, the air mask gives `aircraft`, the ship mask gives `naval`.
+  The tank designer's seven bits match its seven roles (`tank_designer_` + armor, `_anti_tank`,
+  `_artillery`, `_anti_air`, `_rocket`, `_amphibious`, `_flame`). That the bits are exactly
+  those types is an inference: the name-to-bit table was not found.
+- **The predicates are used everywhere** (E8 scan): `FUN_140cf5570` ~110 calls, `FUN_140cf4e10`
+  ~100, `FUN_140cf4fe0` ~40, `FUN_140cf55e0` 11, across combat, XP, MIO, AI and UI code. **They
+  must not be hooked**: changing them changes game rules. Any change has to sit at UI entry points.
+- **Title:** one localisation key, `TANK_DESIGNER_TITLE` ("Tank Designer"), for every land design.
+
+## N3: in-game probe without the loader (2026-11-14, 1.19.5, Germany 1936)
+
+`version.dll` moved aside and only a script-only probe mod enabled (`Documents\...\mod\
+designer_probe`, not in the repo). Four modular archetypes, each with two slots, one module each,
+`interface_category = interface_category_land`, unlocked by an on_startup tech. Round 1 without,
+round 2 with `equipment_designer_<archetype>` layouts. Checked with screenshots.
+
+| Probe | `type` | Production list | Design button opens |
+|---|---|---|---|
+| A | artillery | **not listed anywhere** (inf/art, armor, air; also with "show outdated") | — |
+| B | infantry | inf/art tab | the old "Create Variant" upgrade window, with and without layout |
+| C | armor | **armor tab** (its `interface_category_land` is ignored) | without layout: old window; with layout: **Tank Designer** |
+| D | anti_tank | **not listed anywhere** | — |
+
+The Tank Designer for C: title "Tank Designer"; role dropdown `tank_designer_probe_arm_chassis`
+(the loc key, since none was given); stats Base (Max Speed, Reliability, HP, Supply Use), Combat
+(Soft/Hard Attack, Piercing, Hardness, Armor, Breakthrough, Defense, Air Attack), Misc (Fuel
+Capacity/Usage, Suppression, Reconnaissance, Entrenchment). `error.log`: only "not in script enum
+script_enum_equipment_bonus_type" documentation warnings for the probe types.
+
+## N4: verdict
+
+**Not possible in vanilla:**
+1. A modular **non-armor** land archetype in the inf/art tab with a designer. `type = infantry`
+   gets no designer; `type = artillery` / `anti_tank` isn't listed at all; `type = armor` (what the
+   Workshop mods do) moves it to the armor tab.
+2. The **title** (always "Tank Designer") and the **stats** shown (always the tank set).
+
+The `type = armor` workaround also has game effects: the equipment counts as armor for anything
+keyed on the type (MIO tank manufacturers, armor modifiers, AI unit ratios, XP icon).
+
+**Already possible, so not loader work:** blueprint/slot layout per archetype, role names per
+archetype, AI designs with `category = land`, the six existing production tabs.
+
+## N5: proposed script side (for approval)
+
+A new feature `equipment_designers`. Mods add `common/hoi4_loader_equipment_designers/*.txt`
+(read through the mod list, like `air_scenarios`):
+
+```
+small_arms_designer = {
+    archetypes = { infantry_equipment support_equipment }  # archetype names; required
+    window = land                       # land | air | naval: which engine window to reuse
+    title = SMALL_ARMS_DESIGNER_TITLE   # optional loc key instead of TANK_DESIGNER_TITLE
+    hide_roles = yes                    # optional: hide the role dropdown (default yes for non-designer types)
+    stats = {                           # optional (N part 2); a missing group keeps the engine's list
+        base   = { reliability maximum_speed build_cost_ic }
+        combat = { soft_attack hard_attack ap_attack defense breakthrough }
+        misc   = { }
+    }
+}
+```
+
+- The archetype keeps its real `type` (e.g. `infantry`, `artillery`), so nothing in combat, MIO,
+  AI ratios or XP changes. Only the UI routes it.
+- The mod still ships the `equipment_designer_<archetype>` layout and module icons (vanilla
+  mechanism).
+- Without the loader: the archetype behaves as in N3 (B: plain list entry with the old window; A/D:
+  hidden). A mod that needs designs players can't make otherwise should check
+  `hoi4_loader_feature_equipment_designers` (guard trigger) and warn.
+- Errors (unknown archetype, archetype without `module_slots`, unknown stat) are logged to
+  `loader.log` and that entry is skipped.
+
+## N6: code plan (where it would hook)
+
+UI only, no game rules:
+1. **Open the window:** hook `FUN_140bbf870` (ANCHOR: its unique error-string `lea`; CODE shape for
+   the four predicate calls and the `+0x258/+0x260/+0x268` offsets). For a listed archetype, run
+   its tail with the configured window (`FUN_141817ff0`, `FUN_141820c00`, `FUN_14181ce00`,
+   `FUN_140bbcf20`, taken from the call sites); otherwise call the original.
+2. **List it in its tab:** find why A/D are listed nowhere and where B/C get their tab (the
+   production list builder; see N7) and add listed archetypes to their `interface_category` tab
+   with the designer icon.
+3. **Title:** answer `TANK_DESIGNER_TITLE` with the mod's key while the window shows a listed
+   archetype (hook the title setter or the loc lookup, whichever is narrower).
+4. **Stats (part 2):** find the code that fills `stats_grid` (base/combat/misc). If it walks a fixed
+   list of stat ids, give it the mod's list for listed archetypes.
+5. **Roles:** hide `dropdown_tank_roles` for listed archetypes, unless N7 shows the role code is
+   safe for non-tank types.
+- **Fail safe:** each hook has its own pattern; any mismatch leaves the feature off (vanilla
+  behaviour). SEH around hook bodies.
+- **Multiplayer:** saving a design goes through the game's own synced command, so the UI routing is
+  local. Still to check: that the command doesn't re-check "has a matching designer" on the
+  receiving side (N7).
+- **Saves:** designs are normal variants; without the loader they stay usable in production.
+
+## N7: still to find before code (needs approval of N5 first)
+
+- The production-list builder and its tab test (why `artillery`/`anti_tank` modular archetypes are
+  listed nowhere; why `armor` overrides `interface_category`).
+- Whether the save-design command (`CCreateEquipmentVariantCommand` or similar) or the variant
+  validation checks the designer type again (MP and AI side).
+- The `stats_grid` filler and its stat list; the title setter.
+- The role dropdown code (`UpdateTankRolesDropdownBox`) with a non-armor type: safe or not.
+- AI: whether `ai_equipment` designs for these archetypes need anything (the AI doesn't use the
+  window).
+- The same patterns on 1.19.4.2 (copy available); 1.19.3 / 1.19.2 impossible (no copies).
+
+## N8: decisions for the owner
+
+1. Approve the script side in N5 (file name, keys, `window`, `title`, `hide_roles`, `stats`)?
+2. Part 2 (stats) in the first version, or after part 1 works?
+3. `window = air | naval` for non-air/naval types: allow, or land only at first (smaller risk)?
+
+## N9: owner's decisions (2026-11-14) and the second round of findings
+
+**Owner:** N5 approved, plus more customisation: which XP the designer uses, how many slots there
+are, what they are called and where they sit. Order: part 1 first, stats (part 2) after; land
+first, air and naval afterwards.
+
+### Findings (1.19.5; same bytes at the same addresses on 1.19.4.2)
+
+**Production list (`FUN_141e3c020`, refreshed by `FUN_141e3fb00`).** The add-line list ignores
+`interface_category`. It shows a variant when `variant+0x408` (its type mask: archetype type plus
+the modules' `add_equipment_type`, `FUN_140c29730`) shares a bit with the tab's mask
+(`view+0x1120`, test at `0x141e3c29b`): armor `4`, inf/art `0x80000038`, air `0x1f0037fc00`,
+naval `0x80004003c1`. `interface_category` (`CEquipmentType+0x440`) only groups existing lines.
+- Probe C (armor) is in the armor tab because of bit 2. Probe B (infantry) is in inf/art.
+- Vanilla towed artillery is `type = { artillery infantry }`; the **infantry** bit lists it.
+  Pure `artillery` (bit 28) / `anti_tank` (bit 29) match no tab: probes A and D.
+
+**Old window or designer (`FUN_141820c00(ctx, type)`, 9 callers, all UI).** True only if
+`FUN_140cf5670` (the type has slots and its normalised mask meets `FUN_14100bfe0`, the DLC mask:
+MtG `0x80004001c0`, NSB `4`, BBA `0x1d0026fc00`) and `FUN_141e58dc0` (an
+`equipment_designer_<type|archetype>[_TAG]` layout exists). No Step Back unlocks only bit 2, so
+infantry can never pass. `FUN_140cf5670` has gameplay callers: not hooked.
+
+**Which window (`FUN_140bbf870`, N2).** Land predicates `FUN_140cf4fe0` (mask `0x408000003c`) or
+`FUN_140cf55e0` (bit 19) pick the tank window. The inf/art bits 3/4/5/31 are inside that mask, so
+an archetype with `infantry` in its type already routes to the tank window once
+`FUN_141820c00` lets it through.
+
+**Saving (`CCreateEquipmentVariantCommand` / `CUpdateEquipmentVariantCommand`, vtables
+`0x142a9d1f0` / `0x142a9d2b0`).** Validate (slot 9) checks the XP pool through `FUN_141338880`:
+land predicates → army, naval → navy, air → air, none → 0 (the save fails if it costs XP); and the
+modules against the type's slots. Execute (slot 10) deducts air / navy / else army XP. **Neither
+checks the designer, the DLC or the layout**, so a machine without the loader executes these
+commands like any other.
+
+**Inside the window (`CEquipmentDesignerView`).**
+- Kind `view+0x3ce0` (0 ship, 1 tank, 2 plane), shown archetype `view+0x5448`.
+- Title: `FUN_14181ce00(view, variant)` ("open this variant") sets `*(view+0xf878)` to
+  `FUN_141813d40(kind)` (SHIP / TANK / PLANE / EQUIPMENT_DESIGNER_TITLE) through `FUN_142347db0`.
+- Slots: setup (`FUN_141820330` → `FUN_14181fe50`) creates one slot window per positionType
+  `pos_custom_module_slot_window_%i` / `pos_fixed_module_slot_window_%i`, i = 0..19, stopping at
+  the first missing one, looked up in `*(view+0xf2c0)` (vtable `+0xc0`), placed at
+  `positionType+0xf0` (`{int x; int y}`) by `FUN_141e5d6c0`. Vanilla's tank GUI has 9 custom and
+  no fixed positions. The refresh `FUN_141821be0(view+0x28)` first calls `FUN_14181bb90`, which
+  gives the archetype's slots (`+0x70`, stride 0x50, count `+0x7c`, name token `+8`) the windows
+  in definition order: `fixed_*` to the next fixed window, others to the next custom one; extra
+  slots are dropped silently, unused windows hidden.
+- Slot names: vanilla, loc key `EQ_MOD_SLOT_<slot>_TITLE`.
+- Roles: the dropdown `*(view+0x134f8)`; its label comes from the type mask. For a type that isn't
+  a tank role (infantry) it reads "unknown" (no crash).
+- Stats (part 2): `FUN_141823950` fills the three panels from fixed `{int id; int8 kind}` arrays.
+- XP shown: by window kind (tank = army). The cost tooltip `FUN_1415c8470` picks army/navy/air by
+  the type mask; with the inf/art bits it says army.
+
+### Decisions
+
+1. **Feature `equipment_designers`**, engine tier, after `lifecycle`. Files
+   `common/hoi4_loader_equipment_designers/*.txt` from the game folder and the enabled mods, in load
+   order (as air_scenarios; a later entry of the same name replaces an earlier one).
+2. **Keys:**
+   ```
+   small_arms_designer = {
+       archetypes = { infantry_equipment }   # required
+       window = land                         # optional; only land for now (air/naval: logged, entry skipped)
+       title = SMALL_ARMS_DESIGNER_TITLE     # optional loc key; default: the window's own title
+       hide_roles = yes                      # optional, default yes: hides the tank role dropdown
+       slots = {                             # optional: position of a slot window, by slot name
+           small_arms_slot = { x = 1 y = 1 }
+           fixed_sight_slot = { x = 180 y = 300 }
+       }
+   }
+   ```
+3. **The archetype keeps its real type,** which must include a type the land window serves
+   (e.g. `infantry`, as vanilla towed artillery has). That type decides the production tab
+   (inf/art), the XP pool (army) and the save path, all vanilla. An archetype without one is
+   logged ("its type has no land type; add e.g. infantry") and skipped.
+4. **Opening:** a hook on `FUN_141820c00`: if the game says no and the type (or its archetype) is
+   listed, return true when the archetype has slots, the tank designer is unlocked (No Step
+   Back: the DLC mask's armor bit) and the game's own layout check passes. Everything after that
+   is the game's own path.
+5. **Title and roles:** a post-hook on `FUN_14181ce00` sets the title; a post-hook on the refresh
+   hides (or shows again) the role dropdown.
+6. **Slots:**
+   - Count: up to 20 normal plus 20 `fixed_` slots per archetype. The loader adds the missing
+     positionTypes (custom 9..19, fixed 0..19) to `interface/tank_designer_view.gui` when the game
+     reads it (whichever copy: vanilla's or a mod's), placed far off screen, so nothing changes
+     for other designs.
+   - Names: vanilla (`EQ_MOD_SLOT_<slot>_TITLE`); documented, no loader key.
+   - Positions: the refresh post-hook moves each listed archetype's slot windows to `slots`, and
+     puts windows back at their positionType for every other design.
+7. **XP: not in this version.** Land archetypes pay army XP through the game's own command. Paying
+   navy or air XP for them means changing the save command's validate and execute, which run on
+   every machine (a game rule; out of sync with a machine without the loader). **Owner to decide**
+   whether it is wanted with that limit (it would come with the air/naval step).
+8. **Stats** (part 2) next, then air and naval windows.
+9. **Fail safe:** each hook has its own pattern and CODE checks; any mismatch leaves the feature
+   off (vanilla behaviour). Problems in definitions are logged per entry. Multiplayer: UI only.
+   Saves: designs are normal variants; without the loader they stay producible, and editing them
+   opens the old window.
+
+## N10: implementation (2026-11-14, branch `feature/equipment-designers`)
+
+**Files:** `src/engine_designers.cpp` (engine access), `src/plugin_equipment_designers.cpp` (the
+feature), `src/equipment_designers.cpp/.h` (parser and merging, tested by
+`tests/equipment_designers_test.cpp`), `Engine::PatchTankDesignerViewGui` in `src/gui_patch.cpp`.
+Shared: `src/script_tree.cpp` (the script reader, moved out of air_scenarios) and
+`ModList::ScanFolder` (the mod folder scan, likewise).
+
+**Hooks** (all UI, main thread, SEH around each body; a fault switches the feature off):
+- `kSigEqdCanOpen` (`FUN_141820c00`): when the game says no and the type or its archetype is listed,
+  yes if the archetype has slots, the DLC mask has the tank bit (`kCodeEqdDlcMask` +0x3b, 4), the
+  game's land tests (`kSigEqdPickWindow`'s calls) pass and the game's own layout check passes. The
+  picker then opens the tank window itself.
+- `kSigEqdOpenVariant` (after): the title (`view+0xf878`, SetText from `kCodeEqdTitle`) with the
+  definition's loc key, localised once per definition.
+- `kSigEqdRefresh` (after; its argument is `view+0x28`): role dropdown (`view+0x134f8`) hidden or
+  shown; slot windows placed by name; window visibility.
+
+**Slot windows, as found in game.** The game does not hide unused slot windows: it clears their slot
+(`window+0xd8 = 0`, `kCodeEqdSlotClear`) and draws them locked ("This slot is not available for
+this equipment type"), which is vanilla's look for tanks with fewer slots. So the loader sets each
+window's visibility after every refresh: for listed designs only the windows that hold a slot; for
+every other tank design the GUI file's own windows (as vanilla) and none of the added ones. The
+visible part: `window+0x670` is a container window; its GUI object, the one hide/show and the
+`+0x75` flags belong to (as Find returns them), is at `+0x30` (`kCodeEqdSlotGuiBase`, from the
+window's constructor). The first build hid `window+0x670` itself: its vtable slot `0x80` is the
+container's Find, which threw a C++ exception (`0xE06D7363`); the SEH caught it and the feature
+switched itself off, as designed. The fault log now names the exception and the call stack.
+
+**Positions.** `DesignerPlaceSlot` packs `{int x; int y}` and calls the window's SetPosition
+(`kCodeEqdSetPosition`). Putting a window back: its `pos_custom/fixed_module_slot_window_N` is
+looked up in the window's position container (`view+0xf2c0`, vtable `+0xc0`) as setup does. The
+plugin remembers per window which listed archetype it showed last and resets only on a change.
+
+**GUI patch.** `interface/tank_designer_view.gui` (any copy) gets the missing
+`pos_custom_module_slot_window_N` and `pos_fixed_module_slot_window_N` up to 19, each at window 0's
+`position` text, after the last existing one. Only registered when a definition exists.
+
+**Checks:** Release build without warnings; `equipment_designers_test` (31 checks, plus vanilla's
+`tank_designer_view.gui`: 9 custom, 0 fixed before, all 40 after, idempotent), `air_scenarios_test`
+(34), smoke test, `check_signatures.py` and `check_code_shapes.py` on the 1.19.5 and 1.19.4.2
+copies (same addresses on both). 1.19.3 / 1.19.2 unchecked (no copies).
+
+**In-game test** (1.19.5, Germany 1936, loader build of this branch, test mod only; driven with
+screenshots, not yet by the owner, 2026-11-14):
+1. `loader.log`: every signature, anchor and shape resolved; `1 designer(s) for 1 archetype(s)`;
+   `tank_designer_view.gui: 9 custom and 0 fixed ... 20 each now`; `serves hoi4_loader_test_small_arms
+   (10 slot(s), 1 fixed_, 11 placed by the definition)`. No ERROR. `error.log`: nothing about the
+   test files.
+2. Vanilla Panzer II design first: "Tank Designer", role "Light Tank", turret, gun and the rest at
+   vanilla's places, no extra windows.
+3. Decision "Unlock the test small arms": Production > infantry/artillery lists "Test Small Arms" with
+   the designer icon. The icon opens **"Small Arms Designer"**, no role dropdown, 11 slots in two rows
+   (6 + 5) at the definition's places, including the 10th slot and the `fixed_` slot ("Sight
+   (fixed_ slot)", from `EQ_MOD_SLOT_..._TITLE`) in windows only the patch adds.
+4. Module picker per slot works ("Module Slot: Kit 1", modules with ★5 army experience to add).
+   Saving with grenades: "Spend ★5 to save the changes"; army experience 50 → 45; "Test Small Arms
+   Mk0" appears in the infantry/artillery tab and takes a production line.
+5. Back to the Panzer II: "Tank Designer", "Light Tank" dropdown and vanilla's slot places again.
+
+**Not tested:** multiplayer (expected unaffected: UI only, the variant commands don't check the
+window); a save loaded without the loader with such a design (expected: producible, old window to
+edit); another mod replacing `tank_designer_view.gui`; `hide_roles = no`.
+
+**Open (owner):** the `xp` key (N9 decision 7), stats per designer (part 2), air and naval windows.
+
+## N11: stats, XP and more options (owner, 2026-11-14)
+
+**Owner:** the XP option is wanted even though a machine without the loader would go out of sync
+("the loader is a necessity anyways"); more options are welcome as long as each is optional; start
+with the stats.
+
+### Findings (1.19.5; same addresses on 1.19.4.2)
+
+**Stats.** `FUN_141823950(view, a, b, basePanel, combatPanel, miscPanel)` (callers: the stats
+dispatcher `FUN_141823510` for the tank kind, and `FUN_1418247c0`; both pass the window) fills each
+panel with `Fill(panel, &{begin,end}, a, &{b's 16 bytes, byte 1}, view->[+0x5e84])`
+(`FUN_141e57270`) over static arrays of `{int id; int8 kind}` (kind 0 = a stat, 1 = a special row,
+-1 = assert). A row's label is `Localize(table[id])`: `FUN_1414822a0` reads `table` at
+`0x14312b560`, 78 `char*` loc keys, id 0 `STAT_ARMY_DEFAULT_MORALE` … id 77
+`STAT_COMMON_BUILD_COST_IC`. The value is `builder->[+0xa0 + 8*id]`. The script names
+(`soft_attack`) are interned tokens with no static table; the loader keeps its own name → loc key
+list and finds the id by the loc key in the game's table at runtime.
+
+**XP.**
+- Pool: `FUN_141338880(container, out, type)`: land → `container+0x10`, navy `+0x28`, air
+  `+0x40`, copied by `FUN_142572db0`. Callers: the commands' validation and the UI.
+- Deduction: the create and update commands' execute (RTTI `CCreateEquipmentVariantCommand` /
+  `CUpdateEquipmentVariantCommand`, slot 10) call `IsAir(type)` (`FUN_140cf4e10`) and then
+  `IsNaval(type)` (`FUN_140cf5570`) to choose air / navy / army deduction (each with its own side
+  effects, so the loader doesn't redo them).
+- Shown: the window's line `DESIGNER_ARMY_EXPERIENCE` (`£army_experience $VALUE$`) for the tank kind,
+  from the player's container (`session->vt[0xa0]()` → `FUN_140c07da0`) at `+0x10`, on
+  `view+0x135c8`. `DESIGNER_NAVY_EXPERIENCE` / `DESIGNER_AIR_EXPERIENCE` exist.
+- Cost tooltip: `FUN_1415c8470(?, mask, ?, ?, out)` picks army / navy / air text by three masks
+  (`mov rax, imm64` at +0x3c, +0x134, +0x22c).
+
+**Window elements.** Setup finds elements in the window's root container `view->[+0xf2b8]` by name
+(vtable `+0xa0`, `{ptr, len}`, flags 0), e.g. the role dropdown.
+
+### Decisions (all keys optional)
+
+1. **`stats = { base = { ... } combat = { ... } misc = { ... } }`**: the stat rows per panel, in that
+   order, by script name (the list in MODDING.md, e.g. `soft_attack`, `ap_attack`, `armor_value`,
+   `build_cost_ic`). A missing group keeps the window's own list; `{ }` empties the panel. Unknown
+   names are logged and skipped.
+2. **`xp = army | navy | air`**: the experience the design costs and the window shows. The loader
+   answers the pool function for listed archetypes, answers `IsAir` / `IsNaval` differently only
+   when called from those two deduction checks (by return address), and fixes the tooltip's mask and
+   the window's XP line. A game rule: every machine in multiplayer needs the loader and the mods.
+3. **`hide = { <element> ... }`**: elements of the tank window (names from
+   `interface/tank_designer_view.gui`) hidden while this designer's design is shown, shown again for
+   other designs.
+4. **Later candidates** (not in this step): an XP cost factor, a country trigger for who may use the
+   designer, a blueprint background per designer, the air and naval windows.
+
+## N12: stats, `xp` and `hide`: implementation and in-game test (2026-11-14)
+
+**Stats** (`kSigEqdStats`, hooked): for a listed archetype with `stats`, the detour calls the game's
+Fill with the definition's rows (8-byte `{id, kind 0}` entries the plugin builds once, ids looked up
+by loc key in the game's table `kSigEqdStatName`) and the game's own arrays for panels left out.
+`check_code_shapes.py` checks that every entry of the game's three arrays names a stat of that table.
+
+**`xp`** (all hooked only when a definition uses it):
+- `kSigEqdPool`: the pool for listed types (validation, the window's "can afford").
+- `IsAir` / `IsNaval` (the window picker's calls +0x68 / +0x23, the pool's calls must agree): a
+  different answer only when the return address is right after the create or update command's
+  deduction test (RTTI execute, `kCodeEqdCreateAir/Naval`, `kCodeEqdUpdateTest` twice). Every other
+  caller gets the game's answer.
+- The window's line: `DESIGNER_<POOL>_EXPERIENCE` with the player's pool (container from
+  `kSigEqdXpShown`), set after each refresh.
+- Cost texts: the tooltip (`kSigEqdTooltip`) and the icon name function (`kSigEqdXpIcon`,
+  `army_experience` / `navy_experience` / `air_experience`, used for `$XPICON$` and `$EXPERIENCE_TYPE$`)
+  get one bit of the pool's mask while the tank window's root is visible and shows a listed design
+  with `xp`. Their callers are the designer and its module picker only.
+
+**`hide`.** The window's root (`view+0xf2b8`) has several lookups by name, one per element class
+(vtable `+0x78` text boxes, `+0xa0` the role dropdown and some buttons, `+0x88`, `+0x68`, `+0x1b0`);
+a missing name returns that lookup's placeholder object, not null. The first implementation asked
+`+0xa0` only and got the placeholder for every name (the in-game log showed one pointer for four
+names), so nothing hid. Now the loader collects the lookup slots from setup's own calls (only those
+whose result the window keeps), learns each slot's placeholder from a name no window has, and takes
+the first real result. The game shows some elements again when it updates the window's buttons
+(`kSigEqdButtons`, called by open, refresh and ~10 other UI paths), so `hide` is applied again after
+that too.
+
+**In-game test** (1.19.5, Germany 1936, branch build, test mod only; driven with screenshots, not
+yet by the owner):
+1. `loader.log`: stats, experience, icon, buttons and 5 lookup slots resolved; all hooks queued; no
+   ERROR.
+2. The small arms designer: base panel Reliability, Max Speed, Production Cost; combat Soft
+   Attack, Hard Attack, Piercing, Defense, Breakthrough; misc empty (as defined).
+3. The window's experience line shows the navy icon with 50; module costs ("Costs ★5 to replace")
+   and Save ("Spend ★5 to save the changes") show the navy icon.
+4. Saving a design with grenades: navy experience 50 → 45, army 50 unchanged; the design is listed.
+5. `hide` (with `designer_title` and `production_value` added for the test): the title, the
+   production cost, "Select Model" and the historical design button are hidden.
+6. The Panzer II afterwards: "Tank Designer", "Light Tank" dropdown, "Select Model", production cost,
+   both buttons, the army icon with 50 and the tank's 4 + 8 + 5 stat rows are back.
+
+**Not tested:** multiplayer with `xp` (expected: in sync when every player has the loader and mods;
+out of sync otherwise, as accepted), the update command (editing a saved design) paying from the
+`xp` pool (same tests, same hook; only the create command was used), `xp = air`.
+
+## N13: review before the PR, two fixes and the remaining in-game tests (2026-11-15)
+
+**Threads.** The archetype table was built at its first use, by whichever hook asked first. The
+experience pool hook (`xp`) can also run on worker threads, so two threads could build or read the
+table at once. Now it is built on the main thread before every game entry (`OnGameEntering`, or at
+an earlier first use on the main thread); other threads read it only once it is complete (an
+interlocked flag) and get the game's own answer before that. Game state changes only on the main
+thread, so every `xp` command sees the table. In game the table is logged before "game entered".
+
+**Title.** On the second opening of the window the title was blank. The game's SetText takes the
+string's buffer (the game passes a temporary), so it emptied the loader's cached title. Now the
+title is given to SetText as a fresh copy and freed after, as the experience line already did. In
+game: the title stays on every reopening.
+
+**In-game test** (1.19.5, Germany 1936, branch build, test mod only):
+1. Unlock, open the small arms designer, save with grenades: navy 50 -> 45, army 50.
+2. Reopen the saved design, add a bayonet, save ("Spend navy 5 to save the changes to this design",
+   the update command): navy 45 -> 40, army 50. The update command now tested.
+3. Close and reopen the window three times: "Small Arms Designer" each time.
+4. `loader.log`: no ERROR, no fault.
+
+**Not tested:** multiplayer with `xp`, `xp = air`.

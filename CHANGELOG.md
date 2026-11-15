@@ -6,6 +6,26 @@ A–F; NOTES.md has the findings and test results behind each.
 
 ## Unreleased
 
+- **New feature `equipment_designers`** (engine tier; guard `hoi4_loader_feature_equipment_designers`;
+  no script commands; NOTES.md Part N, MODDING.md "Equipment designers"). Modular equipment the game
+  gives no designer (e.g. `type = infantry`) can open the tank designer window, listed per archetype
+  in `common/hoi4_loader_equipment_designers/*.txt` with its own title, without the tank role
+  dropdown and with its own slot positions. The archetype keeps its real type, so the production
+  tab (infantry/artillery), the experience (army) and the save path stay the game's own. The tank
+  window gets up to 20 normal and 20 `fixed_` slot windows (added to `tank_designer_view.gui` at
+  load); other designs keep vanilla's look. Optional per designer: `stats` (the rows of the three
+  stat panels, by `add_stats` names), `xp = army | navy | air` (the pool a design is checked against
+  and paid from, shown and named in the cost texts; a game rule, so every multiplayer player needs
+  the loader) and `hide` (elements of the tank window). Needs No Step Back and the archetype's
+  `interface/equipmentdesigner` layout, as vanilla does. Land window only for now; the air and naval
+  windows are planned. Hooks the "can open designer" check, the window's open, refresh, stats and
+  buttons update, and, only when `xp` is used, the experience pool, the two deduction tests of the
+  variant commands, the cost tooltip and icon; 13 new signatures and 2 anchors (smoke `2/144`).
+  Checked on 1.19.4.2 and 1.19.5; tested in game on 1.19.5 (2026-11-14). The test mod has a small
+  arms designer (decision "Unlock the test small arms").
+- **Shared code:** the Paradox script reader (`src/script_tree.cpp`) and the mod folder scan
+  (`ModList::ScanFolder`) moved out of air_scenarios, which now uses them; `UserFolder()` and
+  `GameFolder()` in `loader.h`.
 - **Railway badges after a merge** (`railway_queue`; NOTES.md H6). When a removed railway takes a
   junction with it, the two segments next to it merge into one badge. An entry queued on one of
   them used to vanish from the badge, and a click queued a second, overlapping entry. Now the entry

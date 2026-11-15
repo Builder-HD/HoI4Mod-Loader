@@ -45,6 +45,7 @@ Current features:
 | `province_building_removal` | engine (needs `lifecycle`) | `hoi4_loader_plugin_province_building_removal` | a removal cross on the state view's province buildings (supply hub, naval base, bunkers); no script commands, see below |
 | `equipment_conversion` | engine (needs `lifecycle`) | `hoi4_loader_plugin_equipment_conversion` | tools a mod switches on with global flags: "Convert from Stockpile" from every earlier generation, a cost factor, "same role only"; off until a mod sets them, see below |
 | `air_scenarios` | engine | `hoi4_loader_plugin_air_scenarios` | new air scenarios (the 3D air animations on the map) for chosen missions, planes and countries, defined in `common/hoi4_loader_air_scenarios/`; no script commands, see below |
+| `equipment_designers` | engine | `hoi4_loader_plugin_equipment_designers` | designer windows for equipment the game gives none (e.g. `type = infantry`): the tank designer window with the mod's title, slot count and slot places, defined in `common/hoi4_loader_equipment_designers/`; no script commands, see below |
 | `attention_area` | engine (needs `lifecycle`) | `hoi4_loader_plugin_attention_area` | `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area`: mark any set of provinces on the map (a line and a fill shader each, built-in or a mod's own) and move the camera to it; display only, not saved, see below |
 
 On an unknown build the file tier stays on, the engine tier is off, and `loader.log` lists the
@@ -153,6 +154,7 @@ when the loader is missing or a feature is off. Without them, using a loader tri
 | a check that `province_building_removal` is on (it has no script commands) | `scripted_triggers/hoi4_loader_feature_province_building_removal.txt` |
 | `equipment_conversion` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_equipment_conversion.txt` |
 | `air_scenarios` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_air_scenarios.txt` |
+| `equipment_designers` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_equipment_designers.txt` |
 | `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area` | `scripted_triggers/hoi4_loader_feature_attention_area.txt` |
 
 - **Combinations:** a block that combines features needs each feature's stub and guard, e.g.
@@ -1417,6 +1419,146 @@ scenarios; nothing in the game state changes.
 
 **Without the loader:** the entries are ignored (a folder the game doesn't read); the game's own
 scenarios play. The mod's extra entities are unused. Guard: `hoi4_loader_feature_air_scenarios`.
+
+## Equipment designers (`equipment_designers`)
+
+The game has three designer windows: tank, ship and plane. Which one a piece of equipment opens
+is fixed by its `type`: armor (and the tank roles) the tank designer, ships the ship designer,
+planes the plane designer. Every other type opens no designer, only the old "Create Variant"
+upgrade window, even with `module_slots`. That is why modular infantry or artillery equipment in
+mods has to pretend to be `type = armor`, and then sits in the tank production tab, pays like a
+tank and counts as armor wherever the game asks for the type (NOTES.md N3/N4 has the tests).
+
+With the loader, a mod lists archetypes that should open the **tank designer window** while
+keeping their real type. For each such designer the mod also chooses the **window title**,
+whether the **tank role dropdown** shows, and **where each slot sits**, for up to 20 normal plus
+20 `fixed_` slots.
+
+**What the archetype needs** (vanilla script, no loader keys):
+- `module_slots` and modules, as for tanks (`_documentation.md` in `common/units/equipment`).
+- **A type the tank window serves.** `infantry` works (tested); vanilla's towed artillery is
+  `type = { artillery infantry }` for the same reason. Pure `artillery` or `anti_tank` is not
+  listed in any production tab by the game; give it `infantry` as well. Other land types may work
+  too but are untested; the loader logs it when an archetype's type doesn't fit.
+- **A blueprint layout:** a window `equipment_designer_<archetype>` (or `_<type>`, optionally with
+  `_<TAG>`) in `interface/equipmentdesigner/*.gui`, with a `module_slots` child, exactly as
+  vanilla's tanks have (`interface/equipmentdesigner/_documentation.info`). The game opens no
+  designer without one.
+- **No Step Back:** it unlocks the tank designer; without it the old window opens, as for tanks.
+- **Slot names** are vanilla localisation: `EQ_MOD_SLOT_<slot>_TITLE`; module categories
+  `EQ_MOD_CAT_<category>_TITLE`.
+
+**The designer** (`common/hoi4_loader_equipment_designers/*.txt`, the only new part):
+```
+small_arms_designer = {
+    archetypes = { infantry_equipment support_equipment }   # required
+    window = land                          # optional; only land for now
+    title = SMALL_ARMS_DESIGNER_TITLE      # optional loc key instead of "Tank Designer"
+    hide_roles = yes                       # optional, default yes: hide the tank role dropdown
+    slots = {                              # optional: where each slot window goes
+        small_arms_slot = { x = 1 y = 1 }
+        fixed_sight_slot = { x = 293 y = 300 }
+    }
+    stats = {                              # optional: the stat rows of the three panels
+        base = { reliability maximum_speed build_cost_ic }
+        combat = { soft_attack hard_attack ap_attack defense breakthrough }
+        misc = { }                         # an empty panel
+    }
+    xp = army                              # optional: army | navy | air (a game rule, see below)
+    hide = { select3d_button }             # optional: elements of the tank window to hide
+}
+```
+- `archetypes`: archetype names (not their `_1`, `_2` types).
+- `window`: `air` and `naval` are planned; an entry with them is skipped for now.
+- `title`: a localisation key; without one, or if it has no localisation, the window keeps its title.
+- `hide_roles`: the tank designer's role dropdown (Light Tank, Tank Destroyer, ...) names roles by
+  armor type and reads "unknown" for other types. Hidden unless you set `no`.
+- `slots`: `x` and `y` in the tank window's own slot coordinates. Vanilla's grid is
+  `x` = 1, 74, 147, 220, 293, 366 and `y` = 1 (top row) or 300 (bottom row); the round button
+  right of the top row sits at `x` = 439. Values from -4000 to 4000.
+- `stats`: per panel (`base`, `combat`, `misc`) the stats shown, in that order, by the names
+  `add_stats` uses (the list below). A panel you leave out keeps the tank window's rows; `{ }`
+  empties it. The values are the design's own, as the game computes them.
+- `xp`: the experience the design costs. Without it the game decides by type (army for land
+  types). With it, the window's experience line, the cost texts and the save itself use that pool.
+- `hide`: element names from `interface/tank_designer_view.gui` (e.g. `select3d_button` for "Select
+  Model", `historical_design_button`, `designer_title`, `production_value`), hidden while this
+  designer's design is shown and shown again for every other design. A name the window doesn't
+  have is logged once.
+
+**What happens:**
+- **Production tab:** the game lists equipment by its type, so an `infantry` archetype is in the
+  infantry/artillery tab. (`interface_category` doesn't decide this; the game uses it for the
+  existing production lines.) The design icon on its entry now opens the designer.
+- **The window** is the tank designer window with your title, without the role dropdown, and with
+  your archetype's slots at your positions. Only the windows that hold a slot show.
+- **Slots:** the game gives the archetype's slots the slot windows in `module_slots` order: names
+  starting with `fixed_` go to a second group. The loader adds windows to the tank window (in
+  `interface/tank_designer_view.gui`, whichever copy the game reads, at load) up to 20 per group.
+  Vanilla's file has 9 normal and no `fixed_` ones. **Give every slot a position** when you have
+  more than 9 slots or any `fixed_` slot: the added windows start at the first slot's place.
+- **Experience:** without `xp` the game charges the type's experience (army for land types). With
+  `xp` the loader answers the game's experience questions for the archetype: which pool the save is
+  checked against and paid from (on every machine, in the game's own save command), which pool the
+  window shows, and which icon the cost texts use. **A game rule:** in multiplayer every player needs
+  the loader and the same mods, or the games go out of sync.
+- **Stats:** without `stats` the window shows the tank designer's stats; with it, your rows.
+- **Every other design** (vanilla tanks, other mods' tanks) looks as without the loader: its title,
+  role dropdown and slot places come back, and the added windows stay hidden.
+
+**Stat names** (`stats`), the game's 78 stats; the row shows the game's own label (`STAT_*`):
+`default_morale`, `defense`, `breakthrough`, `hardness`, `soft_attack`, `hard_attack`,
+`recon`, `entrenchment`, `initiative`, `casualty_trickleback`, `supply_consumption_factor`, `supply_consumption`,
+`suppression`, `suppression_factor`, `experience_loss_factor`, `equipment_capture_factor`, `fuel_capacity`, `recovery_rate`,
+`additional_collateral_damage`, `surface_detection`, `sub_detection`, `surface_visibility`, `sub_visibility`, `carrier_sub_detection`,
+`carrier_surface_detection`, `lg_attack`, `lg_armor_piercing`, `hg_attack`, `hg_armor_piercing`, `torpedo_attack`,
+`sub_attack`, `anti_air_attack`, `amphibious_defense`, `naval_speed`, `naval_range`, `mines_planting`,
+`mines_sweeping`, `naval_light_gun_hit_chance_factor`, `naval_heavy_gun_hit_chance_factor`, `naval_torpedo_hit_chance_factor`, `naval_torpedo_damage_reduction_factor`, `naval_torpedo_enemy_critical_chance_factor`,
+`naval_weather_penalty_factor`, `convoy_raiding_coordination`, `patrol_coordination`, `search_and_destroy_coordination`, `air_range`, `air_defence`,
+`air_attack`, `air_agility`, `air_bombing`, `air_superiority`, `naval_strike_attack`, `naval_strike_targetting`,
+`air_ground_attack`, `air_visibility_factor`, `railway_gun_attack`, `railway_gun_attack_range`, `railway_gun_annex_ratio`, `railway_gun_hours_to_redistribute`,
+`max_organisation`, `max_strength`, `maximum_speed`, `armor_value`, `ap_attack`, `reliability`,
+`reliability_factor`, `weight`, `thrust`, `fuel_consumption`, `fuel_consumption_factor`, `strategic_attack`,
+`carrier_size`, `submarine_carrier_size`, `acclimatization_hot_gain`, `acclimatization_cold_gain`, `night_penalty`, `build_cost_ic`
+
+**Files and mods:** as for air scenarios: the game folder, then every enabled mod in launcher order;
+a file of the same name replaces the earlier one, an entry of the same name the earlier entry,
+`replace_path = "common/hoi4_loader_equipment_designers"` drops the earlier mods' files, zipped mods
+can't be read. An archetype listed by two designers goes to the later one (logged).
+
+**Checks and messages** (`loader.log`):
+- At start: `equipment_designers: 1 designer(s) for 1 archetype(s) from 1 file(s) ...` and, when the
+  game reads the tank window, `tank_designer_view.gui: 9 custom and 0 fixed slot window(s) before,
+  20 each now`.
+- The first time the game asks about a design: `equipment_designers: small_arms_designer serves
+  infantry_equipment (10 slot(s), 1 fixed_, 11 placed by the definition)`, or why an archetype is
+  skipped: not found, not an archetype, no `module_slots`, no type the tank window serves.
+- A slot that lands on an added window without a position, a position for a slot the archetype
+  doesn't have, a title key without localisation.
+- Problems in the files, with file and line: syntax, unknown keys, values out of range, unknown
+  stat names, an `xp` other than army, navy or air.
+- When `xp` is used: `` `xp` is used: designs pay from the chosen pool; in multiplayer every player
+  needs the loader and these mods``. If a part can't be resolved on a build, that option is logged
+  as ignored and the rest works.
+- Without definitions the feature stays idle: `no designer definitions; the designer windows are
+  left alone` (no hooks, no file patch).
+
+**Multiplayer:** everything but `xp` is UI only: designs are saved with the game's own command, which
+checks only experience and modules, so every machine accepts them, with or without the loader.
+`xp` changes which pool that command pays from, so with it every player needs the loader.
+
+**Saves:** designs are ordinary equipment variants. Without the loader they stay in the save and
+in production; editing them opens the old upgrade window.
+
+**Without the loader:** the definition files are ignored (a folder the game doesn't read); the
+equipment behaves as vanilla does for its type. Guard: `hoi4_loader_feature_equipment_designers`.
+
+**Test mod:** the decision "Unlock the test small arms" (any country, No Step Back) researches a
+`type = infantry` archetype with ten slots and one `fixed_` slot and gives 50 army and 50 navy
+experience (`common/hoi4_loader_equipment_designers/hoi4_loader_test_designer.txt`). Production >
+infantry/artillery: "Test Small Arms" opens the "Small Arms Designer" with eleven slots in two rows,
+its own stats (3 base, 5 combat, no misc), navy experience, and without the "Select Model" and
+historical design buttons; a design costs navy experience. Its modules have no icons (a pink "?").
 
 ## Attention areas (`attention_area`)
 
