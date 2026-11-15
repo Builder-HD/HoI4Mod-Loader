@@ -29,3 +29,5 @@
  EQ_MOD_SLOT_sa_extra_slot_9_TITLE:0 "Kit 9"
  HOI4_LOADER_TEST_GUNS_TAB:0 "Towed guns (hoi4_loader test tab)"
  HOI4_LOADER_TEST_SHIPS_TAB:0 "Submarines and destroyers (hoi4_loader test tab)"
+ hoi4_loader_tabs_hide:0 "Tabs: hide the guns and naval tabs"
+ hoi4_loader_tabs_show:0 "Tabs: show them again"

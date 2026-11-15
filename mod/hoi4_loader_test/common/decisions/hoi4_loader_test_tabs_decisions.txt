@@ -1,0 +1,26 @@
+# Test decisions for hoi4_loader's production_tabs `visible` (MODDING.md "Production tabs", NOTES.md O8).
+# 1. Production: the "Towed guns" tab and the naval tab are there.
+# 2. "Tabs: hide the guns and naval tabs": open the production screen again: both buttons are gone
+#    (the other tabs stay). 3. "Tabs: show them again": both are back.
+hoi4_loader_test_category = {
+	hoi4_loader_tabs_hide = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_production_tabs = yes
+			NOT = { has_country_flag = hoi4_loader_test_hide_tabs }
+		}
+		complete_effect = { set_country_flag = hoi4_loader_test_hide_tabs }
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_tabs_show = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_production_tabs = yes
+			has_country_flag = hoi4_loader_test_hide_tabs
+		}
+		complete_effect = { clr_country_flag = hoi4_loader_test_hide_tabs }
+		ai_will_do = { base = 0 }
+	}
+}

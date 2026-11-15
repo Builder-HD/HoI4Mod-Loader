@@ -1,0 +1,6 @@
+# hoi4_loader test: production_tabs `visible` (MODDING.md "Production tabs", NOTES.md O8). The guns tab
+# and the vanilla naval tab show only while the country has no flag hoi4_loader_test_hide_tabs
+# (decisions "Tabs: hide the guns and naval tabs" / "Tabs: show them again").
+hoi4_loader_test_tabs_visible = {
+	NOT = { has_country_flag = hoi4_loader_test_hide_tabs }
+}

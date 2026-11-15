@@ -7,6 +7,7 @@
 hoi4_loader_test_guns_tab = {
 	button = hoi4_loader_test_guns_button
 	glow = hoi4_loader_test_guns_button_glow
+	visible = hoi4_loader_test_tabs_visible   # a scripted trigger (decisions "Tabs: ..." toggle it)
 	add = { artillery_equipment rocket_artillery_equipment anti_tank_equipment anti_air_equipment }
 }
 infantry = {
@@ -27,4 +28,5 @@ hoi4_loader_test_ships_tab = {
 }
 naval = {
 	remove = { ship_hull_submarine }
+	visible = hoi4_loader_test_tabs_visible   # a vanilla tab hidden by the same trigger
 }
