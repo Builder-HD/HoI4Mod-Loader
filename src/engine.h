@@ -624,13 +624,20 @@ bool HaveProductionTabs();
 // always false for new tabs).
 using PtabMember_t = bool (*)(int tab, const void* archetype, uint64_t types, bool vanilla);
 using PtabFault_t = void (*)(const char* where);  // a contained fault; the game's own tabs from now on
+// The tab's `visible` condition: a scripted trigger template (PtabScriptedTrigger), or null (always shown).
+using PtabCondition_t = const void* (*)(int tab);
 struct PtabNewTab {
     const char* name;    // for messages
     const char* button;  // element names in the production view (glow: null or empty for none)
     const char* glow;
 };
 // changed[i]: vanilla tab i has add / remove (else the game alone lists it). All hooks or none.
-bool HookProductionTabs(const bool changed[4], const PtabNewTab* tabs, int count, PtabMember_t member, PtabFault_t fault);
+bool HookProductionTabs(const bool changed[4], const PtabNewTab* tabs, int count, PtabMember_t member, PtabCondition_t condition,
+                        PtabFault_t fault);
+// Scripted triggers (`visible`): the template of a scripted trigger by name, or null (no such trigger,
+// or HavePtabConditions false). Main thread, after the game loaded its scripted triggers.
+bool HavePtabConditions();
+const void* PtabScriptedTrigger(const char* name);
 const void* PtabArchetypeOf(const void* type);  // the archetype of an equipment type (itself for one)
 // The type mask bit of an equipment type name (`type = { ... }` names), 0 if the game has no such type
 // or the lookup is unavailable (HavePtabTypes false: not found, or its check against the tank tab failed).
@@ -725,5 +732,9 @@ bool SetGlobalFlagValue(int token, short value, short days);
 // and effect. countryTag > 0: ROOT = that country; 0: no scope. name: at most 15 characters.
 // Returns false (and logs) on failure; an exception inside is contained.
 bool FireOnAction(const char* name, int countryTag);
+// Calls fn with a CEventScope whose ROOT and THIS are the country (constructed with seed 0, not
+// through the synced RNG: for UI conditions only, nothing that changes the game). False if the scope
+// functions are unresolved or a fault was contained (then *result is unset).
+bool WithCountryScope(int tag, bool (*fn)(const void* scope, void* ctx), void* ctx, bool* result);
 
 }  // namespace Engine

@@ -80,6 +80,18 @@ int main() {
     Merge(&merged, Parse("guns = { add_types = { anti_air artillery } }", &problems), &problems);
     Check(!merged.empty() && merged[0].addTypes.size() == 3, "types: merged without duplicates");
 
+    // visible: a scripted trigger name, on new and vanilla tabs; first definition wins when merging.
+    problems.clear();
+    tabs = Parse("guns = { button = g visible = guns_visible }\nnaval = { visible = has_navy_tabs }\nbad = { button = b visible = { tag = GER } }\n",
+                 &problems);
+    Check(tabs.size() == 2 && tabs[0].visible == "guns_visible" && tabs[1].visible == "has_navy_tabs", "visible read on new and vanilla tabs");
+    Check(HasProblem(problems, "visible takes the name of a scripted trigger"), "visible with a block reported");
+    std::vector<Tab> vis;
+    Merge(&vis, tabs, &problems);
+    Merge(&vis, Parse("guns = { visible = other_trigger }", &problems), &problems);
+    Check(!vis.empty() && vis[0].visible == "guns_visible" && HasProblem(problems, "visible = other_trigger ignored"),
+          "visible: first definition kept, a different later one reported");
+
     // Several add blocks in one entry append.
     problems.clear();
     tabs = Parse("armor = { add = { a } add = { b } remove = { c } }", &problems);

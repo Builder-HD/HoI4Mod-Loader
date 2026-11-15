@@ -6,12 +6,14 @@
 //   artillery_tab = {
 //       button = artillery_tab_button      # a buttonType the mod adds to countryproductionlineview.gui
 //       glow = artillery_tab_button_glow   # optional iconType, shown while a design of the tab is new
-//       add = { artillery_equipment anti_tank_equipment anti_air_equipment }
+//       visible = my_tab_visible           # optional scripted trigger (player's country); any tab
+//       add = { artillery_equipment }      # archetypes ...
+//       add_types = { anti_tank anti_air } # ... and equipment types (remove / remove_types too)
 //   }
-//   infantry = { remove = { artillery_equipment anti_tank_equipment anti_air_equipment } }
+//   infantry = { remove = { artillery_equipment } remove_types = { anti_tank anti_air } }
 //
-// A design is in a tab when its archetype is in the tab's `add`, or (vanilla tabs) its type matches
-// the tab as in the game; and its archetype is not in the tab's `remove`. Nothing else changes:
+// A design is in a tab by the most specific entry: its archetype in `remove` / `add`, then its types
+// in `remove_types` / `add_types`, then (vanilla tabs) the game's own answer. Nothing else changes:
 // research, can_be_produced and the rest of the game's checks stay; the add-line command doesn't
 // look at the tab, so this is UI only (multiplayer and saves are unaffected).
 #include <windows.h>
@@ -38,6 +40,7 @@ std::vector<size_t> g_newDefs;           // g_defs index per new tab (engine tab
 // Resolved once on the main thread, before each game entry or at an earlier first use there (the
 // equipment database is loaded by then).
 struct Sets {
+    const void* visible = nullptr;  // the scripted trigger template, or null (always shown)
     std::unordered_set<const void*> add, remove;
     uint64_t addTypes = 0, removeTypes = 0;  // type mask bits
 };
@@ -95,6 +98,15 @@ void Resolve() {
         ResolveList(*t, t->remove, "remove", &s.remove);
         s.addTypes = ResolveTypes(*t, t->addTypes, "add_types");
         s.removeTypes = ResolveTypes(*t, t->removeTypes, "remove_types");
+        if (!t->visible.empty()) {
+            if (!Engine::HavePtabConditions())
+                Log("%s: %s: visible is unavailable on this build; the tab always shows", kFeature, t->name.c_str());
+            else if (!(s.visible = Engine::PtabScriptedTrigger(t->visible.c_str())))
+                Log("%s: %s (%s line %d): visible: no scripted trigger %s (common/scripted_triggers); the tab always shows",
+                    kFeature, t->name.c_str(), t->file.c_str(), t->line, t->visible.c_str());
+            else
+                Log("%s: %s: visible while %s", kFeature, t->name.c_str(), t->visible.c_str());
+        }
         Log("%s: %s%s: %zu archetype(s) added, %zu removed; types added 0x%llx, removed 0x%llx", kFeature, t->name.c_str(),
             tab < 4 ? " (vanilla tab)" : "", s.add.size(), s.remove.size(), (unsigned long long)s.addTypes,
             (unsigned long long)s.removeTypes);
@@ -119,6 +131,12 @@ bool Member(int tab, const void* archetype, uint64_t types, bool vanilla) {
     if (types & s.removeTypes) return false;
     if (types & s.addTypes) return true;
     return vanilla;
+}
+
+// The tab's condition (UI thread, after Resolve). Null: always shown.
+const void* Condition(int tab) {
+    if (!g_resolved || tab < 0 || (size_t)tab >= g_sets.size()) return nullptr;
+    return g_sets[(size_t)tab].visible;
 }
 
 void OnFault(const char* where) { FeatureDeactivate(kFeature, (std::string("fault in the ") + where).c_str()); }
@@ -170,7 +188,7 @@ bool ProductionTabsInit() {
     }
     std::vector<Engine::PtabNewTab> tabs;
     for (size_t i : g_newDefs) tabs.push_back({g_defs[i].name.c_str(), g_defs[i].button.c_str(), g_defs[i].glow.c_str()});
-    if (!Engine::HookProductionTabs(changed, tabs.data(), (int)tabs.size(), &Member, &OnFault)) {
+    if (!Engine::HookProductionTabs(changed, tabs.data(), (int)tabs.size(), &Member, &Condition, &OnFault)) {
         Log("%s: hooks could not be queued", kFeature);
         return false;
     }

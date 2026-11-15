@@ -1204,6 +1204,11 @@ SIG(kSigPtabListNaval, "48 89 5C 24 18 48 89 54 24 10 55 56 57 41 54 41 55 41 56
 // masks the tabs and designs use (checked at first use: "armor" is the tank tab's mask). Function start.
 SIG(kSigPtabTypeByName, "48 83 EC 28 48 83 79 18 0F 76 03 48 8B 09 48 8B D1 41 B8 ?? ?? ?? ?? 48 8D 4C 24 30 E8 ?? ?? ?? ?? 8B 4C 24 30 81 F9 ?? ?? ?? ?? 74 09 48 83 C4 28 E9 ?? ?? ?? ?? 33 C0 48 83 C4 28 C3")
 static const size_t kSigPtabTypeDefaultToken = 0x13, kSigPtabTypeDefaultToken2 = 0x27;
+// The trigger parser on a scripted trigger's name (0x14059771c): db = [rip+rel32 at +3] (the
+// CScriptedTriggerTemplateDatabase), ... Find(db, const std::string* name) (E8 at +0x51): the
+// template, or a dummy whose valid byte is 0 (kCodePtabScriptedValid).
+SIG(kSigPtabScriptedTrigger, "4C 8B 3D ?? ?? ?? ?? 4D 8D 66 ?? 41 83 3C 24 00 48 8B D6 74 04 49 8B 56 ?? 0F 57 C0 0F 11 44 24 48 0F 57 C9 F3 0F 7F 4C 24 58 49 C7 C0 FF FF FF FF 0F 1F 00 49 FF C0 42 80 3C 02 00 75 F6 48 8D 4C 24 48 E8 ?? ?? ?? ?? 90 48 8D 54 24 48 49 8B CF E8 ?? ?? ?? ?? 4C 8B F8")
+static const size_t kSigPtabScriptedDbRel = 3, kSigPtabScriptedFindCall = 0x51;
 
 // --- Production tabs (NOTES.md Part O; addresses 1.19.5, same on 1.19.4.2) ------------------------
 // In the setup (SigFindIn 0x100): root = GetRoot(view) (E8 at +3); container = root->vtable[disp32
@@ -1247,6 +1252,14 @@ static const size_t kCodePtabGlowFlags = 4, kCodePtabGlowClear = 5, kCodePtabSho
 CODE(kCodePtabMaskTestLand, "49 8B 86 ?? ?? ?? ?? 48 85 86 ?? ?? ?? ?? 0F 84")
 CODE(kCodePtabMaskTestNaval, "48 8B 87 ?? ?? ?? ?? 48 85 83 ?? ?? ?? ?? 0F 84")
 static const size_t kCodePtabWindowMaskDisp = 3, kCodePtabDesignMaskDisp = 0xa, kCodePtabMaskTestRange = 0x400;
+// After kSigPtabScriptedTrigger's Find (SigFindIn 0x100): template null or its valid byte (disp8 +8)
+// zero: not a scripted trigger. (0x1405977c9)
+CODE(kCodePtabScriptedValid, "4D 85 FF 74 ?? 41 80 7F ?? 00 74 ?? B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 89 44 24 ?? 48 85 C0 74 ?? 49 8B D7 48 8B C8 E8")
+static const size_t kCodePtabScriptedValidDisp = 8;
+// CScriptedTrigger::Evaluate (RTTI .?AVCScriptedTrigger@@ slot 22, 0x14143e120): template = this->[disp8
+// +0xc]; template->vtable[disp8 +0x12](template, scope) (the CTrigger evaluate entry) == this's yes/no.
+CODE(kCodePtabScriptedEval, "40 53 48 83 EC 20 48 8B D9 48 8B 49 ?? 48 8B 01 FF 50 ?? 38 43 ?? 0F 94 C0")
+static const size_t kCodePtabScriptedTemplateDisp = 0xc, kCodePtabScriptedEvalSlot = 0x12, kScriptedTriggerEvalSlot = 22;
 
 #undef CODE
 #undef SIG

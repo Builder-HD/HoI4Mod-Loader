@@ -58,6 +58,13 @@ List_t g_listOrig[2] = {nullptr, nullptr};
 
 // Called.
 using TypeByName_t = uint64_t(__fastcall*)(const EngineString* name);
+using TriggerFind_t = const void*(__fastcall*)(void* db, const EngineString* name);
+using TriggerEval_t = bool(__fastcall*)(const void* trigger, const void* scope);
+void** g_triggerDb = nullptr;  // the CScriptedTriggerTemplateDatabase global
+TriggerFind_t g_triggerFind = nullptr;
+uint32_t g_triggerValid = 0, g_triggerEvalSlot = 0;
+PtabCondition_t g_condition = nullptr;
+volatile LONG g_conditionFaultLogged = 0;
 TypeByName_t g_typeByName = nullptr;
 int g_typesChecked = 0;  // 0 not yet, 1 passed, -1 failed
 Open_t g_open = nullptr;
@@ -256,6 +263,21 @@ bool ResolveAll() {
     if (Rd<uint32_t>(nt, kCodePtabWindowMaskDisp) != g_windowMask || Rd<uint32_t>(lt, kCodePtabDesignMaskDisp) != g_designMask ||
         Rd<uint32_t>(nt, kCodePtabDesignMaskDisp) != g_designMask)
         return Fail("the two lists test different fields");
+    // Optional: scripted triggers (visible): the parser's lookup, its valid test, the evaluate entry.
+    if (uint8_t* st = SigFindUnique("ptab_scripted_trigger", kSigPtabScriptedTrigger)) {
+        uint8_t* v = SigFindIn(st, 0x100, kCodePtabScriptedValid);
+        size_t slots = 0;
+        void** vt = FindVtableByRtti(".?AVCScriptedTrigger@@", &slots);
+        uint8_t* ev = vt && slots > kScriptedTriggerEvalSlot ? (uint8_t*)vt[kScriptedTriggerEvalSlot] : nullptr;
+        if (v && ev && st[kSigPtabScriptedFindCall] == 0xE8 && SigMatchAt(ev, kCodePtabScriptedEval) && ev[kCodePtabScriptedEvalSlot] % 8 == 0) {
+            g_triggerDb = (void**)SigRipTarget(st, kSigPtabScriptedDbRel, kSigPtabScriptedDbRel + 4);
+            g_triggerFind = (TriggerFind_t)SigFollowRel32(st + kSigPtabScriptedFindCall);
+            g_triggerValid = v[kCodePtabScriptedValidDisp];
+            g_triggerEvalSlot = ev[kCodePtabScriptedEvalSlot];
+        } else {
+            Log("production_tabs: the scripted trigger lookup or evaluate has an unexpected shape; `visible` unavailable");
+        }
+    }
     // Optional: type names (add_types / remove_types). Its default token is compared and returned.
     if (uint8_t* tn = SigFindUnique("ptab_type_by_name", kSigPtabTypeByName)) {
         if (Rd<uint32_t>(tn, kSigPtabTypeDefaultToken) == Rd<uint32_t>(tn, kSigPtabTypeDefaultToken2))
@@ -414,11 +436,42 @@ void ApplyState(void* button, void* glow, void* open, int tab, uint64_t vanillaM
 
 bool TryBind(void* view, size_t t, bool atSetup);
 
+bool EvalTrigger(const void* scope, void* trigger) {
+    return ((TriggerEval_t)(*(void***)trigger)[g_triggerEvalSlot / 8])(trigger, scope);
+}
+
+// The tab's `visible` for the player's country: true without a condition, and (logged once) when
+// the evaluation fails.
+bool Visible(int tab, bool* conditioned) {
+    const void* trigger = g_condition && g_triggerEvalSlot ? g_condition(tab) : nullptr;
+    *conditioned = trigger != nullptr;
+    if (!trigger) return true;
+    bool result = true;
+    if (!WithCountryScope(PlayerCountryTag(), &EvalTrigger, (void*)trigger, &result)) {
+        if (!InterlockedExchange(&g_conditionFaultLogged, 1))
+            Log("production_tabs: a tab's visible trigger could not be evaluated; the tab shows");
+        return true;
+    }
+    return result;
+}
+
+// A conditioned tab's button and glow: hidden while its trigger is false. The glow is only hidden
+// here; ApplyState shows it again when a design is new.
+void ApplyVisible(int tab, void* button, void* glow) {
+    bool conditioned = false;
+    bool show = Visible(tab, &conditioned);
+    if (!conditioned) return;
+    SetElementVisible(button, show);
+    if (!show && glow) SetElementVisible(glow, false);
+}
+
 void StatesBody(void* view, void* open) {
     for (int i = 0; i < 4; ++i) {
-        if (!g_changed[i]) continue;
         void* button = Rd<void*>(view, g_vanilla[i].buttonDisp);
-        if (button) ApplyState(button, Rd<void*>(view, g_vanilla[i].glowDisp), open, i, g_vanilla[i].stateMask, g_vanilla[i].stateMask);
+        if (!button) continue;
+        void* glow = Rd<void*>(view, g_vanilla[i].glowDisp);
+        if (g_changed[i]) ApplyState(button, glow, open, i, g_vanilla[i].stateMask, g_vanilla[i].stateMask);
+        ApplyVisible(i, button, glow);
     }
     if (view != g_view) return;
     for (size_t t = 0; t < g_tabs.size(); ++t) {
@@ -429,6 +482,7 @@ void StatesBody(void* view, void* open) {
         bool naval = NewTabNaval(4 + (int)t, &types);
         // The factory check of the land/air tabs (military factories) or of the naval tab (dockyards).
         ApplyState(nt.buttonEl, nt.glowEl, open, 4 + (int)t, 0, g_vanilla[naval ? 3 : 1].stateMask);
+        ApplyVisible(4 + (int)t, nt.buttonEl, nt.glowEl);
     }
 }
 void StatesSafe(void* view, void* open) {
@@ -593,12 +647,43 @@ uint64_t PtabTypeMask(const char* name) {
     return ok && !(m >> kOwnBits) ? m : 0;
 }
 
+namespace {
+const void* FindTrigger(const char* name) {
+    void* db = *g_triggerDb;
+    if (!db) return nullptr;
+    EngineString s;
+    ConstructEngineString(&s, name, strlen(name));
+    const void* t = g_triggerFind(db, &s);
+    FreeEngineString(&s);
+    return t && Rd<uint8_t>(t, g_triggerValid) ? t : nullptr;
+}
+void LogFindFault() {
+    Log("production_tabs: fault looking up a scripted trigger (exception 0x%08lX at %s)", g_faultCode, DescribeAddress(g_faultAt).c_str());
+}
+const void* FindTriggerSafe(const char* name) {
+    __try {
+        return FindTrigger(name);
+    } __except (FaultFilter(GetExceptionInformation())) {
+        LogFindFault();
+        return nullptr;
+    }
+}
+}  // namespace
+
+bool HavePtabConditions() { return g_triggerDb && g_triggerFind && g_triggerValid && g_triggerEvalSlot; }
+
+const void* PtabScriptedTrigger(const char* name) {
+    if (!name || !*name || !HavePtabConditions()) return nullptr;
+    return FindTriggerSafe(name);
+}
+
 const void* PtabArchetypeOf(const void* type) {
     const void* a = type && TypeArchetypeOffset() ? Rd<const void*>(type, TypeArchetypeOffset()) : nullptr;
     return a ? a : type;
 }
 
-bool HookProductionTabs(const bool changed[4], const PtabNewTab* tabs, int count, PtabMember_t member, PtabFault_t fault) {
+bool HookProductionTabs(const bool changed[4], const PtabNewTab* tabs, int count, PtabMember_t member, PtabCondition_t condition,
+                        PtabFault_t fault) {
     if (!HaveProductionTabs() || !member || count < 0 || count > 63 - kOwnBits + 1) return false;
     for (int i = 0; i < 4; ++i) g_changed[i] = changed[i];
     g_tabs.clear();
@@ -610,6 +695,7 @@ bool HookProductionTabs(const bool changed[4], const PtabNewTab* tabs, int count
         g_tabs.push_back(nt);
     }
     g_member = member;
+    g_condition = condition;
     g_fault = fault;
     struct Hook {
         uint8_t* target;

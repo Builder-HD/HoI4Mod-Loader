@@ -808,6 +808,19 @@ def check_production_tabs(img, codes, text_va, text):
     ok = bool(tn) and u32(tn + k['kSigPtabTypeDefaultToken']) == u32(tn + k['kSigPtabTypeDefaultToken2'])
     results.append(('kSigPtabTypeByName (default token 0x%x)' % (u32(tn + k['kSigPtabTypeDefaultToken']) if tn else -1), ok,
                     hex(tn or 0)))
+    # visible: the parser's scripted trigger lookup, its valid test, CScriptedTrigger::Evaluate (RTTI slot 22).
+    st = one('kSigPtabScriptedTrigger')
+    v = find_in(img, st, 0x100, codes['kCodePtabScriptedValid']) if st else None
+    sc = img.vtable('.?AVCScriptedTrigger@@')
+    slot = k['kScriptedTriggerEvalSlot']
+    ev = sc[1][slot] if sc and len(sc[1]) > slot else 0
+    call = st + k['kSigPtabScriptedFindCall'] if st else 0
+    ok = bool(st and v and ev) and img.match_at(ev, codes['kCodePtabScriptedEval']) and \
+        u8(ev + k['kCodePtabScriptedEvalSlot']) % 8 == 0 and u8(call) == 0xE8 and img.is_code(rel32(img, call))
+    results.append(('kSigPtabScriptedTrigger / Valid / Eval (find 0x%x, valid +0x%x, template +0x%x, eval slot 0x%x)' %
+                    (rel32(img, call) if st else 0, u8(v + k['kCodePtabScriptedValidDisp']) if v else -1,
+                     u8(ev + k['kCodePtabScriptedTemplateDisp']) if ok else -1, u8(ev + k['kCodePtabScriptedEvalSlot']) if ok else -1),
+                    ok, hex(st or 0)))
     return results
 
 

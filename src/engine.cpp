@@ -385,6 +385,21 @@ bool FireOnActionRaw(void* db, const EngineString* name, int tag, DWORD* code) {
     }
 }
 
+// A country scope built without SyncedRandom (seed 0): for UI conditions, which must not touch the
+// multiplayer-checked RNG. No C++ objects, so SEH can contain a fault.
+bool WithCountryScopeRaw(int tag, bool (*fn)(const void* scope, void* ctx), void* ctx, bool* result) {
+    alignas(16) uint8_t scope[kEventScopeBuffer];
+    __try {
+        g_scopeCtor(scope, 0);
+        g_scopeSetCountry(scope, &tag, true);
+        *result = fn(scope, ctx);
+        g_scopeDtor(scope);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 bool ShortEngineString(const char* s, EngineString* out) {
     size_t n = strlen(s);
     if (n > 15) return false;
@@ -739,6 +754,11 @@ bool OnActionDefined(const char* name) {
         return false;
     }
     return defined;
+}
+
+bool WithCountryScope(int tag, bool (*fn)(const void* scope, void* ctx), void* ctx, bool* result) {
+    if (!g_scopeCtor || !g_scopeDtor || !g_scopeSetCountry || tag <= 0 || !fn || !result) return false;
+    return WithCountryScopeRaw(tag, fn, ctx, result);
 }
 
 bool FireOnAction(const char* name, int countryTag) {

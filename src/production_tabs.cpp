@@ -71,6 +71,14 @@ void ParseFile(const std::string& text, const std::string& fileName, std::vector
                 ok = ReadList(c, fileName, &t.add, &why);
             } else if (EqualsNoCase(c.key, "remove")) {
                 ok = ReadList(c, fileName, &t.remove, &why);
+            } else if (EqualsNoCase(c.key, "visible")) {
+                if (c.block || c.value.empty()) {
+                    why = "visible takes the name of a scripted trigger: visible = my_tab_visible (write the trigger in "
+                          "common/scripted_triggers)";
+                    ok = false;
+                } else {
+                    t.visible = c.value;
+                }
             } else if (EqualsNoCase(c.key, "add_types")) {
                 ok = ReadList(c, fileName, &t.addTypes, &why);
             } else if (EqualsNoCase(c.key, "remove_types")) {
@@ -86,7 +94,7 @@ void ParseFile(const std::string& text, const std::string& fileName, std::vector
             } else if (isGlow) {
                 t.glow = c.value;
             } else {
-                why = "unknown key '" + Label(c) + "' (allowed: add, remove, add_types, remove_types" +
+                why = "unknown key '" + Label(c) + "' (allowed: add, remove, add_types, remove_types, visible" +
                       (t.vanilla >= 0 ? "" : ", button, glow") + ")";
                 ok = false;
             }
@@ -117,6 +125,7 @@ void Merge(std::vector<Tab>* all, const std::vector<Tab>& later, std::vector<Pro
             copy.vanilla = t.vanilla;
             copy.button = t.button;
             copy.glow = t.glow;
+            copy.visible = t.visible;
             copy.file = t.file;
             copy.line = t.line;
             AddNew(&copy.add, t.add);
@@ -137,6 +146,7 @@ void Merge(std::vector<Tab>* all, const std::vector<Tab>& later, std::vector<Pro
         };
         keep(&old->button, t.button, "button");
         keep(&old->glow, t.glow, "glow");
+        keep(&old->visible, t.visible, "visible");
         AddNew(&old->add, t.add);
         AddNew(&old->remove, t.remove);
         AddNew(&old->addTypes, t.addTypes);

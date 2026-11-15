@@ -25,6 +25,7 @@ struct Tab {
     std::string name;  // the entry's key
     int vanilla = -1;  // a VanillaTab, or -1 for a new tab
     std::string button, glow;  // new tabs: element names in the production view (glow optional)
+    std::string visible;       // optional: a scripted trigger; the button shows while it is true
     std::vector<Archetype> add, remove;            // archetypes
     std::vector<Archetype> addTypes, removeTypes;  // equipment types (`type = ...` names), same entries
     std::string file;  // where it was first defined
