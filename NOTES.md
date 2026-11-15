@@ -6829,3 +6829,15 @@ air = { enabled = my_has_air_tabs }   # the vanilla tabs too
 - Unknown trigger name, merging, unavailable signature, faults: as `visible` (logged; the tab stays
   enabled; first definition wins; the feature's fault path).
 - Engine API: `PtabCondition_t` gets the condition kind (`kPtabVisible`, `kPtabEnabled`).
+
+**Implementation and in-game test** (2026-11-15):
+- `ConditionHolds(tab, kind)` evaluates either condition (O8's path); `ApplyConditions` runs after
+  the button's state: `visible` first, then, for a shown button that isn't the open one, a false
+  `enabled` calls the disable slot, sets frame 3 and hides the glow. The new tabs' click handler
+  refuses a disabled tab unless its button is the open one (kept from the last state update), so
+  an open tab still closes.
+- In game (1.19.5, Germany 1936, combined test build): `enabled while hoi4_loader_test_tabs_enabled`
+  for the air tab and the ship tab; all six buttons enabled. "Tabs: lock the ship and air tabs":
+  reopened, both show the disabled look, the others are unchanged; clicking either opens nothing.
+  "Tabs: unlock them": both enabled again, the ship tab opens the dockyard list. No fault, no ERROR.
+- Offline: 40 unit checks (3 new), smoke OVERALL PASSED; no new signatures.
