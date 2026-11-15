@@ -7144,3 +7144,44 @@ province_has_terrain = { province = 1234 terrain = marsh }    # the current terr
    also switch them?
 3. Extras: a `state = 42` form (every land province of a state) and a trigger "the province's
    terrain was changed" — wanted?
+
+## P5: design (owner's decisions, 2026-11-15)
+
+1. **The map's look stays**; a visible change is a separate feature later.
+2. **Running battles switch at once**: the battles in the province get the new terrain too (their
+   copy at `+0x48`), as it would be in reality.
+3. **No "every land province of a state" form; instead a terrain filter, `if_terrain`**, and a state
+   trigger. The states are picked by vanilla's own state scopes (`42 = { }`,
+   `every_owned_state = { limit = { ... } }`, `random_state`, ...), the provinces in them by their
+   current terrain. No "changed" trigger. (`from` was dropped as a name: `FROM` is a vanilla scope
+   keyword.)
+
+```
+# effects
+set_province_terrain = { province = 1234 terrain = marsh }              # one or several provinces
+set_province_terrain = { province = 1234 if_terrain = plains terrain = marsh }   # only if plains now
+42 = { set_province_terrain = { if_terrain = plains terrain = marsh } } # state scope: if_terrain required
+set_province_terrain = { state = 42 if_terrain = plains if_terrain = forest terrain = marsh }
+reset_province_terrain = { province = 1234 }   # back to definition.csv's terrain
+reset_province_terrain = { state = 42 }        # every changed province of the state (or the state scope)
+
+# triggers (with the guard, as every native trigger)
+hoi4_loader_feature_province_terrain = yes
+province_has_terrain = { province = 1234 terrain = marsh }
+state_has_terrain = { terrain = plains }       # state scope or state = 42: any province of it has it
+
+# e.g. every owned state with plains turns them into marsh
+every_owned_state = {
+    limit = { hoi4_loader_feature_province_terrain = yes state_has_terrain = { terrain = plains } }
+    set_province_terrain = { if_terrain = plains terrain = marsh }
+}
+```
+- **Which provinces:** `province` (repeatable) or the state (`state = N`, else the state scope).
+  Both given: the provinces only. A state without `if_terrain` is refused (logged; nothing
+  changes), so a state is never switched wholesale by accident. `if_terrain` (repeatable) filters
+  either form by the province's current terrain.
+- **`terrain`:** a land category from `common/terrain` (vanilla's or a mod's). Water categories and
+  water provinces are refused; a province already of that terrain is left as it is.
+- Everything else as P4: the change inside the effect (pointer, state and country masks, supply
+  dirty, and now the province's battles), global flags `hoi4_ptr_<province>_<category>` as storage
+  applied at load, multiplayer needs the loader everywhere, saves vanilla-safe, fail safe.
