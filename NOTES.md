@@ -6494,9 +6494,11 @@ game: the title stays on every reopening.
 4. `loader.log`: no ERROR, no fault.
 
 **Not tested:** multiplayer with `xp`, `xp = air`.
+
 # Part O: production tabs (`production_tabs`, investigation)
 
-Branch `feature/production-tabs` (from `main`). Investigation only, nothing implemented.
+Branch `feature/production-tabs` (from `feature/equipment-designers`, for its shared definition
+reader). Investigation only, nothing implemented.
 Owner's request (2026-11-15): choose which "add production line" tab lists an equipment, and let
 mods add their own tabs (e.g. one tab for artillery, anti-tank and anti-air guns, to declutter the
 infantry tab). Only what the game hard-codes belongs in the loader. Addresses are from vanilla
@@ -6570,49 +6572,66 @@ infantry tab). Only what the game hard-codes belongs in the loader. Addresses ar
 | exactly four tabs (four names bound in setup) | whether something can be produced (`can_be_produced`, `is_buildable`) |
 | button enabled / glow by the same masks | existing-line grouping and filters (`interface_category`) |
 
-## O4: proposal (for the owner's approval)
+## O4: first proposal (2026-11-15, replaced by O5)
 
-One file kind, `common/hoi4_loader_production_tabs/*.txt`, engine-tier feature `production_tabs`:
+A file `common/hoi4_loader_production_tabs/*.txt` with vanilla tab keys (`infantry`, `armor`,
+`air`, `naval`) and new tabs (`button`, `glow`, `equipment = { archetypes }`); a listed archetype
+would **move** (show only in that tab). Owner: the file and the shape are fine, but a fixed "move"
+is a policy for one use case; the loader is general purpose, so every behaviour has to be the
+mod's explicit choice. `types = { ... }` later; archetypes first.
+
+## O5: design (owner's decisions, 2026-11-15)
+
+**Open points of O4, resolved:**
+- `FUN_141e3d660` is the window's "available MIOs" counter (`INDUSTRIAL_ORG_AVAILABLE_MIOS`,
+  window `+0x1170`): MIOs whose equipment types meet the window's mask. It keeps counting by type.
+- The toggle (`FUN_141e3d120`): a click closes the window when it is open with the same mask. A
+  new tab's mask is its equipment's mask union plus one bit of its own (bits 63 down, never an
+  equipment type), so tabs never share a mask, and the MIO counter and the ship filters
+  (`FUN_141e3c410`) still see the real types.
+
+**Syntax** (`common/hoi4_loader_production_tabs/*.txt`, engine-tier feature `production_tabs`):
 ```
-# Put equipment into a vanilla tab: infantry | armor | air | naval
-infantry = {
-    equipment = { my_field_gun }         # archetypes; their variants and duplicate_archetypes copies follow
-}
-
-# A new tab: the mod adds the button to countryproductionlineview.gui (vanilla gui modding)
+# The vanilla tabs are infantry | armor | air | naval; any other name is a new tab.
 artillery_tab = {
-    button = artillery_tab_button        # required: a buttonType next to the vanilla ones
-    glow = artillery_tab_button_glow     # optional iconType, lit while a new design is unseen
-    equipment = { artillery_equipment anti_tank_equipment anti_air_equipment }
+    button = artillery_tab_button        # required for a new tab: a buttonType in the production view
+    glow = artillery_tab_button_glow     # optional iconType, shown while a design of the tab is new
+    add = { artillery_equipment anti_tank_equipment anti_air_equipment }
+}
+infantry = {
+    remove = { artillery_equipment anti_tank_equipment anti_air_equipment }
 }
 ```
-- **Moves, doesn't copy:** a listed archetype shows only in its tab, so the vanilla tab gets
-  shorter. An archetype in two tabs: the second is logged and skipped.
-- **Land/air vs naval:** a tab is naval when its equipment is (naval type bits), and uses the
-  dockyard window; mixing, or moving across (a ship into `infantry`, a gun into `naval`), is logged
-  and skipped.
-- **Vanilla rules stay:** research, `can_be_produced`, outdated filter, modules, the designer button
-  on the entry. Button enabled/glow/selected like the vanilla ones (and the vanilla buttons stop
-  counting moved-out equipment).
-- **Changing a line's equipment** lists that equipment's tab (the loader's tab if moved).
-- **Fail safe:** a missing button: logged, that tab off (its equipment stays where the game puts it).
-  Any pattern mismatch: feature off, vanilla tabs.
-- **Not in it:** the existing-lines filters (`interface_category`, vanilla); button looks (gui).
-  A `types = { ... }` selector instead of archetypes: later, if wanted (the name-to-bit table is not
-  found yet; archetypes cover every case).
-- **Space:** the vanilla row has room for one more button at x = 265 (between air and naval).
+- **A design is in a tab** when its archetype is in the tab's `add`, or (vanilla tabs) its type
+  matches the tab as in vanilla; and its archetype is not in the tab's `remove`. `remove` wins.
+  Nothing moves by itself: copy = `add`, move = `add` here plus `remove` there.
+- **Archetypes by exact name.** `duplicate_archetypes` copies are archetypes of their own (vanilla's
+  `light_tank_destroyer_chassis`, ...): listed separately. An archetype may be in any number of tabs.
+- **Merging:** the same tab in several files or mods merges its `add` / `remove`; for `button` and
+  `glow` the first definition (load order) wins, a different later one is logged.
+- **The button** is the mod's, in `countryproductionlineview.gui` (sprite, position, `pdx_tooltip`,
+  as for the vanilla ones); found by name anywhere in the production view. Missing: logged, the tab
+  off. The vanilla row has room for one more button (x = 265).
+- **Window:** a new tab whose archetypes are ships opens the dockyard list, otherwise the military
+  list. An archetype of the other kind (a ship in a land tab, a gun in `naval`): logged, skipped.
+- **Button state, every tab** (vanilla ones now by the same membership): enabled when the country
+  has a design of the tab, glow while one is new, "selected" while open; off without military
+  factories (dockyards for naval), as vanilla.
+- **Stays vanilla:** research, `can_be_produced`, `is_buildable`, outdated filter, the designer
+  button on each entry, the list a line's equipment button opens (by the line's types), existing
+  lines' grouping (`interface_category`). UI only: the add-line command doesn't check the tab.
+- **Later, if wanted:** `types = { ... }` next to the archetype lists.
 
-**Hooks (plan):** the list builders (`FUN_141e3c020`, `FUN_141e3cd40`): call the original with a
-filtered copy of the variant array for the open tab (the original keeps every other check); the
-four click thunks' target `FUN_1417d6e10` stays the entry for vanilla tabs, new tabs call it with
-the union of their equipment's masks (so `FUN_141e3d660`'s entries keep working by type) and the
-loader remembers which tab is open; the button-state updater (`FUN_1417d66b0`, post) for new
-buttons and `FUN_1417d8cc0` for moved equipment. Signatures for the four thunks, the two list
-builders and the updater (unique shapes on 1.19.5 and 1.19.4.2).
-
-**Open before code:** what `FUN_141e3d660`'s entries are (licences or market contracts?) and
-whether they should follow a new tab; whether the open-tab toggle (`FUN_141e3d120`, compares the
-mask) needs the loader's tab id when two tabs have the same mask union.
-
-**Supersedes** the `production_tab` key planned for `equipment_designers` (designer branch, N16):
-one place for all equipment, modular or not.
+**Hooks:**
+1. `FUN_1417d8f10` (view setup, post): find each new tab's button and glow by name, bind the click
+   (`CButtonWrapper`).
+2. Click: `FUN_1417d6e10(view, tab mask, naval, window, button)`, as the vanilla thunks do.
+3. `FUN_141e3c020` / `FUN_141e3cd40` (the land/air and naval list builders): when the window's mask
+   is a tab's (vanilla or new), call the original with a filtered copy of the variant array (the
+   tab's members) and the window's mask set to all bits for that call; any other mask (a line's
+   equipment button) runs unchanged.
+4. `FUN_1417d8cc0` (one vanilla button's state): replaced by the membership version when vanilla
+   tabs have `add`/`remove`; `FUN_1417d66b0` (all buttons, post): the new buttons' state.
+- Patterns: the four click thunks (their masks give the vanilla tab table), the two list builders
+  (mask test shape), the button-state functions, the setup (button name `lea`s). Unique on 1.19.5
+  and 1.19.4.2.
