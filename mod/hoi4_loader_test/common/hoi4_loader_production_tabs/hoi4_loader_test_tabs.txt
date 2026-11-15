@@ -15,3 +15,12 @@ infantry = {
 armor = {
 	add = { hoi4_loader_test_small_arms }
 }
+# A new tab of ships (it opens the dockyard list): submarines move out of the naval tab, destroyers
+# are copied. Its button: hoi4_loader_test_ships_button (no glow).
+hoi4_loader_test_ships_tab = {
+	button = hoi4_loader_test_ships_button
+	add = { ship_hull_submarine ship_hull_light }
+}
+naval = {
+	remove = { ship_hull_submarine }
+}
