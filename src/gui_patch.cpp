@@ -102,10 +102,10 @@ std::string PatchCountryStateViewGui(const std::string& original) {
     return changed ? out : std::string();
 }
 
-// tank_designer_view.gui (equipment_designers, NOTES.md N9): the engine makes one slot window per
+// The designer view GUIs (equipment_designers, NOTES.md N9): the engine makes one slot window per
 // positionType pos_custom_module_slot_window_N / pos_fixed_module_slot_window_N, N = 0, 1, ... up to
 // the first missing one. Missing ones are added after the last existing one, at window 0's position.
-std::string PatchTankDesignerViewGui(const std::string& original, int maxWindows, int* customBefore, int* fixedBefore) {
+std::string PatchDesignerViewGui(const std::string& original, int maxWindows, int* customBefore, int* fixedBefore) {
     *customBefore = *fixedBefore = 0;
     std::vector<Tok> t = Tokenize(original);
     std::vector<long> partner(t.size(), -1);  // '{' -> its '}'

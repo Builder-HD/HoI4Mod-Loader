@@ -4,15 +4,15 @@
 //   small_arms_designer = {
 //       archetypes = { infantry_equipment }   # archetypes with module_slots; their type must be one
 //                                              # the tank designer window serves (e.g. infantry)
-//       window = land                          # optional; only land for now
+//       window = land                          # optional: land (tank window), air (plane), naval (ship)
 //       title = SMALL_ARMS_DESIGNER_TITLE      # optional loc key instead of "Tank Designer"
 //       hide_roles = yes                       # optional (default): hide the tank role dropdown
 //       slots = { small_arms_slot = { x = 1 y = 1 } }   # optional slot window positions
 //   }
 //
 // The game opens the old upgrade window for modular equipment without a designer. For a listed
-// archetype the loader lets the game open its tank designer window instead (the archetype still
-// needs its interface/equipmentdesigner layout, and No Step Back). The archetype keeps its real
+// archetype the loader lets the game open the designer window its type routes to (the archetype
+// still needs its interface/equipmentdesigner layout and the window's DLC). The archetype keeps its real
 // type, which decides the production tab, the XP the design costs and how it is saved, all as the
 // game does it. UI only: designs are saved by the game's own command, so multiplayer and saves are
 // unaffected. The exception is the optional `xp`: it changes which pool that command pays from, so
@@ -49,8 +49,17 @@ std::vector<bool> g_titleTried;
 // Per definition and panel: the stat rows as the game's arrays hold them ({int id; int8 kind}).
 std::vector<std::vector<uint64_t>> g_stats[Eqd::kStatPanels];
 
-// Slot windows the GUI file had before the loader's patch: windows past these are the loader's.
-volatile LONG g_customBefore = -1, g_fixedBefore = -1;
+// Per window kind (ship, tank, plane): whether a definition uses it, and the slot windows its GUI
+// file had before the loader's patch (windows past these are the loader's; -1: not patched).
+bool g_kindUsed[3] = {false, false, false};
+volatile LONG g_customBefore[3] = {-1, -1, -1}, g_fixedBefore[3] = {-1, -1, -1};
+const wchar_t* const kViewGui[3] = {L"interface/equipmentdesignerview.gui", L"interface/tank_designer_view.gui",
+                                    L"interface/plane_designer_view.gui"};
+const char* const kWindowName[3] = {"ship", "tank", "plane"};
+
+int KindOf(const Eqd::Designer& d) {
+    return d.window == "naval" ? Engine::kDesignerShip : d.window == "air" ? Engine::kDesignerPlane : Engine::kDesignerTank;
+}
 
 // Views whose roles or slot positions the loader changed (at most the three designer windows),
 // with the listed archetype shown last.
@@ -118,16 +127,19 @@ void ResolveTypes() {
             Log("%s: %s: archetype %s has no module_slots; skipped", kFeature, d.name.c_str(), e.first.c_str());
             continue;
         }
-        if (!Engine::DesignerLandType(type)) {
-            Log("%s: %s: archetype %s has no type the land designer serves (add e.g. infantry to its type, as towed "
-                "artillery has); skipped",
-                kFeature, d.name.c_str(), e.first.c_str());
+        int kind = KindOf(d), routed = Engine::DesignerWindowOf(type);
+        if (routed != kind) {
+            static const char* const kHint[3] = {"a naval type such as convoy or support_ship",
+                                                 "a land type such as infantry, as towed artillery has",
+                                                 "an air type such as air_transport, and no land or naval type"};
+            Log("%s: %s: the game sends archetype %s to the %s window, not the %s window (its type needs %s); skipped", kFeature,
+                d.name.c_str(), e.first.c_str(), routed >= 0 ? kWindowName[routed] : "no designer", kWindowName[kind], kHint[kind]);
             continue;
         }
         g_byType[type] = e.second;
         served[e.second] = true;
         int custom = 0, fixed = 0, placed = 0;
-        LONG before[2] = {g_customBefore, g_fixedBefore};
+        LONG before[2] = {g_customBefore[kind], g_fixedBefore[kind]};
         for (int i = 0; i < slots; ++i) {
             const char* name = Engine::TypeSlotName(type, i);
             bool isFixed = StartsWithFixed(name);
@@ -147,10 +159,13 @@ void ResolveTypes() {
         if (custom > Eqd::kMaxSlotWindows || fixed > Eqd::kMaxSlotWindows)
             Log("%s: %s: archetype %s has more slots than the designer has windows (%d plus %d fixed_); the rest don't show",
                 kFeature, d.name.c_str(), e.first.c_str(), Eqd::kMaxSlotWindows, Eqd::kMaxSlotWindows);
-        Log("%s: %s serves %s (%d slot(s), %d fixed_, %d placed by the definition)", kFeature, d.name.c_str(), e.first.c_str(),
-            custom, fixed, placed);
+        Log("%s: %s serves %s in the %s window (%d slot(s), %d fixed_, %d placed by the definition%s)", kFeature, d.name.c_str(),
+            e.first.c_str(), kWindowName[kind], custom, fixed, placed, Engine::DesignerDesignable(type) ? "; the game designs it anyway" : "");
     }
-    if (!Engine::TankDesignerUnlocked()) Log("%s: the tank designer is not unlocked (No Step Back); designs open the old window", kFeature);
+    static const char* const kDlc[3] = {"Man the Guns", "No Step Back", "By Blood Alone"};
+    for (int k = 0; k < 3; ++k)
+        if (g_kindUsed[k] && !Engine::DesignerWindowUnlocked(k))
+            Log("%s: the %s designer is not unlocked (%s); its designs open the old window", kFeature, kWindowName[k], kDlc[k]);
 }
 
 // Main thread only.
@@ -172,10 +187,19 @@ const Eqd::Designer* DesignerOf(const void* type) {
     return it == g_byType.end() ? nullptr : &g_defs[it->second];
 }
 
-const void* Find(const void* type) { return DesignerOf(type); }
+int Find(const void* type) {
+    const Eqd::Designer* d = DesignerOf(type);
+    return d ? KindOf(*d) : -1;
+}
 
-const uint64_t* StatsFor(const void* archetype, int panel, int* count) {
-    const Eqd::Designer* d = DesignerOf(archetype);
+// The listed designer of an archetype shown in a window of this kind (null: the game's own look).
+const Eqd::Designer* DesignerIn(int kind, const void* archetype) {
+    const Eqd::Designer* d = kind >= 0 ? DesignerOf(archetype) : nullptr;
+    return d && KindOf(*d) == kind ? d : nullptr;
+}
+
+const uint64_t* StatsFor(int kind, const void* archetype, int panel, int* count) {
+    const Eqd::Designer* d = DesignerIn(kind, archetype);
     if (!d || panel < 0 || panel >= Eqd::kStatPanels || !d->hasStats[panel]) return nullptr;
     const std::vector<uint64_t>& v = g_stats[panel][(size_t)(d - &g_defs[0])];
     static const uint64_t kNone = 0;
@@ -209,7 +233,7 @@ void HideElements(void* view, const Eqd::Designer& d, Touched* t) {
             for (const std::string& s : logged) seen = seen || s == key;
             if (!seen) {
                 logged.push_back(key);
-                Log("%s: %s: the tank window has no element %s to hide", kFeature, d.name.c_str(), name.c_str());
+                Log("%s: %s: the %s window has no element %s to hide", kFeature, d.name.c_str(), kWindowName[KindOf(d)], name.c_str());
             }
             continue;
         }
@@ -231,8 +255,7 @@ const EngineString* TitleOf(const Eqd::Designer& d) {
 }
 
 void Opened(void* view, const void* archetype) {
-    if (!Engine::IsTankDesigner(view)) return;
-    const Eqd::Designer* d = DesignerOf(archetype);
+    const Eqd::Designer* d = DesignerIn(Engine::DesignerKind(view), archetype);
     if (d && !d->title.empty())
         if (const EngineString* text = TitleOf(*d)) Engine::DesignerSetTitle(view, text);
 }
@@ -245,15 +268,16 @@ void ResetGroup(void* view, bool fixed) {
 
 // The window updated its buttons: hide the listed design's elements again.
 void AfterButtons(void* view, const void* archetype) {
-    if (!Engine::IsTankDesigner(view) || !archetype) return;
-    const Eqd::Designer* d = DesignerOf(archetype);
+    if (!archetype) return;
+    const Eqd::Designer* d = DesignerIn(Engine::DesignerKind(view), archetype);
     Touched* t = d ? TouchedOf(view, false) : nullptr;
     if (t && t->archetype == archetype) HideElements(view, *d, t);
 }
 
 void Refreshed(void* view, const void* archetype) {
-    if (!Engine::IsTankDesigner(view) || !archetype) return;
-    const Eqd::Designer* d = DesignerOf(archetype);
+    int kind = Engine::DesignerKind(view);
+    if (kind < 0 || !g_kindUsed[kind] || !archetype) return;  // windows no definition uses keep the game's look
+    const Eqd::Designer* d = DesignerIn(kind, archetype);
     int xp = d ? XpFor(archetype) : -1;
     Engine::DesignerSetShownXp(view, xp);
     if (d) {
@@ -293,7 +317,7 @@ void Refreshed(void* view, const void* archetype) {
     }
     // Every other design sees the GUI file's own windows (locked where unused, as vanilla draws
     // them); the windows the loader added stay hidden (vanilla dropped slots beyond its windows).
-    LONG before[2] = {g_customBefore, g_fixedBefore};
+    LONG before[2] = {g_customBefore[kind], g_fixedBefore[kind]};
     for (int g = 0; g < 2; ++g) {
         int n = Engine::DesignerSlotWindows(view, g == 1);
         int own = before[g] >= 0 ? (int)before[g] : n;
@@ -303,13 +327,14 @@ void Refreshed(void* view, const void* archetype) {
 
 void OnFault(const char* where) { FeatureDeactivate(kFeature, (std::string("fault in the ") + where).c_str()); }
 
+template <int K>
 std::string PatchGui(const std::string& original) {
     int custom = 0, fixed = 0;
-    std::string out = Engine::PatchTankDesignerViewGui(original, Eqd::kMaxSlotWindows, &custom, &fixed);
-    InterlockedExchange(&g_customBefore, custom);
-    InterlockedExchange(&g_fixedBefore, fixed);
+    std::string out = Engine::PatchDesignerViewGui(original, Eqd::kMaxSlotWindows, &custom, &fixed);
+    InterlockedExchange(&g_customBefore[K], custom);
+    InterlockedExchange(&g_fixedBefore[K], fixed);
     if (!out.empty())
-        Log("%s: tank_designer_view.gui: %d custom and %d fixed slot window(s) before, %d each now", kFeature, custom, fixed,
+        Log("%s: %ls: %d custom and %d fixed slot window(s) before, %d each now", kFeature, kViewGui[K], custom, fixed,
             Eqd::kMaxSlotWindows);
     return out;
 }
@@ -329,15 +354,11 @@ void LoadDefinitions() {
         Eqd::ParseFile(text, f.shown, &defs, &problems);
         Eqd::Merge(&g_defs, defs);
     }
-    std::vector<Eqd::Designer> land;
-    for (Eqd::Designer& d : g_defs) {
-        if (d.window != "land") {
-            problems.push_back({d.file, d.line, d.name + ": window = " + d.window + " is not supported yet (only land); skipped"});
-            continue;
-        }
-        land.push_back(std::move(d));
+    for (const Eqd::Designer& d : g_defs) {
+        g_kindUsed[KindOf(d)] = true;
+        if (!d.hideRoles && KindOf(d) != Engine::kDesignerTank)
+            problems.push_back({d.file, d.line, d.name + ": hide_roles applies to the land window only (the others have no role dropdown)"});
     }
-    g_defs.swap(land);
     g_byName = Eqd::ByArchetype(g_defs, &problems);
     for (const Eqd::Problem& p : problems) Log("%s: %s line %d: %s", kFeature, p.file.c_str(), p.line, p.message.c_str());
     g_titles.assign(g_defs.size(), nullptr);
@@ -378,7 +399,9 @@ bool EquipmentDesignersInit() {
         Log("%s: `xp` is used: designs pay from the chosen pool; in multiplayer every player needs the loader and these mods",
             kFeature);
     OnGameEntering(&ResolveBeforeEntry);
-    if (!register_file_patch(L"interface/tank_designer_view.gui", &PatchGui))
-        Log("%s: tank_designer_view.gui patch could not be registered; only the GUI's own slot windows exist", kFeature);
+    std::string (*const patches[3])(const std::string&) = {&PatchGui<0>, &PatchGui<1>, &PatchGui<2>};
+    for (int k = 0; k < 3; ++k)
+        if (g_kindUsed[k] && !register_file_patch(kViewGui[k], patches[k]))
+            Log("%s: %ls patch could not be registered; only the GUI's own slot windows exist", kFeature, kViewGui[k]);
     return true;
 }

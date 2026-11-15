@@ -9,6 +9,14 @@
 # 3. Save a design (navy XP is paid, army XP unchanged) and produce it; open a tank design: "Tank
 #    Designer", the role dropdown, the buttons, the tank stats, army experience and vanilla's slot
 #    places are back.
+# 4. The small arms window shows the mod's own background ("small arms workbench") instead of the
+#    tank blueprint; installing a barrel, bayonet, grenades (one per kit slot) or the scope adds its
+#    picture (vanilla mechanism, interface/equipmentdesigner/hoi4_loader_test_small_arms.gui).
+# 5. Production > air: "Test Drone" (type air_transport, which the game routes to the plane window
+#    but never makes designable) opens the plane window titled "Drone Designer", with the mod's
+#    "drone hangar" background, the engine at the top left, three cargo pods on the right of the
+#    bottom row, the definition's stats (4 base, 2 combat, no misc) and no historical design button;
+#    a pod adds its picture; a design costs air experience.
 # Without the loader the decision is hidden; the equipment, if unlocked, opens the old window.
 
 hoi4_loader_test_category = {
@@ -23,6 +31,7 @@ hoi4_loader_test_category = {
 			set_technology = { hoi4_loader_test_small_arms_tech = 1 popup = no }
 			army_experience = 50
 			navy_experience = 50
+			air_experience = 50
 			log = "hoi4_loader_test: test small arms unlocked"
 		}
 		ai_will_do = { base = 0 }

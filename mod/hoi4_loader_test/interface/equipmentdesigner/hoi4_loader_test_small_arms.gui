@@ -1,85 +1,167 @@
-# hoi4_loader test: the blueprint layout the game needs before it opens a designer for the test
-# small arms (vanilla mechanism, interface/equipmentdesigner/_documentation.info). It borrows the
-# light tank's picture; a real mod draws its own.
+# hoi4_loader test: the blueprint layout of the test small arms (vanilla mechanism,
+# interface/equipmentdesigner/_documentation.info; NOTES.md N14). Its first element covers the
+# window's generic blueprint background with the mod's own; the rifle's body is always shown, and
+# each installed module adds its picture: the barrel (rifle or SMG), a bayonet, grenades (one per
+# kit slot, side by side) and the scope.
 guiTypes = {
 	containerWindowType = {
 		name = "equipment_designer_hoi4_loader_test_small_arms"
 		position = { x=0 y=0 }
 		size = { width=508 height=248 }
-		iconType = {
-			name = "equipment_image_overlay"
-			spriteType = "GFX_TC_light_tank_chassis"
-			position = { x=0 y=0 }
-		}
+		iconType = { name = "background" spriteType = "GFX_hoi4_loader_test_sa_background" position = { x=0 y=0 } }
+		iconType = { name = "equipment_image_overlay" spriteType = "GFX_hoi4_loader_test_sa_body" position = { x=30 y=88 } }
 		containerWindowType = {
 			name = "module_slots"
 			position = { x=0 y=0 }
 			size = { width=100% height=100% }
 			containerWindowType = {
 				name = "sa_main_slot"
-				position = { x=0 y=0 }
-				size = { width=100% height=100% }
-				containerWindowType = { name = "sa_main_slot" position = { x=0 y=0 } size = { width=100% height=100% } }
+				position = { x=0 y=0 } size = { width=100% height=100% }
+				containerWindowType = {
+					name = "hoi4_loader_test_sa_rifle"
+					position = { x=0 y=0 } size = { width=100% height=100% }
+					iconType = { name = "barrel" spriteType = "GFX_hoi4_loader_test_sa_barrel_rifle" position = { x=250 y=112 } }
+				}
+				containerWindowType = {
+					name = "hoi4_loader_test_sa_smg"
+					position = { x=0 y=0 } size = { width=100% height=100% }
+					iconType = { name = "barrel" spriteType = "GFX_hoi4_loader_test_sa_barrel_smg" position = { x=250 y=112 } }
+				}
 			}
 			containerWindowType = {
 				name = "sa_extra_slot_1"
-				position = { x=0 y=0 }
-				size = { width=100% height=100% }
-				containerWindowType = { name = "sa_extra_slot_1" position = { x=0 y=0 } size = { width=100% height=100% } }
+				position = { x=0 y=0 } size = { width=100% height=100% }
+				containerWindowType = {
+					name = "hoi4_loader_test_sa_bayonet"
+					position = { x=0 y=0 } size = { width=100% height=100% }
+					iconType = { name = "bayonet" spriteType = "GFX_hoi4_loader_test_sa_bayonet" position = { x=400 y=113 } }
+				}
+				containerWindowType = {
+					name = "hoi4_loader_test_sa_grenades"
+					position = { x=0 y=0 } size = { width=100% height=100% }
+					iconType = { name = "grenade" spriteType = "GFX_hoi4_loader_test_sa_grenade" position = { x=66 y=190 } }
+				}
 			}
 			containerWindowType = {
 				name = "sa_extra_slot_2"
-				position = { x=0 y=0 }
-				size = { width=100% height=100% }
-				containerWindowType = { name = "sa_extra_slot_2" position = { x=0 y=0 } size = { width=100% height=100% } }
+				position = { x=0 y=0 } size = { width=100% height=100% }
+				containerWindowType = {
+					name = "hoi4_loader_test_sa_bayonet"
+					position = { x=0 y=0 } size = { width=100% height=100% }
+					iconType = { name = "bayonet" spriteType = "GFX_hoi4_loader_test_sa_bayonet" position = { x=400 y=113 } }
+				}
+				containerWindowType = {
+					name = "hoi4_loader_test_sa_grenades"
+					position = { x=0 y=0 } size = { width=100% height=100% }
+					iconType = { name = "grenade" spriteType = "GFX_hoi4_loader_test_sa_grenade" position = { x=92 y=190 } }
+				}
 			}
 			containerWindowType = {
 				name = "sa_extra_slot_3"
-				position = { x=0 y=0 }
-				size = { width=100% height=100% }
-				containerWindowType = { name = "sa_extra_slot_3" position = { x=0 y=0 } size = { width=100% height=100% } }
+				position = { x=0 y=0 } size = { width=100% height=100% }
+				containerWindowType = {
+					name = "hoi4_loader_test_sa_bayonet"
+					position = { x=0 y=0 } size = { width=100% height=100% }
+					iconType = { name = "bayonet" spriteType = "GFX_hoi4_loader_test_sa_bayonet" position = { x=400 y=113 } }
+				}
+				containerWindowType = {
+					name = "hoi4_loader_test_sa_grenades"
+					position = { x=0 y=0 } size = { width=100% height=100% }
+					iconType = { name = "grenade" spriteType = "GFX_hoi4_loader_test_sa_grenade" position = { x=118 y=190 } }
+				}
 			}
 			containerWindowType = {
 				name = "sa_extra_slot_4"
-				position = { x=0 y=0 }
-				size = { width=100% height=100% }
-				containerWindowType = { name = "sa_extra_slot_4" position = { x=0 y=0 } size = { width=100% height=100% } }
+				position = { x=0 y=0 } size = { width=100% height=100% }
+				containerWindowType = {
+					name = "hoi4_loader_test_sa_bayonet"
+					position = { x=0 y=0 } size = { width=100% height=100% }
+					iconType = { name = "bayonet" spriteType = "GFX_hoi4_loader_test_sa_bayonet" position = { x=400 y=113 } }
+				}
+				containerWindowType = {
+					name = "hoi4_loader_test_sa_grenades"
+					position = { x=0 y=0 } size = { width=100% height=100% }
+					iconType = { name = "grenade" spriteType = "GFX_hoi4_loader_test_sa_grenade" position = { x=144 y=190 } }
+				}
 			}
 			containerWindowType = {
 				name = "sa_extra_slot_5"
-				position = { x=0 y=0 }
-				size = { width=100% height=100% }
-				containerWindowType = { name = "sa_extra_slot_5" position = { x=0 y=0 } size = { width=100% height=100% } }
+				position = { x=0 y=0 } size = { width=100% height=100% }
+				containerWindowType = {
+					name = "hoi4_loader_test_sa_bayonet"
+					position = { x=0 y=0 } size = { width=100% height=100% }
+					iconType = { name = "bayonet" spriteType = "GFX_hoi4_loader_test_sa_bayonet" position = { x=400 y=113 } }
+				}
+				containerWindowType = {
+					name = "hoi4_loader_test_sa_grenades"
+					position = { x=0 y=0 } size = { width=100% height=100% }
+					iconType = { name = "grenade" spriteType = "GFX_hoi4_loader_test_sa_grenade" position = { x=170 y=190 } }
+				}
 			}
 			containerWindowType = {
 				name = "sa_extra_slot_6"
-				position = { x=0 y=0 }
-				size = { width=100% height=100% }
-				containerWindowType = { name = "sa_extra_slot_6" position = { x=0 y=0 } size = { width=100% height=100% } }
+				position = { x=0 y=0 } size = { width=100% height=100% }
+				containerWindowType = {
+					name = "hoi4_loader_test_sa_bayonet"
+					position = { x=0 y=0 } size = { width=100% height=100% }
+					iconType = { name = "bayonet" spriteType = "GFX_hoi4_loader_test_sa_bayonet" position = { x=400 y=113 } }
+				}
+				containerWindowType = {
+					name = "hoi4_loader_test_sa_grenades"
+					position = { x=0 y=0 } size = { width=100% height=100% }
+					iconType = { name = "grenade" spriteType = "GFX_hoi4_loader_test_sa_grenade" position = { x=196 y=190 } }
+				}
 			}
 			containerWindowType = {
 				name = "sa_extra_slot_7"
-				position = { x=0 y=0 }
-				size = { width=100% height=100% }
-				containerWindowType = { name = "sa_extra_slot_7" position = { x=0 y=0 } size = { width=100% height=100% } }
+				position = { x=0 y=0 } size = { width=100% height=100% }
+				containerWindowType = {
+					name = "hoi4_loader_test_sa_bayonet"
+					position = { x=0 y=0 } size = { width=100% height=100% }
+					iconType = { name = "bayonet" spriteType = "GFX_hoi4_loader_test_sa_bayonet" position = { x=400 y=113 } }
+				}
+				containerWindowType = {
+					name = "hoi4_loader_test_sa_grenades"
+					position = { x=0 y=0 } size = { width=100% height=100% }
+					iconType = { name = "grenade" spriteType = "GFX_hoi4_loader_test_sa_grenade" position = { x=222 y=190 } }
+				}
 			}
 			containerWindowType = {
 				name = "sa_extra_slot_8"
-				position = { x=0 y=0 }
-				size = { width=100% height=100% }
-				containerWindowType = { name = "sa_extra_slot_8" position = { x=0 y=0 } size = { width=100% height=100% } }
+				position = { x=0 y=0 } size = { width=100% height=100% }
+				containerWindowType = {
+					name = "hoi4_loader_test_sa_bayonet"
+					position = { x=0 y=0 } size = { width=100% height=100% }
+					iconType = { name = "bayonet" spriteType = "GFX_hoi4_loader_test_sa_bayonet" position = { x=400 y=113 } }
+				}
+				containerWindowType = {
+					name = "hoi4_loader_test_sa_grenades"
+					position = { x=0 y=0 } size = { width=100% height=100% }
+					iconType = { name = "grenade" spriteType = "GFX_hoi4_loader_test_sa_grenade" position = { x=248 y=190 } }
+				}
 			}
 			containerWindowType = {
 				name = "sa_extra_slot_9"
-				position = { x=0 y=0 }
-				size = { width=100% height=100% }
-				containerWindowType = { name = "sa_extra_slot_9" position = { x=0 y=0 } size = { width=100% height=100% } }
+				position = { x=0 y=0 } size = { width=100% height=100% }
+				containerWindowType = {
+					name = "hoi4_loader_test_sa_bayonet"
+					position = { x=0 y=0 } size = { width=100% height=100% }
+					iconType = { name = "bayonet" spriteType = "GFX_hoi4_loader_test_sa_bayonet" position = { x=400 y=113 } }
+				}
+				containerWindowType = {
+					name = "hoi4_loader_test_sa_grenades"
+					position = { x=0 y=0 } size = { width=100% height=100% }
+					iconType = { name = "grenade" spriteType = "GFX_hoi4_loader_test_sa_grenade" position = { x=274 y=190 } }
+				}
 			}
 			containerWindowType = {
 				name = "fixed_sa_sight_slot"
-				position = { x=0 y=0 }
-				size = { width=100% height=100% }
-				containerWindowType = { name = "fixed_sa_sight_slot" position = { x=0 y=0 } size = { width=100% height=100% } }
+				position = { x=0 y=0 } size = { width=100% height=100% }
+				containerWindowType = {
+					name = "hoi4_loader_test_sa_scope"
+					position = { x=0 y=0 } size = { width=100% height=100% }
+					iconType = { name = "scope" spriteType = "GFX_hoi4_loader_test_sa_scope" position = { x=160 y=90 } }
+				}
 			}
 		}
 	}

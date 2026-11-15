@@ -23,6 +23,18 @@ A–F; NOTES.md has the findings and test results behind each.
   variant commands, the cost tooltip and icon; 13 new signatures and 2 anchors (smoke `2/144`).
   Checked on 1.19.4.2 and 1.19.5; tested in game on 1.19.5 (2026-11-14). The test mod has a small
   arms designer (decision "Unlock the test small arms").
+- **`equipment_designers`: the plane and ship windows** (NOTES.md N14/N15). `window = air` opens the
+  plane window, `window = naval` the ship window, for archetypes whose type the game sends there but
+  never makes designable (e.g. `air_transport` and the missile types; `convoy`, `support_ship`,
+  `floating_harbor`), with the window's DLC (By Blood Alone, Man the Guns). Title, slots (the plane
+  and ship GUI files get up to 20 + 20 slot windows too), `stats`, `xp` and `hide` work in every
+  window; `hide` also finds container windows (e.g. the plane window's role line `plane_role`).
+  Stats now go through the game's Fill function for all three windows and the comparison panels (the
+  tank-only stats hook is gone). Vanilla-designable archetypes can be listed too, to change their
+  window. Backgrounds and module pictures are vanilla (the layout file); documented, and shown in the
+  test mod. 2 new signatures and 1 anchor (smoke `2/147`). Checked on 1.19.4.2 and 1.19.5; the plane
+  window tested in game on 1.19.5 (2026-11-15); the ship window offline only (no Man the Guns here).
+  The test mod has a test drone (`type = air_transport`) and pictures for the small arms.
 - **Shared code:** the Paradox script reader (`src/script_tree.cpp`) and the mod folder scan
   (`ModList::ScanFolder`) moved out of air_scenarios, which now uses them; `UserFolder()` and
   `GameFolder()` in `loader.h`.

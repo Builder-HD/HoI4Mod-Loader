@@ -1,8 +1,10 @@
-# hoi4_loader test: unlocks the test small arms and their modules (set by a decision only).
+# hoi4_loader test: unlocks the test small arms, the test drone and their modules (set by a decision only).
 technologies = {
 	hoi4_loader_test_small_arms_tech = {
-		enable_equipments = { hoi4_loader_test_small_arms_1 }
+		enable_equipments = { hoi4_loader_test_small_arms_1 hoi4_loader_test_drone_1 }
 		enable_equipment_modules = {
+			hoi4_loader_test_drone_engine
+			hoi4_loader_test_drone_pod
 			hoi4_loader_test_sa_rifle
 			hoi4_loader_test_sa_smg
 			hoi4_loader_test_sa_grenades

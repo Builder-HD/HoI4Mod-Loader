@@ -1,0 +1,14 @@
+# hoi4_loader test: pictures for the test designers (equipment_designers; NOTES.md N14).
+spriteTypes = {
+	spriteType = { name = "GFX_hoi4_loader_test_sa_background" texturefile = "gfx/interface/equipmentdesigner/hoi4_loader_test/sa_background.dds" }
+	spriteType = { name = "GFX_hoi4_loader_test_sa_body" texturefile = "gfx/interface/equipmentdesigner/hoi4_loader_test/sa_body.dds" }
+	spriteType = { name = "GFX_hoi4_loader_test_sa_barrel_rifle" texturefile = "gfx/interface/equipmentdesigner/hoi4_loader_test/sa_barrel_rifle.dds" }
+	spriteType = { name = "GFX_hoi4_loader_test_sa_barrel_smg" texturefile = "gfx/interface/equipmentdesigner/hoi4_loader_test/sa_barrel_smg.dds" }
+	spriteType = { name = "GFX_hoi4_loader_test_sa_bayonet" texturefile = "gfx/interface/equipmentdesigner/hoi4_loader_test/sa_bayonet.dds" }
+	spriteType = { name = "GFX_hoi4_loader_test_sa_grenade" texturefile = "gfx/interface/equipmentdesigner/hoi4_loader_test/sa_grenade.dds" }
+	spriteType = { name = "GFX_hoi4_loader_test_sa_scope" texturefile = "gfx/interface/equipmentdesigner/hoi4_loader_test/sa_scope.dds" }
+	spriteType = { name = "GFX_hoi4_loader_test_drone_background" texturefile = "gfx/interface/equipmentdesigner/hoi4_loader_test/drone_background.dds" }
+	spriteType = { name = "GFX_hoi4_loader_test_drone_frame" texturefile = "gfx/interface/equipmentdesigner/hoi4_loader_test/drone_frame.dds" }
+	spriteType = { name = "GFX_hoi4_loader_test_drone_engine" texturefile = "gfx/interface/equipmentdesigner/hoi4_loader_test/drone_engine.dds" }
+	spriteType = { name = "GFX_hoi4_loader_test_drone_pod" texturefile = "gfx/interface/equipmentdesigner/hoi4_loader_test/drone_pod.dds" }
+}

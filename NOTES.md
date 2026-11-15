@@ -6494,3 +6494,106 @@ game: the title stays on every reopening.
 4. `loader.log`: no ERROR, no fault.
 
 **Not tested:** multiplayer with `xp`, `xp = air`.
+
+## N14: air and naval windows, backgrounds and module pictures (2026-11-15, branch `feature/equipment-designers-air-naval`)
+
+**Owner (2026-11-15):** a test of a custom background and module pictures (vanilla mechanism,
+checked in game); the air and naval windows as planned; more ideas for what is hard-coded or could
+improve the designers.
+
+### Findings (1.19.5; same addresses on 1.19.4.2)
+
+**Backgrounds and module pictures are vanilla.** In each designer GUI the window `equipment_preview`
+(508x248) has the generic blueprint background, and the archetype's layout window
+(`equipment_designer_<archetype>`) is inserted into it by code ("inserted here by code"). A layout
+whose first element is a full-size picture covers the background; the `module_slots` windows show a
+picture per installed module (`_documentation.info`). No loader key is needed; a see-through
+background would be the only case for one (not planned).
+
+**The three windows share one class** (N2) and one GUI structure: `designer_title`, `experience`,
+`base_stats` / `combat_stats` / `misc_stats` and their `ref_*` twins, `historical_design_button`,
+`equipment_preview` and the `pos_custom_module_slot_window_N` / `pos_fixed_module_slot_window_N`
+positionTypes. Files: ships `equipmentdesignerview.gui` (`countryequipmentdesignerview`, 7 custom
+and 7 fixed positions), tanks `tank_designer_view.gui` (9 custom), planes `plane_designer_view.gui`
+(7 custom, 5 fixed). Only the tank window has the role dropdown and "Select Model".
+- Kind `view+0x3ce0`: TitleText (`FUN_141813d40`) gives kind 0 `SHIP_DESIGNER_TITLE`, 1
+  `TANK_DESIGNER_TITLE`, 2 `PLANE_DESIGNER_TITLE`, else `EQUIPMENT_DESIGNER_TITLE`.
+- **Which DLC:** the DLC designer mask (`FUN_14100bfe0`) is `(DLC 0x14 ? imm64 at +0x1d : 0) |
+  (DLC 0x1d ? imm8 at +0x3b : 0) | (DLC 0x26 ? imm64 at +0x4e : 0)`: Man the Guns
+  `0x80004001c0` (ships), No Step Back `4` (tanks), By Blood Alone `0x1d0026fc00` (planes).
+  The window picker's masks (N2) are wider: naval `0x80004003c1`, air `0x1f0037fc00`. So some naval
+  (bits 0, 9) and air (bits 16, 20, 33) types route to a window but are never designable: the same
+  gap as `infantry` for the tank window.
+- **Stats:** the dispatcher `FUN_141823510(view)` (from the refresh) calls by kind the ship filler
+  `FUN_141823c70` (same arguments as the tank's `FUN_141823950`), the tank filler, or the plane
+  filler `FUN_141823790(view)` (builds its arguments itself; also writes the air experience line).
+  The comparison panels (`ref_*`, `view+0x133c0..`) come from `FUN_1418247c0(view)`, which calls the
+  ship or tank filler or, for planes, Fill itself. Fill (`FUN_141e57270`) has 12 callers, all these;
+  each filler calls it three times, base, combat, misc, in that order. Arrays: ships `0x142a75a98`
+  / `ad0` / `b20`, tanks `b68` / `b90` / `bd0`, planes `c48` / `c70` / `cb0`; the ship's combat list
+  is filtered for some hulls, the ship's and plane's misc list is two rows shorter without DLC 0x13.
+
+### Decisions
+
+1. **`window = air | naval`**: the plane or ship window. As for `land`, the archetype's own `type`
+   must route there (the game's window picker, unchanged): `naval` needs a type the naval test
+   accepts, `air` a type the air test accepts and neither the naval nor the land test. The window's
+   DLC is required as vanilla requires it: Man the Guns for ships, By Blood Alone for planes (read
+   from the DLC mask, +0x1d / +0x4e). An archetype vanilla already designs (e.g. a fighter airframe)
+   simply gets the customisation.
+2. **Per window:** `title`, `slots` (positions in that window's coordinates; up to 20 + 20 windows,
+   added to that window's GUI file at load), `stats`, `xp`, `hide` (names from that window's GUI
+   file). `hide_roles` applies to the tank window only (the others have no dropdown).
+3. **Stats, one mechanism for all windows:** Fill is hooked; the dispatcher, the comparison function
+   and the plane filler mark the view being filled (main thread, nested calls restore the previous
+   mark); Fill's n-th call during a mark is panel n (base, combat, misc). For a listed archetype
+   with that panel in `stats`, Fill gets the definition's rows. This replaces the tank-only stats
+   hook and also covers the comparison panels. SIGs: dispatcher (kind at +0xf; tank filler call at
+   +0x1e5), comparison function (tank filler call at +0x1bb); the plane filler from the dispatcher's
+   `cmp eax,2; jne; call`. Cross-checks: both tank calls reach `kSigEqdStats`, the ship calls of
+   both agree, the plane filler calls Fill three times.
+4. **Test mod:** the small arms layout gets its own background and pictures per module (bayonet,
+   grenades, scope); a test air archetype (a type the plane window serves but By Blood Alone doesn't
+   design) with an air designer; a naval example in the docs. **Man the Guns is not installed here**,
+   so the naval window can be checked offline only; that stays open for the owner.
+
+## N15: air and naval windows: implementation and in-game test (2026-11-15)
+
+**Code** (as decided in N14):
+- `DesignerFind_t` returns the wanted window kind; the "can open" detour allows a listed type when
+  it has slots, the kind's DLC bit is set (`kCodeEqdDlcMask` +0x1d / +0x3b / +0x4e) and the game's
+  window picker sends it there (`DesignerWindowOf`: naval test +0x23, land tests, air test +0x68).
+- TitleText's three branches are checked (ship / tank / plane keys).
+- Stats: `kSigEqdStatsDispatch`, `kSigEqdStatsRef` and the plane filler (`kCodeEqdStatsPlane`) mark
+  the view; the Fill hook counts calls (base, combat, misc). The tank filler is no longer hooked.
+- Per kind: the GUI file patched (only for kinds a definition uses), its slot window counts, the
+  plugin's look restored only in kinds a definition uses; `hide_roles` only for the tank window.
+- `hide` and containers: the root's container lookup (`+0x1b8`, from setup's `plane_role` lookup,
+  `kAnchorEqdPlaneRole` / `kCodeEqdRootFindContainer`, rcx checked to be the root) returns a
+  container window; its element part is at `+0x30` (the slot windows' `kCodeEqdSlotGuiBase`, and the
+  game's own `add rcx,0x30` before showing `equipment_preview`). The first try hid the container
+  itself: its vtable `+0x78/+0x80` are lookups, not show/hide, so showing it again threw (C++
+  exception in the refresh hook; the fail-safe switched the feature off and logged the frames).
+
+**Routing of vanilla types** (temporary log, 1.19.5): ship window: `convoy`, `support_ship`,
+`floating_harbor`; tank window: `train`, `railway_gun`; plane window: `air_transport`, `missile`,
+`ballistic_missile`, `nuclear_missile`, `sam_missile`, `emplacement_gun_ammo`, `fighter`. The test
+drone (`air_transport` with slots) is not designable in vanilla even with By Blood Alone.
+
+**In-game test** (1.19.5, Germany 1936, branch build, test mod only; screenshots):
+1. `loader.log`: both used GUI files patched (plane 7 + 5, tank 9 + 0 windows before), "serves ...
+   in the plane window", no ERROR.
+2. Production > air lists "Test Drone" with the designer button; it opens "Drone Designer": the mod's
+   hangar background, the frame and the default engine's picture, the engine slot top left, the
+   three cargo slots at x 220/293/366 on the bottom row, 4 base and 2 combat rows, misc empty, air
+   experience 50, no role line, no historical design button.
+3. A cargo pod adds its picture and raises the range 800 -> 900 km; saving costs air 50 -> 45.
+4. The small arms window: the mod's workbench background, the rifle's body and barrel; bayonet, two
+   grenades side by side and the scope add their pictures; stats (3 + 5 + 0) and navy experience
+   as before (now through the Fill hook).
+5. A vanilla Bf 109 D after the drone: "Plane Designer", "Fighter", 5 + 7 slot windows (locks
+   included), all vanilla stats, the historical picture. A vanilla Panzer II: unchanged.
+
+**Offline:** both checkers on 1.19.5 and 1.19.4.2; the GUI patch on all three vanilla designer
+files (ship 7 + 7 windows before). **Not tested:** the ship window in game (Man the Guns is not
+installed here), multiplayer.

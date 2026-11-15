@@ -43,7 +43,7 @@ static size_t Count(const std::string& s, const std::string& needle) {
 
 static void CheckPatched(const std::string& original, const char* label) {
     int custom = -1, fixed = -1;
-    std::string out = Engine::PatchTankDesignerViewGui(original, kMaxSlotWindows, &custom, &fixed);
+    std::string out = Engine::PatchDesignerViewGui(original, kMaxSlotWindows, &custom, &fixed);
     std::string what = std::string(label) + ": patched";
     Check(!out.empty(), what.c_str());
     for (int k = 0; k < 2; ++k)
@@ -61,7 +61,7 @@ static void CheckPatched(const std::string& original, const char* label) {
     Check(braces == 0, what.c_str());
     int c2 = -1, f2 = -1;
     what = std::string(label) + ": patching twice changes nothing";
-    Check(Engine::PatchTankDesignerViewGui(out, kMaxSlotWindows, &c2, &f2).empty() && c2 == kMaxSlotWindows &&
+    Check(Engine::PatchDesignerViewGui(out, kMaxSlotWindows, &c2, &f2).empty() && c2 == kMaxSlotWindows &&
               f2 == kMaxSlotWindows,
           what.c_str());
     std::printf("  %s: %d custom and %d fixed slot window(s) before\n", label, custom, fixed);
@@ -206,7 +206,7 @@ int main(int argc, char** argv) {
         "\t}\r\n"
         "}\r\n";
     int custom = -1, fixed = -1;
-    std::string out = Engine::PatchTankDesignerViewGui(gui, kMaxSlotWindows, &custom, &fixed);
+    std::string out = Engine::PatchDesignerViewGui(gui, kMaxSlotWindows, &custom, &fixed);
     Check(custom == 2 && fixed == 0, "gui: counts the windows the engine makes (stops at the gap)");
     Check(Count(out, "\"pos_custom_module_slot_window_3\"") == 1 && Count(out, "\"pos_custom_module_slot_window_2\"") == 1 &&
               Count(out, "\"pos_custom_module_slot_window_19\"") == 1 && Count(out, "\"pos_fixed_module_slot_window_19\"") == 1 &&
@@ -218,7 +218,7 @@ int main(int argc, char** argv) {
           "gui: inserted after the last slot position, inside its container");
     Check(out.find("\r\n\t\t\tpositionType = { name = \"pos_fixed_module_slot_window_0\"") != std::string::npos,
           "gui: CRLF and the container's indentation kept");
-    Check(Engine::PatchTankDesignerViewGui("guiTypes = { }", kMaxSlotWindows, &custom, &fixed).empty(),
+    Check(Engine::PatchDesignerViewGui("guiTypes = { }", kMaxSlotWindows, &custom, &fixed).empty(),
           "gui: a file without slot positions is left alone");
     CheckPatched(gui, "snippet");
 
