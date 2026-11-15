@@ -6556,3 +6556,44 @@ and 7 fixed positions), tanks `tank_designer_view.gui` (9 custom), planes `plane
    grenades, scope); a test air archetype (a type the plane window serves but By Blood Alone doesn't
    design) with an air designer; a naval example in the docs. **Man the Guns is not installed here**,
    so the naval window can be checked offline only; that stays open for the owner.
+
+## N15: air and naval windows: implementation and in-game test (2026-11-15)
+
+**Code** (as decided in N14):
+- `DesignerFind_t` returns the wanted window kind; the "can open" detour allows a listed type when
+  it has slots, the kind's DLC bit is set (`kCodeEqdDlcMask` +0x1d / +0x3b / +0x4e) and the game's
+  window picker sends it there (`DesignerWindowOf`: naval test +0x23, land tests, air test +0x68).
+- TitleText's three branches are checked (ship / tank / plane keys).
+- Stats: `kSigEqdStatsDispatch`, `kSigEqdStatsRef` and the plane filler (`kCodeEqdStatsPlane`) mark
+  the view; the Fill hook counts calls (base, combat, misc). The tank filler is no longer hooked.
+- Per kind: the GUI file patched (only for kinds a definition uses), its slot window counts, the
+  plugin's look restored only in kinds a definition uses; `hide_roles` only for the tank window.
+- `hide` and containers: the root's container lookup (`+0x1b8`, from setup's `plane_role` lookup,
+  `kAnchorEqdPlaneRole` / `kCodeEqdRootFindContainer`, rcx checked to be the root) returns a
+  container window; its element part is at `+0x30` (the slot windows' `kCodeEqdSlotGuiBase`, and the
+  game's own `add rcx,0x30` before showing `equipment_preview`). The first try hid the container
+  itself: its vtable `+0x78/+0x80` are lookups, not show/hide, so showing it again threw (C++
+  exception in the refresh hook; the fail-safe switched the feature off and logged the frames).
+
+**Routing of vanilla types** (temporary log, 1.19.5): ship window: `convoy`, `support_ship`,
+`floating_harbor`; tank window: `train`, `railway_gun`; plane window: `air_transport`, `missile`,
+`ballistic_missile`, `nuclear_missile`, `sam_missile`, `emplacement_gun_ammo`, `fighter`. The test
+drone (`air_transport` with slots) is not designable in vanilla even with By Blood Alone.
+
+**In-game test** (1.19.5, Germany 1936, branch build, test mod only; screenshots):
+1. `loader.log`: both used GUI files patched (plane 7 + 5, tank 9 + 0 windows before), "serves ...
+   in the plane window", no ERROR.
+2. Production > air lists "Test Drone" with the designer button; it opens "Drone Designer": the mod's
+   hangar background, the frame and the default engine's picture, the engine slot top left, the
+   three cargo slots at x 220/293/366 on the bottom row, 4 base and 2 combat rows, misc empty, air
+   experience 50, no role line, no historical design button.
+3. A cargo pod adds its picture and raises the range 800 -> 900 km; saving costs air 50 -> 45.
+4. The small arms window: the mod's workbench background, the rifle's body and barrel; bayonet, two
+   grenades side by side and the scope add their pictures; stats (3 + 5 + 0) and navy experience
+   as before (now through the Fill hook).
+5. A vanilla Bf 109 D after the drone: "Plane Designer", "Fighter", 5 + 7 slot windows (locks
+   included), all vanilla stats, the historical picture. A vanilla Panzer II: unchanged.
+
+**Offline:** both checkers on 1.19.5 and 1.19.4.2; the GUI patch on all three vanilla designer
+files (ship 7 + 7 windows before). **Not tested:** the ship window in game (Man the Guns is not
+installed here), multiplayer.
