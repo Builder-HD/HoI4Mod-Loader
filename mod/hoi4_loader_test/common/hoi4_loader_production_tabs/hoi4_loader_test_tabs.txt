@@ -1,0 +1,36 @@
+# hoi4_loader test: production_tabs (MODDING.md "Production tabs", NOTES.md Part O).
+# - A new tab for the towed guns; they leave the infantry tab (add here, remove there: a move).
+# - The test small arms also show in the armor tab (add only: a copy; they stay in infantry too).
+# The new tab's button is the mod's own element in countryproductionlineview.gui; this test mod
+# doesn't ship a copy of that file (MODDING.md "Production tabs" has the two elements to add).
+# Without the button the loader logs it and the guns tab is off; the vanilla tab changes still work.
+hoi4_loader_test_guns_tab = {
+	button = hoi4_loader_test_guns_button
+	glow = hoi4_loader_test_guns_button_glow
+	visible = hoi4_loader_test_tabs_visible   # a scripted trigger (decisions "Tabs: ..." toggle it)
+	add = { artillery_equipment rocket_artillery_equipment anti_tank_equipment anti_air_equipment }
+}
+infantry = {
+	remove = { artillery_equipment rocket_artillery_equipment anti_tank_equipment anti_air_equipment }
+}
+armor = {
+	add = { hoi4_loader_test_small_arms }
+	add_types = { motorized }   # by type: trucks, armored cars, support equipment ...
+}
+infantry = {
+	remove_types = { motorized }   # ... leave the infantry tab (with add_types above: a move by type)
+}
+# A new tab of ships (it opens the dockyard list): submarines move out of the naval tab, destroyers
+# are copied. Its button: hoi4_loader_test_ships_button (no glow).
+hoi4_loader_test_ships_tab = {
+	button = hoi4_loader_test_ships_button
+	add = { ship_hull_submarine ship_hull_light }
+	enabled = hoi4_loader_test_tabs_enabled   # greyed out while false (decisions "Tabs: lock ..." / "unlock ...")
+}
+air = {
+	enabled = hoi4_loader_test_tabs_enabled   # a vanilla tab greyed out by the same trigger
+}
+naval = {
+	remove = { ship_hull_submarine }
+	visible = hoi4_loader_test_tabs_visible   # a vanilla tab hidden by the same trigger
+}

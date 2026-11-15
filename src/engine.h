@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -459,6 +460,11 @@ bool HaveProvinceBuildingRemoval();  // every function, field and vtable resolve
 // The engine's hide/show idiom for a GUI element (kSigGuiHideShow), shared with other UI features.
 bool HaveElementVisibility();
 void SetElementVisible(void* element, bool visible);
+// A click handler on a GUI button the game itself doesn't bind (the engine's CButtonWrapper, as the
+// province building cross uses it). The wrapper is never freed: it lives as long as the button may
+// call it. Main thread.
+bool HaveButtonClick();
+bool BindButtonClick(void* button, std::function<void()> click);
 bool ElementVisible(const void* element);  // its hidden flag is clear
 // UI thread. `allowed`: may the cross show at all (the plugin: single player only). `onClick`: the
 // player clicked the cross of `type` (a CBuildingType*) in `province` (a province object) of `state`;
@@ -607,6 +613,39 @@ using AirPick_t = void* (*)(int slot, const void* attackers, const void* defende
 bool HookAirScenarios(AirBuilt_t built, AirPick_t pick);  // all hooks or none
 void DisableAirScenarios();  // after a fault: the game's own templates from now on
 
+// --- Production tabs (production_tabs; engine_production_tabs.cpp, NOTES.md Part O) --------------
+// The production view's "add production line" tabs: the four vanilla ones (0 infantry, 1 armor,
+// 2 air, 3 naval) and the mod's new ones (4 and up). Which designs a tab lists and the buttons'
+// state; UI only (the add-line command doesn't check the tab), main thread.
+void ResolveProductionTabs();  // after ResolveData (production_data's type offsets)
+bool HaveProductionTabs();
+// Is a design of `archetype` in `tab`? `types`: the design's type mask (its archetype's types and its
+// modules' add_equipment_type); `vanilla`: the game's own answer (its type matches a vanilla tab;
+// always false for new tabs).
+using PtabMember_t = bool (*)(int tab, const void* archetype, uint64_t types, bool vanilla);
+using PtabFault_t = void (*)(const char* where);  // a contained fault; the game's own tabs from now on
+// A tab's condition of a kind: a scripted trigger template (PtabScriptedTrigger), or null (none:
+// always shown / enabled).
+enum PtabConditionKind { kPtabVisible = 0, kPtabEnabled = 1 };
+using PtabCondition_t = const void* (*)(int tab, int kind);
+struct PtabNewTab {
+    const char* name;    // for messages
+    const char* button;  // element names in the production view (glow: null or empty for none)
+    const char* glow;
+};
+// changed[i]: vanilla tab i has add / remove (else the game alone lists it). All hooks or none.
+bool HookProductionTabs(const bool changed[4], const PtabNewTab* tabs, int count, PtabMember_t member, PtabCondition_t condition,
+                        PtabFault_t fault);
+// Scripted triggers (`visible`, `enabled`): the template of a scripted trigger by name, or null (no such trigger,
+// or HavePtabConditions false). Main thread, after the game loaded its scripted triggers.
+bool HavePtabConditions();
+const void* PtabScriptedTrigger(const char* name);
+const void* PtabArchetypeOf(const void* type);  // the archetype of an equipment type (itself for one)
+// The type mask bit of an equipment type name (`type = { ... }` names), 0 if the game has no such type
+// or the lookup is unavailable (HavePtabTypes false: not found, or its check against the tank tab failed).
+bool HavePtabTypes();
+uint64_t PtabTypeMask(const char* name);
+
 // --- Equipment designers (equipment_designers; engine_designers.cpp, NOTES.md Part N) -----------
 // Lets equipment the game gives no designer (e.g. type infantry) open a designer window (ship,
 // tank or plane), and changes that window's title, role dropdown and slot window positions. UI
@@ -709,5 +748,9 @@ bool SetGlobalFlagValue(int token, short value, short days);
 // and effect. countryTag > 0: ROOT = that country; 0: no scope. name: at most 15 characters.
 // Returns false (and logs) on failure; an exception inside is contained.
 bool FireOnAction(const char* name, int countryTag);
+// Calls fn with a CEventScope whose ROOT and THIS are the country (constructed with seed 0, not
+// through the synced RNG: for UI conditions only, nothing that changes the game). False if the scope
+// functions are unresolved or a fault was contained (then *result is unset).
+bool WithCountryScope(int tag, bool (*fn)(const void* scope, void* ctx), void* ctx, bool* result);
 
 }  // namespace Engine

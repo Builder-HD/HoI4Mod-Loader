@@ -59,6 +59,9 @@ src/engine_air.cpp            engine access for air_scenarios (templates, the ga
 src/plugin_equipment_designers.cpp  equipment_designers feature (definitions, tank window title, roles, slot windows)
 src/equipment_designers.cpp   equipment_designers without engine access: definition parser, merging (tested)
 src/engine_designers.cpp      engine access for equipment_designers (can-open hook, window open and refresh)
+src/plugin_production_tabs.cpp  production_tabs feature (definitions, which tab lists which archetype)
+src/production_tabs.cpp       production_tabs without engine access: definition parser, merging (tested)
+src/engine_production_tabs.cpp  engine access for production_tabs (tab lists, button states, new tab buttons)
 src/script_tree.cpp           the Paradox script reader shared by the definition parsers
 src/plugin_time_control.cpp   time_control feature (speed lock, pause block, hidden date; saved as flags)
 src/engine_data.cpp           engine access for the data triggers (read-only game state)

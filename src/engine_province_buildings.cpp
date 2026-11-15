@@ -659,6 +659,16 @@ bool HaveElementVisibility() { return g_hideDisp && g_showDisp && g_flags && g_h
 void SetElementVisible(void* element, bool visible) {
     if (element && HaveElementVisibility()) SetVisible(element, visible);
 }
+bool HaveButtonClick() { return g_wrapperCtor && g_wrapperSize; }
+bool BindButtonClick(void* button, std::function<void()> click) {
+    if (!HaveButtonClick() || !button) return false;
+    void* storage = _aligned_malloc(g_wrapperSize + 0x40, 16);
+    if (!storage) return false;
+    memset(storage, 0, g_wrapperSize + 0x40);
+    std::function<void()> other;
+    g_wrapperCtor(storage, button, &click, &other);
+    return true;
+}
 bool ElementVisible(const void* element) {
     return element && HaveElementVisibility() && !(Rd<uint8_t>(element, g_flags) & g_hiddenBit);
 }

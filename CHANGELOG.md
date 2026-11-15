@@ -43,6 +43,22 @@ A–F; NOTES.md has the findings and test results behind each.
   the layouts per role stay vanilla. Hooks the dropdown's entry and label functions; 1 new signature
   (smoke `2/148`). Checked on 1.19.4.2 and 1.19.5; tested in game on 1.19.5 (2026-11-15). The test
   mod has a field gun with three roles and battalions for them.
+- **New feature `production_tabs`** (engine tier; guard `hoi4_loader_feature_production_tabs`; no
+  script commands; NOTES.md Part O, MODDING.md "Production tabs"). Which archetypes the production
+  screen's "add production line" tabs list: `add` and `remove` lists per vanilla tab (`infantry`,
+  `armor`, `air`, `naval`), and new tabs (up to 16) with the mod's own button and glow icon in
+  `countryproductionlineview.gui`, defined in `common/hoi4_loader_production_tabs/*.txt`. Move, copy
+  or hide equipment is the mod's choice; the same tab in several mods merges. `add_types` /
+  `remove_types` select by equipment type (`type = { ... }` names, through the game's own name
+  lookup), the more specific archetype entries win. `visible = <scripted trigger>` (any tab, vanilla
+  ones too) shows the button only while the trigger is true for the player's country (evaluated in
+  the UI, outside the synced RNG). The game's own checks
+  (research, `can_be_produced`, outdated) and the add-line command stay; UI only. Hooks the view's
+  setup (binds the new buttons), the buttons' state and the two add-line lists; 7 new signatures
+  (smoke `2/155`). Checked on 1.19.4.2 and 1.19.5; tested in game on 1.19.5 (2026-11-15). The test
+  mod moves the towed guns into a "Towed guns" tab and copies the test small arms into the armor tab.
+- **Shared code:** `Engine::BindButtonClick` (a click handler on a GUI button through the engine's
+  `CButtonWrapper`, from province_building_removal) for any feature.
 - **Shared code:** the Paradox script reader (`src/script_tree.cpp`) and the mod folder scan
   (`ModList::ScanFolder`) moved out of air_scenarios, which now uses them; `UserFolder()` and
   `GameFolder()` in `loader.h`.

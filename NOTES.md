@@ -6692,3 +6692,337 @@ multiplayer (the role is the design's types, saved by the game's own command, as
 **Loading:** several launches in this session took 10-15 minutes to reach the menu (one core busy
 between interface files, also with builds that only changed in-game code); the run before loaded in
 seconds with the same mod. Not caused by the role code (it runs only in the designer); to watch.
+# Part O: production tabs (`production_tabs`, investigation)
+
+Branch `feature/production-tabs` (from `feature/equipment-designers`, for its shared definition
+reader). Investigation only, nothing implemented.
+Owner's request (2026-11-15): choose which "add production line" tab lists an equipment, and let
+mods add their own tabs (e.g. one tab for artillery, anti-tank and anti-air guns, to declutter the
+infantry tab). Only what the game hard-codes belongs in the loader. Addresses are from vanilla
+**1.19.5** (`hoi4_1195.exe`, a copy) and only for orientation; the shapes below are unique on
+1.19.5 and 1.19.4.2. 1.19.3 / 1.19.2: no copies.
+
+## O1: what vanilla script and the wiki have
+
+- **Wiki** (hoi4.paradoxwikis.com: Equipment modding, Unit modding, Interface modding, Defines; the
+  Production modding page doesn't exist). Equipment modding: `interface_category` "Which category
+  the equipment appears in the production screen", `group_by` (`archetype | type`), `visual_level`
+  "Image priority in production screen", `is_buildable`, `can_be_produced` (trigger). Six interface
+  categories. Nothing on how a tab is chosen, nothing on adding tabs; Interface modding: "the effects
+  of base game's GUI are hard-coded", new elements "will not be populated with data". No define
+  about tabs (NInterface only has offsets for the ship filters).
+- **Already scriptable, stays vanilla:**
+  - whether a design may be produced at all: `is_buildable`, `can_be_produced` (the list calls it,
+    `FUN_140cf1470`, walking archetype/parent), research, the "show outdated" box;
+  - grouping and filtering of **existing** lines: `interface_category` (six fixed values with one
+    `show_*` checkbox each in `countryproductionlineview.gui`);
+  - the buttons' look, position and tooltip: `countryproductionlineview.gui` (`infantry_button`,
+    `tank_button`, `aircraft_button`, `naval_button`, each with a `_glow` icon; tooltips are
+    commented out, `pdx_tooltip` works);
+  - the vanilla trick to get an equipment into a tab: an extra type (towed artillery is
+    `type = { artillery infantry }`).
+- **Mods:** BlackICE, Millennium Dawn, TNO, Kaiserreich-family, The Fire Rises, Darkest Hour (all
+  installed as Workshop items) override `countryproductionlineview.gui` and keep exactly the four
+  tabs. None has a fifth.
+
+## O2: engine findings (1.19.5)
+
+- **Buttons** (`FUN_1417d8f10`, the view's setup): looked up by name, stored at view `+0x2758`
+  (tank), `+0x2760` (infantry), `+0x2768` (air), `+0x2770` (naval); glow icons at `+0x2788..+0x27a0`.
+  Clicks go to four thunks, each a hard-coded type mask:
+  | thunk | button | mask (click) | window |
+  |---|---|---|---|
+  | `FUN_1417d7020` | infantry | `0x80080038` | land/air list `+0x2720` |
+  | `FUN_1417d7080` | tank | `4` (armor) | `+0x2720` |
+  | `FUN_1417d6ff0` | air | `0x1f0037fc00` | `+0x2720` |
+  | `FUN_1417d7050` | naval | `0x80004003c1` | naval list `+0x2728` (dockyards) |
+  All call `FUN_1417d6e10(view, mask, naval, window, button)`: it stores the mask at window `+0x1120`
+  (and the naval flags at `+0x112d/+0x112e`), refreshes the window (`FUN_141e3fb00`) and the buttons.
+- **The list** (`FUN_141e3c020` for land/air, `FUN_141e3cd40` for naval, both called by
+  `FUN_141e3fb00` with the country's variant array): a variant is listed when its type is buildable
+  (`+0x445`), `can_be_produced` passes, it isn't outdated (or "show outdated" is on), its modules are
+  available, and **`variant+0x408 & window+0x1120` is non-zero**. `+0x408` is the design's type
+  mask (archetype types plus modules' `add_equipment_type`). So the tab is the type, nothing else:
+  pure `artillery` / `anti_tank` match no tab and are listed nowhere (N3 probes on the designer
+  branch). `FUN_141e3d660` adds a second kind of entry to the same window by the same mask (from
+  country `+0xf68 +0x130`, matched through `TypeMask`; not identified yet).
+- **Button state** (`FUN_1417d66b0` -> `FUN_1417d8cc0(button, glow, open button, mask)` per tab,
+  enable masks: infantry `0x80000038` (without bit 19), tank `4`, air `0x1f0037fc00`, naval
+  inline): enabled if the country has a variant with that mask; glow if one is new (`+0x426`) and
+  buildable; frame "selected" while open. `FUN_1417d25c0(mask)` checks military factories (dockyards
+  for naval) and **asserts on any other mask**, so a new tab can't go through it.
+- **Changing an existing line's equipment** (`FUN_1417d27d0` / `28d0` / `29e0`, from the line item):
+  opens the same window with the line's own mask (`+0x2248` of the line item).
+- **Adding the line** (`CAddProductionLineCommand`, vtable `0x142a0fbc8`; validate `FUN_1411edb10`):
+  checks the country, that it owns the variant (`FUN_140c2cad0`) and the conversion source. **No tab
+  or type mask check.** The tab is UI only: nothing synced, the AI never uses it.
+- **Other users of the button names:** `FUN_141d285e0` / `FUN_141d288e0` (`infantry_button`,
+  `naval_button`) and `FUN_142063990` (`naval_button`) are other views; not part of this.
+- **Binding a click** on a button the game doesn't know: the loader already does it
+  (`CButtonWrapper`, `kSigButtonWrapperCtor`, province_buildings).
+
+## O3: what is hard-coded (loader material) and what isn't
+
+| Hard-coded in the exe | Scriptable (not the loader's job) |
+|---|---|
+| which types each of the four tabs lists (masks in the click thunks) | buttons' sprite, position, tooltip, glow icon (gui) |
+| exactly four tabs (four names bound in setup) | whether something can be produced (`can_be_produced`, `is_buildable`) |
+| button enabled / glow by the same masks | existing-line grouping and filters (`interface_category`) |
+
+## O4: first proposal (2026-11-15, replaced by O5)
+
+A file `common/hoi4_loader_production_tabs/*.txt` with vanilla tab keys (`infantry`, `armor`,
+`air`, `naval`) and new tabs (`button`, `glow`, `equipment = { archetypes }`); a listed archetype
+would **move** (show only in that tab). Owner: the file and the shape are fine, but a fixed "move"
+is a policy for one use case; the loader is general purpose, so every behaviour has to be the
+mod's explicit choice. `types = { ... }` later; archetypes first.
+
+## O5: design (owner's decisions, 2026-11-15)
+
+**Open points of O4, resolved:**
+- `FUN_141e3d660` is the window's "available MIOs" counter (`INDUSTRIAL_ORG_AVAILABLE_MIOS`,
+  window `+0x1170`): MIOs whose equipment types meet the window's mask. It keeps counting by type.
+- The toggle (`FUN_141e3d120`): a click closes the window when it is open with the same mask. A
+  new tab's mask is its equipment's mask union plus one bit of its own (bits 63 down, never an
+  equipment type), so tabs never share a mask, and the MIO counter and the ship filters
+  (`FUN_141e3c410`) still see the real types.
+
+**Syntax** (`common/hoi4_loader_production_tabs/*.txt`, engine-tier feature `production_tabs`):
+```
+# The vanilla tabs are infantry | armor | air | naval; any other name is a new tab.
+artillery_tab = {
+    button = artillery_tab_button        # required for a new tab: a buttonType in the production view
+    glow = artillery_tab_button_glow     # optional iconType, shown while a design of the tab is new
+    add = { artillery_equipment anti_tank_equipment anti_air_equipment }
+}
+infantry = {
+    remove = { artillery_equipment anti_tank_equipment anti_air_equipment }
+}
+```
+- **A design is in a tab** when its archetype is in the tab's `add`, or (vanilla tabs) its type
+  matches the tab as in vanilla; and its archetype is not in the tab's `remove`. `remove` wins.
+  Nothing moves by itself: copy = `add`, move = `add` here plus `remove` there.
+- **Archetypes by exact name.** `duplicate_archetypes` copies are archetypes of their own (vanilla's
+  `light_tank_destroyer_chassis`, ...): listed separately. An archetype may be in any number of tabs.
+- **Merging:** the same tab in several files or mods merges its `add` / `remove`; for `button` and
+  `glow` the first definition (load order) wins, a different later one is logged.
+- **The button** is the mod's, in `countryproductionlineview.gui` (sprite, position, `pdx_tooltip`,
+  as for the vanilla ones); found by name anywhere in the production view. Missing: logged, the tab
+  off. The vanilla row has room for one more button (x = 265).
+- **Window:** a new tab whose archetypes are ships opens the dockyard list, otherwise the military
+  list. An archetype of the other kind (a ship in a land tab, a gun in `naval`): logged, skipped.
+- **Button state, every tab** (vanilla ones now by the same membership): enabled when the country
+  has a design of the tab, glow while one is new, "selected" while open; off without military
+  factories (dockyards for naval), as vanilla.
+- **Stays vanilla:** research, `can_be_produced`, `is_buildable`, outdated filter, the designer
+  button on each entry, the list a line's equipment button opens (by the line's types), existing
+  lines' grouping (`interface_category`). UI only: the add-line command doesn't check the tab.
+- **Later, if wanted:** `types = { ... }` next to the archetype lists.
+
+**Hooks:**
+1. `FUN_1417d8f10` (view setup, post): find each new tab's button and glow by name, bind the click
+   (`CButtonWrapper`).
+2. Click: `FUN_1417d6e10(view, tab mask, naval, window, button)`, as the vanilla thunks do.
+3. `FUN_141e3c020` / `FUN_141e3cd40` (the land/air and naval list builders): when the window's mask
+   is a tab's (vanilla or new), call the original with a filtered copy of the variant array (the
+   tab's members) and the window's mask set to all bits for that call; any other mask (a line's
+   equipment button) runs unchanged.
+4. `FUN_1417d8cc0` (one vanilla button's state): replaced by the membership version when vanilla
+   tabs have `add`/`remove`; `FUN_1417d66b0` (all buttons, post): the new buttons' state.
+- Patterns: the four click thunks (their masks give the vanilla tab table), the two list builders
+  (mask test shape), the button-state functions, the setup (button name `lea`s). Unique on 1.19.5
+  and 1.19.4.2.
+
+## O6: implementation and in-game test (2026-11-15)
+
+**Code** (as O5): `src/production_tabs.cpp` (parser, merge; `tests/production_tabs_test.cpp`, 29
+checks), `src/plugin_production_tabs.cpp` (definitions, archetype names resolved before game entry,
+the membership answer), `src/engine_production_tabs.cpp`.
+- Resolve reads everything from the game's own code: the four buttons and glow icons by name from
+  the setup's lookups (`kCodePtabFindA/B/C`), each click thunk's mask, window and naval flag, each
+  state call's mask and glow; the state function's design loop (`+0xf68` -> `+0xa0`/`+0xac`, design
+  mask `+0x408`, new `+0x426`, type `+0x3f0` (= production_data's), buildable `+0x445`), its enable /
+  disable / frame slots (`0x298`/`0x2a0`/`0xb0`, frames 2 open / 1 / 3) and the glow's show / hide
+  (`0x78`/`0x80`, flags `+0x75` bit `0x10`); the lists' mask test (window `+0x1120`).
+- New buttons are found by name in `production_win_top`, then `military_tab`, then the view's root
+  (lookup slot `0x68` buttons, `0x88` icons, `0x1b8` containers; a missing name gives a placeholder,
+  compared against a probe with a name that can't exist). A click goes through `CButtonWrapper`
+  (`Engine::BindButtonClick`, shared with province_building_removal), never freed.
+- Lists: for a tab's mask, the original runs with the tab's members (a filtered copy of the design
+  array) and the window's mask set to all bits for that call. A list never shows designs of the
+  other window (naval mask bits).
+- First run: `the production view's container lookups have an unexpected shape`, feature off,
+  vanilla tabs (the second lookup is 0x5d bytes after the first and 0x2f long: SigFindIn 0x80 was too
+  short, whole match needed; now 0x100). The fail-safe worked as intended.
+
+**In-game test** (1.19.5, Germany 1936, branch build, test mod only, its tabs file; for the new tab
+the installed test mod had a generated copy of `countryproductionlineview.gui` with the two elements
+of MODDING.md at x = 265, not in the repo; screenshots):
+1. `loader.log`: `1 new tab(s), 2 vanilla tab(s) changed`, `button hoi4_loader_test_guns_button bound
+   (with glow)`, per tab `4 removed` / `1 added` / `4 added`; no ERROR, no fault.
+2. Infantry: armored car, Karabiner 98k, civilian train, support equipment, truck; no towed
+   artillery or AA (Germany has a towed artillery line, so vanilla lists it).
+3. The new button (tooltip "Towed guns ...") opens a list with the 10.5 cm towed artillery and the
+   2 cm FlaK 30 and shows "selected". Clicking the howitzer: the game's MIO choice, "produce without":
+   line 22 "10,5-cm leichte Feldhaubitze 18" added, 20/28 -> 21/28 factories.
+4. A second click closes the list; then infantry opens and the new button is back to normal.
+5. After the decision "Unlock the test small arms": "Test Small Arms" in armor (with the tanks)
+   and still in infantry (add only: a copy).
+6. A line's own equipment button (the howitzer line) lists by the game's rule (infantry types and
+   the guns), unchanged; a destroyer line lists ships.
+7. Without the button in the GUI (first run of the generated file was broken): logged `the
+   production view has no button ...; the tab is off`, the vanilla tab changes still applied.
+
+**Offline:** check_signatures (5 new, unique) and check_code_shapes (6 new rows) on 1.19.5 and
+1.19.4.2; smoke `2/149`. **Not tested:** multiplayer (UI only).
+
+**Ship tab** (same day, owner's request; the test mod's `hoi4_loader_test_ships_tab`: submarines
+moved out of `naval`, destroyers copied; its button in the local test GUI at the repair button's
+place): the button opens the dockyard list (ship filters, "infinite" amount) with the Zerstörer
+1934A, the Type VII and the two base designs; the naval list has no submarine any more and keeps
+the destroyers. A Type VII line from the new tab: the game's MIO choice (HDW), then line 22 "Type
+VII" on dockyards ("U-31"). No ERROR, no fault. Tested on a local merge of this branch with the
+roles branch (both features together, not pushed).
+
+## O7: types and conditions (owner's requests, 2026-11-15)
+
+Owner's decisions on O6's list: a GUI injection feature no (the big mods are total overhauls and
+incompatible anyway); `types` yes; a condition for showing a tab yes; filters for existing lines no.
+
+### Types (`add_types` / `remove_types`)
+
+**Finding.** The type names of `type = { ... }` are the game's equipment categories
+(`script_enum_equipment_category`). `CategoryOf(const std::string*)` (`0x14100c8c0`) turns a name into
+the category's mask bit (0 for any other name): it looks the name up as a token (default token
+`0x4c17` = not found) and switches over the static token ids (`FUN_14100c900`; armor `4`, infantry
+`0x20`, motorized `8`, artillery bit 28, anti_tank bit 29, the masks the tabs and designs use). The
+game uses it for MIO equipment keys and `equipment_bonus` (`FUN_14100c750`, `FUN_140e247b0`). So no
+name table in the loader: `kSigPtabTypeByName` (unique on 1.19.5 and 1.19.4.2; both default token
+immediates equal), called with an engine string. Checked at first use: `armor` must give exactly
+the tank tab's mask and a made-up name 0, else `add_types` / `remove_types` are logged as unavailable.
+
+**Rule** (the plugin's answer per design): an archetype in `remove` -> out; in `add` -> in; the
+design's types (its archetype's and its modules' `add_equipment_type`, `+0x408`) meet
+`remove_types` -> out; meet `add_types` -> in; else the game's own answer. The more specific entry
+wins, and within a level `remove` wins. Lists merge across files and mods like the archetype lists.
+
+**In game** (1.19.5, Germany 1936, combined test build): `motorized` resolved to `0x8`;
+`infantry = { remove_types = { motorized } }` left Karabiner 98k and the civilian train in the
+infantry list; the truck, the armored car (`type = motorized`) and support equipment (`type =
+{ infantry motorized support }`) left it, as their types say. With `armor = { add_types = { motorized } }`
+(the test mod) the three show in the armor list next to the tanks: a move by type.
+
+### Conditions (a tab only for some countries, after a tech, ...)
+
+**What the game has.** Scripted GUIs (`common/scripted_guis`, `_documentation.md` there) can attach
+to the production screen: `parent_window_token = production_tab`, with `visible = { <trigger> }`
+and per element `<name>_click_enabled` triggers. That would make conditions vanilla: the mod puts
+its tab button in a scripted GUI, the loader only binds it.
+
+**Test** (local test mod only, not in the repo): a scripted GUI `parent_window_token =
+production_tab`, `visible = { tag = GER }`, with a button. The button shows on the production
+screen for Germany. The loader does not find it: not at the view's setup (the scripted GUI comes
+later), and not on later lookups either (a retry on every button update was added: it stays, as it
+is cheap and lets a late button work), neither by name in `production_win_top`, `military_tab` or
+the view's root, nor inside its window (`window_name`) looked up the same way.
+
+**Why.** Scripted GUIs live in `CScriptedWindowManager` (created by the in-game UI at `+0x2c8`,
+`FUN_140bb4940`; windows built by `FUN_140bdbb20`: an array at manager `+0x20`, count `+0x2c`, each a
+`CScriptedWindow` of 0xc10 bytes with its template at `+0xe8`, the template's `window_name` at `+0x30`).
+`CScriptedWindow` is not a `CContainerWindow` (its own short vtable `0x1429cb358`; slot `0x68` is not the
+container's lookup), so the named lookups the loader uses don't reach into it. Reaching its
+elements needs more analysis (how it holds its GUI tree), and holding the manager safely needs its
+lifetime (hook after its build; it dies with the in-game UI).
+
+**Options for the owner:**
+1. Finish the scripted GUI path: full vanilla triggers and the mod's own position for the button;
+   the most analysis (the scripted window's element tree, the manager's lifetime).
+2. A loader key reading a **flag**: `visible_flag = <country flag>` (and/or a global flag) for new
+   tabs and the vanilla ones (hidden when the flag is missing). Any script can set the flag with any
+   trigger logic (focus, decision, on_action); small analysis (where a country keeps its flags).
+3. A loader key naming a **scripted trigger** the loader evaluates for the player's country:
+   `visible = my_scripted_trigger`. Full trigger power without the scripted GUI, but the loader needs
+   to call the game's trigger evaluation with a country scope (not done before; medium analysis).
+
+## O8: `visible` = a scripted trigger (owner's choice: option 3, 2026-11-15)
+
+**Findings** (1.19.5, same on 1.19.4.2):
+- Scripted triggers are `CScriptedTriggerTemplate`s (`common/scripted_triggers`), each an AND trigger
+  itself (its vtable's evaluate slot 22 is `CAndTrigger`'s), name std::string at `+0x60`, "valid"
+  byte at `+0x58`. The database (`CScriptedTriggerTemplateDatabase`) is a global (`0x1433dd4a0`);
+  `Find(db, const std::string* name)` (`0x140b07e20`) returns the template or a dummy whose valid byte
+  is 0.
+- The trigger parser uses exactly that for `<name> = yes` (`0x14059771c`): `mov r15, [db]` ...
+  `Find(r15, &name)`, then `test r15; cmp byte [r15+0x58], 0` before building a `CScriptedTrigger`
+  (`new 0x68`, ctor `0x14143d880`: template at `+0x60`). `kSigPtabScriptedTrigger` matches from the db
+  load to the Find call; `kCodePtabScriptedValid` (SigFindIn 0x100) the valid test.
+- `CScriptedTrigger::Evaluate` (RTTI slot 22, `0x14143e120`): `template->vtable[0x18](template, scope)
+  == (yes/no byte +0x58)`. `kCodePtabScriptedEval` there gives the template field and the slot.
+- A country scope: the `CEventScope` constructor and SetCountry the loader already has (player_scope,
+  on_game_loaded). For a UI condition it is built with seed 0, **not** through SyncedRandom (that
+  RNG is checked for multiplayer sync; a UI call there would desync).
+
+**Design:**
+```
+artillery_tab = {
+    button = artillery_tab_button
+    visible = my_artillery_tab_visible   # a scripted trigger; ROOT/THIS = the player's country
+    add = { ... }
+}
+naval = { visible = has_navy_tabs }      # the vanilla tabs too
+```
+- The button (and its glow) hides while the trigger is false for the player's country, shows again
+  when it is true. Evaluated when the production view sets its buttons up and on every update of
+  their state (the game's own moments), so it follows changes when the screen updates.
+- No `visible`: always shown (as now). An unknown or invalid scripted trigger name: logged when the
+  game starts, the condition ignored (the tab shows).
+- Only the button: a hidden tab's list that is open stays open until closed; the add-line command,
+  saves and multiplayer are untouched (the condition is evaluated locally, UI only).
+- Merging: `visible` like `button`: the first definition wins, a different later one is logged.
+- Fail safe: no signature: `visible` logged as unavailable, tabs always shown; a fault while
+  evaluating: the feature's usual fault path (game tabs from then on).
+
+**Implementation and in-game test** (2026-11-15):
+- `Engine::WithCountryScope(tag, fn, ctx, &result)` (engine.cpp): a CEventScope with seed 0, ROOT and
+  THIS the country (SetCountry), under SEH. The tabs call the template's evaluate entry in it.
+- First run: `no scripted trigger ... ; the tab always shows`. A diagnostic showed the Find pointer
+  outside every module: the call's offset in the signature was 0x55, the E8 is at +0x51 (the
+  `4C 8B F8` after it is at +0x55). The fault guard caught it (returned "not found"). Fixed; the
+  resolver and check_code_shapes.py now also require the E8 there.
+- In game (1.19.5, Germany 1936, combined test build): `visible while hoi4_loader_test_tabs_visible`
+  for the guns tab and the naval tab; both buttons show. Decision "Tabs: hide the guns and naval
+  tabs" (sets the country flag): reopened, both are gone, the other tabs (infantry, armor, air, the
+  ship tab) stay. "Tabs: show them again": both back. No fault, no ERROR.
+- Offline: both checkers on 1.19.5 and 1.19.4.2 (one more signature: smoke `2/151`); 37 unit checks.
+
+## O9: `enabled` = a scripted trigger (owner's choice, 2026-11-15)
+
+The last addition to the tabs on this branch. Next to `visible` (hide the button), `enabled` keeps
+the button but greys it out, e.g. a tab that is seen from the start and unlocks with research.
+
+**Findings:** nothing new. The pieces are O2's (the disable slot, the disabled frame `3`, the glow
+hide) and O8's (scripted trigger lookup, evaluation in a country scope with seed 0).
+
+**Design:**
+```
+rocket_tab = {
+    button = rocket_tab_button
+    enabled = my_rocket_tab_enabled   # a scripted trigger; ROOT/THIS = the player's country
+    add_types = { ... }
+}
+air = { enabled = my_has_air_tabs }   # the vanilla tabs too
+```
+- While the trigger is false the button is disabled (the game's own disabled look, as for a tab
+  without designs or factories) and its glow is hidden. True: the button's normal state (enabled
+  when the country has a design of the tab, else disabled, as now).
+- `visible` wins: a hidden button stays hidden whatever `enabled` says. Both may be set.
+- Evaluated at the same moments as `visible` (each update of the buttons' state), after the game's
+  or the loader's own state for the button, so it only ever disables.
+- The open tab: a tab whose list is open keeps its "selected" look and its list until closed (as
+  `visible`). A click on a disabled new tab's button is also refused in the loader's click handler
+  (the vanilla buttons don't click while disabled).
+- No tooltip of its own: the button's `pdx_tooltip` is the mod's and can't depend on the trigger;
+  a mod that wants to explain the lock says so in the tooltip text.
+- Unknown trigger name, merging, unavailable signature, faults: as `visible` (logged; the tab stays
+  enabled; first definition wins; the feature's fault path).
+- Engine API: `PtabCondition_t` gets the condition kind (`kPtabVisible`, `kPtabEnabled`).

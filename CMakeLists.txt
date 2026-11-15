@@ -70,6 +70,10 @@ add_library(hoi4_loader SHARED
     src/equipment_designers.cpp
     src/equipment_designers.h
     src/plugin_equipment_designers.cpp
+    src/engine_production_tabs.cpp
+    src/production_tabs.cpp
+    src/production_tabs.h
+    src/plugin_production_tabs.cpp
     src/plugin_attention_area.cpp
     src/engine_attention.cpp
     src/engine_province_data.cpp
@@ -149,6 +153,12 @@ if(HOI4_LOADER_BUILD_TESTS)
     target_compile_features(air_scenarios_test PRIVATE cxx_std_17)
     target_compile_definitions(air_scenarios_test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
     set_target_properties(air_scenarios_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/$<0:>)
+
+    # production_tabs without engine access: the definition parser and merging (NOTES.md Part O).
+    add_executable(production_tabs_test tests/production_tabs_test.cpp src/production_tabs.cpp src/script_tree.cpp)
+    target_compile_features(production_tabs_test PRIVATE cxx_std_17)
+    target_compile_definitions(production_tabs_test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    set_target_properties(production_tabs_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/$<0:>)
 
     # Shader patterns (attention_area fill/outline patterns), pure text, against vanilla-shaped shader files.
     add_executable(shader_patterns_test tests/shader_patterns_test.cpp src/shader_patterns.cpp src/shader_builtins.cpp src/shader_check.cpp)

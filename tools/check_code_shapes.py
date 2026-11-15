@@ -212,6 +212,7 @@ def check(path, codes):
     results += check_time_control(img, codes, text_va, text)
     results += check_equipment_conversion(img, codes, text_va, text)
     results += check_equipment_designers(img, codes, text_va, text)
+    results += check_production_tabs(img, codes, text_va, text)
     return results
 
 
@@ -764,6 +765,111 @@ def check_equipment_designers(img, codes, text_va, text):
     results.append(('kSigEqdPool / XpShown / Tooltip / command tests (pools +0x%x/+0x%x/+0x%x)' %
                     (u8(army + 3) if army else -1, u8(pool + k['kSigEqdPoolNavyDisp']) if pool else -1,
                      u8(pool + k['kSigEqdPoolAirDisp']) if pool else -1), ok, ' '.join(rets)))
+    return results
+
+
+def check_production_tabs(img, codes, text_va, text):
+    """production_tabs (NOTES.md Part O): the same pieces engine_production_tabs.cpp resolves, with its cross-checks."""
+    hdr = pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h'
+    sigs, _ = cs.load_signatures(hdr)
+    sigs, k = dict(sigs), load_constants(hdr)
+    arrays = {m.group(1): [int(x, 0) for x in m.group(2).split(',')]
+              for m in re.finditer(r'\b(kSigPtab\w+)\[4\]\s*=\s*\{([^}]*)\}', hdr.read_text(encoding='utf-8'))}
+    u8 = lambda va: img.d[img.va2off(va)]
+    u32 = lambda va: struct.unpack_from('<I', img.d, img.va2off(va))[0]
+    u64 = lambda va: struct.unpack_from('<Q', img.d, img.va2off(va))[0]
+
+    def one(name):
+        m = [text_va + x.start() for x in cs.compile_pattern(sigs[name]).finditer(text)]
+        return m[0] if len(m) == 1 else None
+
+    def string(lea):
+        o = img.va2off(lea + 7 + i32(img, lea + 3))
+        return img.d[o:img.d.index(b'\0', o)].decode('ascii', 'replace')
+
+    results = []
+    setup, clicks, states = one('kSigPtabSetup'), one('kSigPtabClicks'), one('kSigPtabStates')
+    land, naval = one('kSigPtabListLand'), one('kSigPtabListNaval')
+    if not (setup and clicks and states and land and naval):
+        return [('production_tabs signatures', False, 'missing')]
+    # Setup: root, the two containers, the named lookups.
+    r = find_in(img, setup, 0x100, codes['kCodePtabRoot'])
+    t = find_in(img, r, 0x100, codes['kCodePtabTop']) if r else None
+    slot = u32(r + k['kCodePtabRootSlot']) if r else 0
+    ok = bool(r and t) and u32(t + k['kCodePtabTopSlot']) == slot
+    names = (string(r + k['kCodePtabRootName']), string(t + k['kCodePtabTopName'])) if ok else ('-', '-')
+    results.append(('kCodePtabRoot / Top (%s > %s, slot 0x%x)' % (names[0], names[1], slot), ok, hex(r or 0)))
+    found = {}
+    for i in range(k['kCodePtabFindRange']):
+        c = setup + i
+        if img.match_at(c, codes['kCodePtabFindA']):
+            found[string(c + 7)] = (u8(c + 6), u32(c + 0x33))
+        elif img.match_at(c, codes['kCodePtabFindB']):
+            found[string(c + 3)] = (u8(c + 0x2b), u32(c + 0x2f))
+        elif img.match_at(c, codes['kCodePtabFindC']):
+            found[string(c + 3)] = (u32(c + 0x2b), u32(c + 0x32))
+    buttons = ['infantry_button', 'tank_button', 'aircraft_button', 'naval_button']
+    ok = all(b in found and b + '_glow' in found for b in buttons) and \
+        len({found[b][0] for b in buttons}) == 1 and len({found[b + '_glow'][0] for b in buttons}) == 1
+    results.append(('kCodePtabFindA/B/C (%d lookups; button slot 0x%x, icon slot 0x%x)' %
+                    (len(found), found[buttons[0]][0] if ok else -1, found[buttons[0] + '_glow'][0] if ok else -1), ok,
+                    hex(setup)))
+    disp = {found[b][1]: b for b in buttons} if ok else {}
+    # Click handlers and button states: each tab once, one Open and one State function.
+    masks, opens = {}, set()
+    for off in arrays.get('kSigPtabClickThunk', []):
+        th = clicks + off
+        wide = u8(th + k['kSigPtabThunkMaskOp']) == 0x48
+        mask = u64(th + k['kSigPtabThunkMaskOp'] + 2) if wide else u32(th + k['kSigPtabThunkMaskOp'] + 1)
+        opens.add(rel32(img, th + (0x24 if wide else 0x1f)))
+        b = disp.get(u32(th + k['kSigPtabThunkButtonDisp']), '?')
+        masks[b] = (mask, u8(th + k['kSigPtabThunkNaval']) == 0x41)
+    ok = len(opens) == 1 and set(masks) == set(buttons) and all(masks[b][1] == (b == 'naval_button') for b in buttons)
+    results.append(('kSigPtabClicks (%s)' % ', '.join('%s 0x%x' % (b.split('_')[0], masks[b][0]) for b in buttons if b in masks),
+                    ok, hex(clicks)))
+    fns, state = set(), {}
+    for i in range(4):
+        b = disp.get(u32(states + arrays['kSigPtabStateButton'][i]), '?')
+        m = arrays['kSigPtabStateMask'][i]
+        state[b] = u32(states + m) if i < 2 else u64(states + m)
+        fns.add(rel32(img, states + arrays['kSigPtabStateCall'][i]))
+        ok = ok and b in found and u32(states + arrays['kSigPtabStateGlow'][i]) == found.get(b + '_glow', (0, -1))[1]
+    fn = fns.pop() if len(fns) == 1 else 0
+    ok = ok and bool(fn) and set(state) == set(buttons)
+    results.append(('kSigPtabStates (state masks %s)' % ', '.join('0x%x' % state[b] for b in buttons if b in state), ok, hex(states)))
+    f = find_in(img, fn, 0x80, codes['kCodePtabFactories']) if fn else None
+    d = find_in(img, fn, 0x200, codes['kCodePtabVariants']) if fn else None
+    s = find_in(img, fn, 0x280, codes['kCodePtabState']) if fn else None
+    g = find_in(img, s, 0x80, codes['kCodePtabGlow']) if s else None
+    ok = bool(f and d and s and g)
+    if ok:
+        ok = u32(d + k['kCodePtabCountDisp']) == u32(d + k['kCodePtabDesignsDisp']) + 0xc and \
+            u8(g + k['kCodePtabGlowFlags2']) == u8(g + k['kCodePtabGlowFlags']) and \
+            (~u8(g + k['kCodePtabGlowClear'])) & 0xff == u8(g + k['kCodePtabGlowSet'])
+    results.append(('kCodePtabFactories / Variants / State / Glow (design mask +0x%x, type +0x%x)' %
+                    (u32(d + k['kCodePtabMaskDisp']) if d else -1, u32(d + k['kCodePtabTypeDisp']) if d else -1), ok, hex(fn)))
+    lt = find_in(img, land, k['kCodePtabMaskTestRange'], codes['kCodePtabMaskTestLand'])
+    nt = find_in(img, naval, k['kCodePtabMaskTestRange'], codes['kCodePtabMaskTestNaval'])
+    ok = bool(lt and nt and d) and u32(lt + 3) == u32(nt + 3) and \
+        u32(lt + k['kCodePtabDesignMaskDisp']) == u32(nt + k['kCodePtabDesignMaskDisp']) == u32(d + k['kCodePtabMaskDisp'])
+    results.append(('kCodePtabMaskTestLand / Naval (window mask +0x%x)' % (u32(lt + 3) if lt else -1), ok, hex(lt or 0)))
+    tn = one('kSigPtabTypeByName')
+    ok = bool(tn) and u32(tn + k['kSigPtabTypeDefaultToken']) == u32(tn + k['kSigPtabTypeDefaultToken2'])
+    results.append(('kSigPtabTypeByName (default token 0x%x)' % (u32(tn + k['kSigPtabTypeDefaultToken']) if tn else -1), ok,
+                    hex(tn or 0)))
+    # visible: the parser's scripted trigger lookup, its valid test, CScriptedTrigger::Evaluate (RTTI slot 22).
+    st = one('kSigPtabScriptedTrigger')
+    v = find_in(img, st, 0x100, codes['kCodePtabScriptedValid']) if st else None
+    sc = img.vtable('.?AVCScriptedTrigger@@')
+    slot = k['kScriptedTriggerEvalSlot']
+    ev = sc[1][slot] if sc and len(sc[1]) > slot else 0
+    call = st + k['kSigPtabScriptedFindCall'] if st else 0
+    ok = bool(st and v and ev) and img.match_at(ev, codes['kCodePtabScriptedEval']) and \
+        u8(ev + k['kCodePtabScriptedEvalSlot']) % 8 == 0 and u8(call) == 0xE8 and img.is_code(rel32(img, call))
+    results.append(('kSigPtabScriptedTrigger / Valid / Eval (find 0x%x, valid +0x%x, template +0x%x, eval slot 0x%x)' %
+                    (rel32(img, call) if st else 0, u8(v + k['kCodePtabScriptedValidDisp']) if v else -1,
+                     u8(ev + k['kCodePtabScriptedTemplateDisp']) if ok else -1, u8(ev + k['kCodePtabScriptedEvalSlot']) if ok else -1),
+                    ok, hex(st or 0)))
     return results
 
 

@@ -1223,6 +1223,94 @@ static const size_t kCodeEqdCreateCall = 0xb;
 CODE(kCodeEqdUpdateTest, "48 8B 8F ?? ?? ?? ?? E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ?? 49 8B 95 ?? ?? ?? ?? 48 8D 8D ?? ?? ?? ?? E8")
 static const size_t kCodeEqdUpdateCall = 7;
 
+// --- Production tabs (production_tabs, NOTES.md Part O; addresses 1.19.5, same on 1.19.4.2) -------
+// The production view's setup (CProductionView, 0x1417d8f10): finds its elements by name (the four
+// "add production line" buttons and their glow icons among them) and keeps them in the view.
+// Hooked (after it) to bind the mod's tab buttons. Function start.
+SIG(kSigPtabSetup, "48 89 5C 24 18 55 56 57 41 54 41 55 41 56 41 57 48 8B EC 48 83 EC 70 0F 29 74 24 60 48 8B F1 45 33 ED 44 89 6D 40 4C 8D B1 ?? ?? ?? ?? 45 89 6E 0C C7 45 40 ?? ?? ?? ?? 48 8D 55 40 49 8B CE E8")
+// The four buttons' click handlers, one after another (air, infantry, naval, tank; 0x1417d6ff0):
+// Open(view, mask, naval, view->[window], view->[button]). Each at kSigPtabClickThunk[i]: button
+// disp32 at +7, r8 at +0xb (45 33 C0: land, 41 B0 01: naval), window disp32 at +0x11, the tab's type
+// mask as imm64 (48 BA, +0x15; value at +0x17, E8 at +0x24) or imm32 (BA, value at +0x16, E8 at +0x1f).
+SIG(kSigPtabClicks, "48 83 EC 38 48 8B 81 ?? ?? ?? ?? 45 33 C0 4C 8B 89 ?? ?? ?? ?? 48 BA ?? ?? ?? ?? ?? ?? ?? ?? 48 89 44 24 20 E8 ?? ?? ?? ?? 48 83 C4 38 C3 CC CC 48 83 EC 38 48 8B 81 ?? ?? ?? ?? 45 33 C0 4C 8B 89 ?? ?? ?? ?? BA ?? ?? ?? ?? 48 89 44 24 20 E8 ?? ?? ?? ?? 48 83 C4 38 C3 CC CC CC CC CC CC CC 48 83 EC 38 48 8B 81 ?? ?? ?? ?? 41 B0 01 4C 8B 89 ?? ?? ?? ?? 48 BA ?? ?? ?? ?? ?? ?? ?? ?? 48 89 44 24 20 E8 ?? ?? ?? ?? 48 83 C4 38 C3 CC CC 48 83 EC 38 48 8B 81 ?? ?? ?? ?? 45 33 C0 4C 8B 89 ?? ?? ?? ?? BA ?? ?? ?? ?? 48 89 44 24 20 E8 ?? ?? ?? ?? 48 83 C4 38 C3")
+static const size_t kSigPtabClickThunk[4] = {0, 0x30, 0x60, 0x90};
+static const size_t kSigPtabThunkButtonDisp = 7, kSigPtabThunkNaval = 0xb, kSigPtabThunkWindowDisp = 0x11, kSigPtabThunkMaskOp = 0x15;
+// The buttons' state (0x1417d66b0, (view, open button)): State(button, glow, open, mask) for each tab
+// (the last as a tail jump). Hooked (after it) for the new buttons and the vanilla ones with add /
+// remove. Per call i: glow disp32, button disp32, mask (imm32 for the first two, imm64 for the
+// others), call. Function start.
+SIG(kSigPtabStates, "48 89 5C 24 08 57 48 83 EC 20 48 8B DA 4C 8B C2 48 8B 91 ?? ?? ?? ?? 48 8B F9 48 8B 89 ?? ?? ?? ?? 41 B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B 97 ?? ?? ?? ?? 41 B9 ?? ?? ?? ?? 48 8B 8F ?? ?? ?? ?? 4C 8B C3 E8 ?? ?? ?? ?? 48 8B 97 ?? ?? ?? ?? 49 B9 ?? ?? ?? ?? ?? ?? ?? ?? 48 8B 8F ?? ?? ?? ?? 4C 8B C3 E8 ?? ?? ?? ?? 48 8B 97 ?? ?? ?? ?? 49 B9 ?? ?? ?? ?? ?? ?? ?? ?? 48 8B 8F ?? ?? ?? ?? 4C 8B C3 48 8B 5C 24 30 48 83 C4 20 5F E9")
+static const size_t kSigPtabStateGlow[4] = {0x13, 0x2f, 0x4b, 0x6b};
+static const size_t kSigPtabStateButton[4] = {0x1d, 0x3c, 0x5c, 0x7c};
+static const size_t kSigPtabStateMask[4] = {0x23, 0x35, 0x51, 0x71};  // imm32, imm32, imm64, imm64
+static const size_t kSigPtabStateCall[4] = {0x27, 0x43, 0x63, 0x8d};  // E8, E8, E8, E9
+// The add-line window's lists: (window, const variants*, int* used). Land and air designs
+// (0x141e3c020) and ships (0x141e3cd40); the window's refresh calls them with the country's design
+// array. Hooked to list a tab's members. Function starts.
+SIG(kSigPtabListLand, "4C 89 44 24 18 48 89 54 24 10 55 53 56 57 41 54 41 55 41 56 41 57 48 8B EC 48 83 EC 78 4D 8B F8 48 8B FA 4C 8B F1 45 33 ED 44 89 6D 48 48 8B 81 ?? ?? ?? ?? 48 8B 80 ?? ?? ?? ?? 48 89 45 B8")
+SIG(kSigPtabListNaval, "48 89 5C 24 18 48 89 54 24 10 55 56 57 41 54 41 55 41 56 41 57 48 83 EC 70 4D 8B E0 48 8B F2 48 8B F9 45 33 FF 44 89 BC 24 B0 00 00 00 48 8B 81 ?? ?? ?? ?? 48 8B 80 ?? ?? ?? ?? 48 89 44 24 30")
+// The equipment category of a type name (`type = { ... }` names: infantry, armor, artillery ...) as
+// a type mask bit, 0 for any other name (0x14100c8c0): CategoryOf(const std::string*). The same
+// masks the tabs and designs use (checked at first use: "armor" is the tank tab's mask). Function start.
+SIG(kSigPtabTypeByName, "48 83 EC 28 48 83 79 18 0F 76 03 48 8B 09 48 8B D1 41 B8 ?? ?? ?? ?? 48 8D 4C 24 30 E8 ?? ?? ?? ?? 8B 4C 24 30 81 F9 ?? ?? ?? ?? 74 09 48 83 C4 28 E9 ?? ?? ?? ?? 33 C0 48 83 C4 28 C3")
+static const size_t kSigPtabTypeDefaultToken = 0x13, kSigPtabTypeDefaultToken2 = 0x27;
+// The trigger parser on a scripted trigger's name (0x14059771c): db = [rip+rel32 at +3] (the
+// CScriptedTriggerTemplateDatabase), ... Find(db, const std::string* name) (E8 at +0x51): the
+// template, or a dummy whose valid byte is 0 (kCodePtabScriptedValid).
+SIG(kSigPtabScriptedTrigger, "4C 8B 3D ?? ?? ?? ?? 4D 8D 66 ?? 41 83 3C 24 00 48 8B D6 74 04 49 8B 56 ?? 0F 57 C0 0F 11 44 24 48 0F 57 C9 F3 0F 7F 4C 24 58 49 C7 C0 FF FF FF FF 0F 1F 00 49 FF C0 42 80 3C 02 00 75 F6 48 8D 4C 24 48 E8 ?? ?? ?? ?? 90 48 8D 54 24 48 49 8B CF E8 ?? ?? ?? ?? 4C 8B F8")
+static const size_t kSigPtabScriptedDbRel = 3, kSigPtabScriptedFindCall = 0x51;
+
+// --- Production tabs (NOTES.md Part O; addresses 1.19.5, same on 1.19.4.2) ------------------------
+// In the setup (SigFindIn 0x100): root = GetRoot(view) (E8 at +3); container = root->vtable[disp32
+// +0xe](root, &{"military_tab"}, 1) (the name's lea at +0x12). (0x1417d8fb7)
+CODE(kCodePtabRoot, "48 8B CE E8 ?? ?? ?? ?? 48 8B 08 4C 8B 89 ?? ?? ?? ?? 48 8D 0D ?? ?? ?? ?? 48 89 4D C0 48 C7 45 C8 ?? 00 00 00 0F 28 45 C0 66 0F 7F 45 C0 41 B0 01 48 8D 55 C0 48 8B C8 41 FF D1 48 8B D8")
+static const size_t kCodePtabRootCall = 3, kCodePtabRootSlot = 0xe, kCodePtabRootName = 0x12;
+// Next (SigFindIn 0x100): the buttons' container = that container->vtable[disp32 +0x2b](&{name at
+// lea +3: "production_win_top"}, 1). (0x1417d9014)
+CODE(kCodePtabTop, "48 8B 03 48 8D 0D ?? ?? ?? ?? 48 89 4D C0 48 C7 45 C8 ?? 00 00 00 0F 28 45 C0 66 0F 7F 45 C0 41 B0 01 48 8D 55 C0 48 8B CB FF 90 ?? ?? ?? ?? 48 8B D8")
+static const size_t kCodePtabTopName = 3, kCodePtabTopSlot = 0x2b;
+// Then the named lookups on that container, each kept in the view (mov [rsi+disp32], rax), in three
+// shapes: A (the first, tank_button): slot disp8 +6, name lea +7, view disp32 +0x33; B (buttons):
+// name lea +3, slot disp8 +0x2b, view disp32 +0x2f; C (icons): name lea +3, slot disp32 +0x2b, view
+// disp32 +0x32. The loader reads every one within kCodePtabFindRange of the setup.
+CODE(kCodePtabFindA, "48 8B 08 4C 8B 49 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 C0 48 C7 45 C8 ?? 00 00 00 0F 28 45 C0 66 0F 7F 45 C0 41 B0 01 48 8D 55 C0 48 8B CB 41 FF D1 48 89 86 ?? ?? ?? ??")
+CODE(kCodePtabFindB, "48 8B 03 48 8D 0D ?? ?? ?? ?? 48 89 4D C0 48 C7 45 C8 ?? 00 00 00 0F 28 45 C0 66 0F 7F 45 C0 41 B0 01 48 8D 55 C0 48 8B CB FF 50 ?? 48 89 86 ?? ?? ?? ??")
+CODE(kCodePtabFindC, "48 8B 03 48 8D 0D ?? ?? ?? ?? 48 89 4D C0 48 C7 45 C8 ?? 00 00 00 0F 28 45 C0 66 0F 7F 45 C0 41 B0 01 48 8D 55 C0 48 8B CB FF 90 ?? ?? ?? ?? 48 89 86 ?? ?? ?? ??")
+static const size_t kCodePtabFindRange = 0x400;
+// State(button, glow, open, mask) (kSigPtabStates' first call, 0x1417d8cc0): CanHave(mask) (E8 at +0,
+// SigFindIn 0x80) and HasFactories(mask) (E8 at +0x16); the latter asserts on a mask that is not one
+// of the four tabs'.
+CODE(kCodePtabFactories, "E8 ?? ?? ?? ?? 41 BD 01 00 00 00 84 C0 0F 84 ?? ?? ?? ?? 48 8B CD E8 ?? ?? ?? ?? 84 C0 0F 84")
+static const size_t kCodePtabFactoriesCall2 = 0x16;
+// Its loop over the country's designs (SigFindIn 0x200): country->[disp32 +3] (production) ->
+// {designs disp32 +0xa, count disp32 +0x11}; design mask disp32 +0x25, "new" byte disp32 +0x2d, design
+// -> type disp32 +0x3b, type "buildable" byte disp32 +0x44. (0x1417d8e31)
+CODE(kCodePtabVariants, "48 8B 88 ?? ?? ?? ?? 48 8B 91 ?? ?? ?? ?? 48 63 81 ?? ?? ?? ?? 48 8D 0C C2 48 3B D1 74 ?? 90 48 8B 02 48 85 A8 ?? ?? ?? ?? 74 ?? 80 B8 ?? ?? ?? ?? 00 45 0F B6 F5 74 ?? 48 8B 80 ?? ?? ?? ?? 0F B6 DB 80 B8 ?? ?? ?? ?? 00")
+static const size_t kCodePtabProdDisp = 3, kCodePtabDesignsDisp = 0xa, kCodePtabCountDisp = 0x11, kCodePtabMaskDisp = 0x25,
+                    kCodePtabNewDisp = 0x2d, kCodePtabTypeDisp = 0x3b, kCodePtabBuildableDisp = 0x44;
+// Then the button's state (SigFindIn 0x280): open -> frame 2 (imm32 +3); else enable (vtable disp32
+// +0x13, frame 1) or disable (disp32 +0x1e, frame 3); SetFrame (disp32 +0x2f). (0x1417d8e97)
+CODE(kCodePtabState, "75 07 BA 02 00 00 00 EB 21 48 8B CF 45 84 F6 74 0B FF 90 ?? ?? ?? ?? 41 8B D5 EB 0B FF 90 ?? ?? ?? ?? BA 03 00 00 00 48 8B 07 48 8B CF FF 90 ?? ?? ?? ?? 48 8B 16 84 DB")
+static const size_t kCodePtabOpenFrame = 3, kCodePtabEnableSlot = 0x13, kCodePtabDisableSlot = 0x1e, kCodePtabFrameSlot = 0x2f;
+// And the glow (SigFindIn 0x80 after it): shown: flags byte disp8 +4 &= imm8 +5, vtable disp8 +0xe;
+// hidden: vtable disp32 +0x11, flags disp8 +0x17 |= imm8 +0x18. (0x1417d8ee6)
+CODE(kCodePtabGlow, "74 0D 80 66 ?? ?? 48 83 C4 50 5E 48 FF 62 ?? FF 92 ?? ?? ?? ?? 80 4E ?? ??")
+static const size_t kCodePtabGlowFlags = 4, kCodePtabGlowClear = 5, kCodePtabShowSlot = 0xe, kCodePtabHideSlot = 0x11,
+                    kCodePtabGlowFlags2 = 0x17, kCodePtabGlowSet = 0x18;
+// The lists' member test (SigFindIn 0x400): window->[disp32 +3] (the tab's mask) & design->[disp32
+// +0xa]. Land: 0x141e3c29b, naval: 0x141e3cf42.
+CODE(kCodePtabMaskTestLand, "49 8B 86 ?? ?? ?? ?? 48 85 86 ?? ?? ?? ?? 0F 84")
+CODE(kCodePtabMaskTestNaval, "48 8B 87 ?? ?? ?? ?? 48 85 83 ?? ?? ?? ?? 0F 84")
+static const size_t kCodePtabWindowMaskDisp = 3, kCodePtabDesignMaskDisp = 0xa, kCodePtabMaskTestRange = 0x400;
+// After kSigPtabScriptedTrigger's Find (SigFindIn 0x100): template null or its valid byte (disp8 +8)
+// zero: not a scripted trigger. (0x1405977c9)
+CODE(kCodePtabScriptedValid, "4D 85 FF 74 ?? 41 80 7F ?? 00 74 ?? B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 89 44 24 ?? 48 85 C0 74 ?? 49 8B D7 48 8B C8 E8")
+static const size_t kCodePtabScriptedValidDisp = 8;
+// CScriptedTrigger::Evaluate (RTTI .?AVCScriptedTrigger@@ slot 22, 0x14143e120): template = this->[disp8
+// +0xc]; template->vtable[disp8 +0x12](template, scope) (the CTrigger evaluate entry) == this's yes/no.
+CODE(kCodePtabScriptedEval, "40 53 48 83 EC 20 48 8B D9 48 8B 49 ?? 48 8B 01 FF 50 ?? 38 43 ?? 0F 94 C0")
+static const size_t kCodePtabScriptedTemplateDisp = 0xc, kCodePtabScriptedEvalSlot = 0x12, kScriptedTriggerEvalSlot = 22;
+
 #undef CODE
 #undef SIG
 #undef ANCHOR
