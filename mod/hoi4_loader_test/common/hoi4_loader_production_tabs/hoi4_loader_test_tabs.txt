@@ -14,6 +14,10 @@ infantry = {
 }
 armor = {
 	add = { hoi4_loader_test_small_arms }
+	add_types = { motorized }   # by type: trucks, armored cars, support equipment ...
+}
+infantry = {
+	remove_types = { motorized }   # ... leave the infantry tab (with add_types above: a move by type)
 }
 # A new tab of ships (it opens the dockyard list): submarines move out of the naval tab, destroyers
 # are copied. Its button: hoi4_loader_test_ships_button (no glow).
