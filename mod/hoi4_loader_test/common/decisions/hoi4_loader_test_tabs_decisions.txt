@@ -23,4 +23,26 @@ hoi4_loader_test_category = {
 		complete_effect = { clr_country_flag = hoi4_loader_test_hide_tabs }
 		ai_will_do = { base = 0 }
 	}
+	# `enabled` (NOTES.md O9): "Tabs: lock the ship and air tabs": both buttons are greyed out and
+	# don't open (an open one stays open until closed). "Tabs: unlock them": both work again.
+	hoi4_loader_tabs_lock = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_production_tabs = yes
+			NOT = { has_country_flag = hoi4_loader_test_lock_tabs }
+		}
+		complete_effect = { set_country_flag = hoi4_loader_test_lock_tabs }
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_tabs_unlock = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_production_tabs = yes
+			has_country_flag = hoi4_loader_test_lock_tabs
+		}
+		complete_effect = { clr_country_flag = hoi4_loader_test_lock_tabs }
+		ai_will_do = { base = 0 }
+	}
 }

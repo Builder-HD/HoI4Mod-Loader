@@ -4,3 +4,8 @@
 hoi4_loader_test_tabs_visible = {
 	NOT = { has_country_flag = hoi4_loader_test_hide_tabs }
 }
+# production_tabs `enabled` (NOTES.md O9): the ship tab and the vanilla air tab are greyed out while
+# the country has the flag hoi4_loader_test_lock_tabs (decisions "Tabs: lock ..." / "Tabs: unlock ...").
+hoi4_loader_test_tabs_enabled = {
+	NOT = { has_country_flag = hoi4_loader_test_lock_tabs }
+}

@@ -25,6 +25,10 @@ infantry = {
 hoi4_loader_test_ships_tab = {
 	button = hoi4_loader_test_ships_button
 	add = { ship_hull_submarine ship_hull_light }
+	enabled = hoi4_loader_test_tabs_enabled   # greyed out while false (decisions "Tabs: lock ..." / "unlock ...")
+}
+air = {
+	enabled = hoi4_loader_test_tabs_enabled   # a vanilla tab greyed out by the same trigger
 }
 naval = {
 	remove = { ship_hull_submarine }
