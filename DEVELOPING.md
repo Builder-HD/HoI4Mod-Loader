@@ -62,6 +62,8 @@ src/engine_designers.cpp      engine access for equipment_designers (can-open ho
 src/plugin_production_tabs.cpp  production_tabs feature (definitions, which tab lists which archetype)
 src/production_tabs.cpp       production_tabs without engine access: definition parser, merging (tested)
 src/engine_production_tabs.cpp  engine access for production_tabs (tab lists, button states, new tab buttons)
+src/plugin_province_terrain.cpp  province_terrain feature (effects, triggers, hoi4_ptr flags, game entry)
+src/engine_terrain.cpp        engine access for province_terrain (categories, masks, battles, supply)
 src/script_tree.cpp           the Paradox script reader shared by the definition parsers
 src/plugin_time_control.cpp   time_control feature (speed lock, pause block, hidden date; saved as flags)
 src/engine_data.cpp           engine access for the data triggers (read-only game state)

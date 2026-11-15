@@ -81,6 +81,8 @@ int ProvinceCount() {
     return n > 0 && n < 1000000 ? n : 0;
 }
 
+void* ProvinceById(int id) { return HaveProvinceIds() ? ProvinceObject(id) : nullptr; }
+
 int ProvinceIdOf(const void* province) { return province && g_provId ? Rd<int>(province, g_provId) : 0; }
 
 bool ProvinceIsCoastal(int id) {
@@ -96,10 +98,9 @@ int ProvinceController(int id) {
     return p && ProvinceControllerOffset() ? Rd<int>(p, ProvinceControllerOffset()) : 0;
 }
 
-int StateOwner(int stateId) {
-    void* s = StateById(stateId);
-    return s && g_stateOwner ? Rd<int>(s, g_stateOwner) : 0;
-}
+int StateOwner(int stateId) { return StateObjectOwner(StateById(stateId)); }
+
+int StateObjectOwner(const void* state) { return state && g_stateOwner ? Rd<int>(state, g_stateOwner) : 0; }
 
 bool ProvinceRect(int id, int rect[4]) {
     void* p = ProvinceObject(id);
@@ -107,6 +108,13 @@ bool ProvinceRect(int id, int rect[4]) {
     if (!gfx) return false;
     memcpy(rect, gfx + g_provRect, 4 * sizeof(int));
     return rect[2] >= 0 && rect[3] >= 0;
+}
+
+void* MapProvinceById(int id) {
+    void* map = g_ppMapData ? *g_ppMapData : nullptr;
+    if (!map || id <= 0 || id >= ProvinceCount()) return nullptr;
+    void* const* arr = Rd<void* const*>(map, g_mapArray);
+    return arr ? arr[id] : nullptr;
 }
 
 }  // namespace Engine

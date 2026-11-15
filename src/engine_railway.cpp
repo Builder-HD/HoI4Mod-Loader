@@ -1586,6 +1586,7 @@ bool HaveRailways() {
 
 bool RailwaysReady() { return HaveRailways() && Manager() != nullptr; }
 
+
 uint32_t ProvinceControllerOffset() { return g_provController; }
 
 int RailwayLevel(int a, int b) {
@@ -1756,6 +1757,15 @@ int DowngradeRailway(const std::vector<int>& path, int levels) {
     int changed = LowerPath(m, path, levels, &dirty);
     FinishChange(supply, dirty, changed);
     return changed;
+}
+
+bool HaveSupplyNotify() { return g_ppGameState && g_supplyOffset && g_notifySlot && g_vtSupply; }
+
+bool SupplyProvinceChanged(int province) {
+    void* supply = HaveSupplyNotify() ? Supply() : nullptr;
+    if (!supply || province <= 0) return false;
+    ((SupplyNotify_t)(*(void***)supply)[g_notifySlot])(supply, province);
+    return true;
 }
 
 }  // namespace Engine

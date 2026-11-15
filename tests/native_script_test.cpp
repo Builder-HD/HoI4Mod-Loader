@@ -359,6 +359,9 @@ int main() {
     ParamSpec badRepeat{"name", ParamType::Key, false};
     badRepeat.repeat = true;
     CHECK(!register_native_effect(Effect("bad_repeat", {badRepeat}), "feat_m"), "repeated key parameter refused");
+    ParamSpec kinds{"kind", ParamType::Token, false};
+    kinds.repeat = true;
+    CHECK(register_native_effect(Effect("mark_kinds", {kinds}), "feat_m"), "effect with a repeated token queued");
     CHECK(!register_native_effect(Effect("bad_block", {{"zone", ParamType::Block, true}}), "feat_m"), "block without keys refused");
     static std::vector<ParamSpec> kNested;
     kNested = {zone};
@@ -383,7 +386,7 @@ int main() {
     be.failBind.insert("bind_fails");
     document_on_action("on_test_loaded", "feat_d", "Fires in tests.");
     int n = NativeScriptFinalize(be, L"");
-    CHECK(n == 20, "20 commands registered (got %d)", n);
+    CHECK(n == 21, "21 commands registered (got %d)", n);
     CHECK(NativeFeatureComplete("feat_k") && !NativeFeatureComplete("feat_g"), "effect block features: complete / unknown child");
     CHECK(LogCount("the game has no effect 'no_such_effect' to allow inside") == 1, "unknown child effect logged");
     CHECK(NativeScriptFinalized(), "window closed after finalize");
@@ -816,6 +819,20 @@ int main() {
               "Args: the blocks' own keys");
         CHECK(native_country(b0.i(1), Scope(&sc)) == 7 && native_country(b1.i(1), Scope(&sc)) == rootCountry.country, "block countries resolved");
         CHECK(a.block(2, 5).size() == 0 && a.block(0, 0).size() == 0, "no such block: empty");
+    }
+    {
+        const Command* mk = nullptr;
+        for (const Command* c : NativeCommands())
+            if (c->name == "mark_kinds") mk = c;
+        CHECK(mk != nullptr, "repeated token command registered");
+        if (mk) {
+            ParsedCommand* k1 = NativeNewParsed(*mk);
+            CHECK(NativeSetArg(*k1, 0, "plains", &err) && NativeSetArg(*k1, 0, "forest", &err), "token written twice");
+            Args a(k1->args.data(), k1->args.size());
+            CHECK(a.count(0) == 2 && a.at(0, 0) == be.Intern("plains") && a.at(0, 1) == be.Intern("forest") &&
+                      std::string(a.key(0)) == "forest",
+                  "Args: both tokens in order, the last text");
+        }
     }
     CHECK(NativeTooltip(m1, &regionScope, false) == "" , "effect without tooltip callback: no line");
     docs = NativeScriptDocs();
