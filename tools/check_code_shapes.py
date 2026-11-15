@@ -586,25 +586,29 @@ def check_equipment_designers(img, codes, text_va, text):
     mask = rel32(img, designable + k['kCodeEqdDesignableMaskCall']) if ok else 0
     ok = ok and img.match_at(mask, codes['kCodeEqdDlcMask'])
     bit = u8(mask + k['kCodeEqdDlcTankBit']) if ok else 0
-    ok = ok and bit != 0 and bit & (bit - 1) == 0
-    results.append(('kCodeEqdDesignable / DlcMask (tank DLC bit 0x%x)' % bit, ok, hex(designable)))
+    u64 = lambda va: struct.unpack_from('<Q', img.d, img.va2off(va))[0]
+    ship = u64(mask + k['kCodeEqdDlcShipMask']) if ok else 0
+    plane = u64(mask + k['kCodeEqdDlcPlaneMask']) if ok else 0
+    ok = ok and bit != 0 and bit & (bit - 1) == 0 and ship != 0 and plane != 0 and not (ship & plane) and not ((ship | plane) & bit)
+    results.append(('kCodeEqdDesignable / DlcMask (ship 0x%x, tank 0x%x, plane 0x%x)' % (ship, bit, plane), ok, hex(designable)))
 
     opn = one('kSigEqdOpenVariant')
     t = find_in(img, opn, 0x300, codes['kCodeEqdTitle']) if opn else None
     fn = rel32(img, t + k['kCodeEqdTitleTextCall']) if t else 0
     anchor = lea('kAnchorEqdTitle')
     ok = bool(fn) and img.match_at(fn, codes['kCodeEqdTitleText']) and bool(anchor) and fn <= anchor < fn + 0x40
-    key = ''
-    if ok:
-        j = fn + k['kCodeEqdTitleTankJump']
-        tank = j + 2 + struct.unpack_from('<b', img.d, img.va2off(j + 1))[0]
-        if img.d[img.va2off(tank):img.va2off(tank) + 3] == b'\x48\x8d\x15':
-            target = tank + 7 + i32(img, tank + 3)
-            o = img.va2off(target)
+    found = []
+    for jump in ('kCodeEqdTitleShipJump', 'kCodeEqdTitleTankJump', 'kCodeEqdTitlePlaneJump') if ok else ():
+        j = fn + k[jump]
+        at = j + 2 + struct.unpack_from('<b', img.d, img.va2off(j + 1))[0]
+        key = '?'
+        if img.d[img.va2off(at):img.va2off(at) + 3] == b'\x48\x8d\x15':
+            o = img.va2off(at + 7 + i32(img, at + 3))
             key = img.d[o:img.d.index(b'\0', o)].decode('ascii', 'replace')
-        ok = key == 'TANK_DESIGNER_TITLE'
-    results.append(('kCodeEqdTitle / TitleText (kind +0x%x, title +0x%x, kind 1 = %s)' %
-                    (u32(t + 2) if t else -1, u32(t + 0xe) if t else -1, key or '?'), ok, hex(t or 0)))
+        found.append(key)
+    ok = ok and found == ['SHIP_DESIGNER_TITLE', 'TANK_DESIGNER_TITLE', 'PLANE_DESIGNER_TITLE']
+    results.append(('kCodeEqdTitle / TitleText (kind +0x%x, title +0x%x, kinds 0-2 = %s)' %
+                    (u32(t + 2) if t else -1, u32(t + 0xe) if t else -1, '/'.join(x.split('_')[0] for x in found) or '?'), ok, hex(t or 0)))
 
     ref = one('kSigEqdRefresh')
     assign = rel32(img, ref + k['kSigEqdRefreshAssignCall']) if ref else 0
@@ -654,7 +658,13 @@ def check_equipment_designers(img, codes, text_va, text):
             if slot and slot % 8 == 0 and img.d[img.va2off(after):img.va2off(after) + 3] == b'\x48\x89\x86' and slot not in slots:
                 slots.append(slot)
     ok = bool(store) and u32(store + k['kCodeEqdRootFindSlot']) in slots
-    results.append(('kCodeEqdRootFind (lookup slots %s)' % [hex(s) for s in slots], ok, hex(roles or 0)))
+    # The container lookup (plane_role): rcx = the same root, then the slot.
+    pr = lea('kAnchorEqdPlaneRole')
+    root = u32(store + k['kCodeEqdRootDisp']) if store else -1
+    cont = u32(pr + k['kCodeEqdRootFindContainerSlot']) if pr and img.match_at(pr, codes['kCodeEqdRootFindContainer']) else 0
+    ok = ok and bool(cont) and img.d[img.va2off(pr - 10):img.va2off(pr - 7)] == b'\x48\x8b\x8e' and u32(pr - 7) == root and \
+        img.d[img.va2off(pr - 3):img.va2off(pr)] == b'\x48\x8b\x01'
+    results.append(('kCodeEqdRootFind / Container (lookup slots %s, containers %s)' % ([hex(s) for s in slots], hex(cont)), ok, hex(roles or 0)))
     buttons = one('kSigEqdButtons')
     ok = bool(buttons and store) and u32(buttons + k['kSigEqdButtonsRootDisp']) == u32(store + k['kCodeEqdRootDisp'])
     results.append(('kSigEqdButtons (root +0x%x)' % (u32(buttons + k['kSigEqdButtonsRootDisp']) if buttons else -1), ok, hex(buttons or 0)))
@@ -684,6 +694,24 @@ def check_equipment_designers(img, codes, text_va, text):
         ok = ok and 0 < len(ids) <= 64 and all(kd != 0 or 0 <= i < keys for i, kd in zip(ids, kinds))
         arrays.append(len(ids))
     results.append(('kSigEqdStats / StatName (%d stat keys, rows %s)' % (keys, arrays), ok, hex(st or 0)))
+    # The view markers for the Fill hook: dispatcher and comparison panels reach the same fillers; the
+    # plane filler and the comparison's plane branch call Fill three times each.
+    disp, cmpf = one('kSigEqdStatsDispatch'), one('kSigEqdStatsRef')
+    fill = rel32(img, st + k['kSigEqdStatsFillCall']) if st else 0
+    call = lambda base, off: rel32(img, base + off) if base and u8(base + off) == 0xE8 else 0
+    ok = bool(disp and cmpf and st) and call(disp, k['kSigEqdStatsDispatchTankCall']) == st and \
+        call(cmpf, k['kSigEqdStatsRefTankCall']) == st and \
+        call(disp, k['kSigEqdStatsDispatchShipCall']) == call(cmpf, k['kSigEqdStatsRefShipCall']) != 0 and \
+        u32(disp + k['kSigEqdStatsDispatchKindDisp']) == (u32(t + 2) if t else -1)
+    pc = find_in(img, disp, 0x300, codes['kCodeEqdStatsPlane']) if ok else None
+    plane_fn = rel32(img, pc + k['kCodeEqdStatsPlaneCall']) if pc else 0
+
+    def fills(lo, n):
+        return sum(1 for a in range(lo, lo + n) if u8(a) == 0xE8 and rel32(img, a) == fill) if lo else 0
+    counts = [fills(plane_fn, 0x180), fills(call(disp, k['kSigEqdStatsDispatchShipCall']), 0x400), fills(st, 0x180), fills(cmpf, 0x300)]
+    ok = ok and counts == [3, 3, 3, 3]
+    results.append(('kSigEqdStatsDispatch / Ref / plane filler (Fill calls plane/ship/tank/ref %s)' % counts, ok,
+                    '%s %s' % (hex(disp or 0), hex(plane_fn))))
 
     # Experience: pool offsets and tests, the window's line, the tooltip masks, the commands' tests.
     pick, pool, shown, tip = one('kSigEqdPickWindow'), one('kSigEqdPool'), one('kSigEqdXpShown'), one('kSigEqdTooltip')

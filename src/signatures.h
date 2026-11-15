@@ -1054,12 +1054,26 @@ ANCHOR(kAnchorEqdRoles, "dropdown_tank_roles")
 ANCHOR(kAnchorEqdTitle, "EQUIPMENT_DESIGNER_TITLE")
 // The tank window's stats: Fill(panel, &{begin, end}, a, &{b, 1}, view->[disp32 +0x38]) (E8 at
 // +0x5e) for the base, combat and misc panels (r9, then the stack), over static {int id; int8 kind}
-// arrays: base begin/end lea at +0x1e/+0x2a, combat +0x64/+0x70, misc +0xae/+0xba. Hooked.
-// (0x141823950)
+// arrays: base begin/end lea at +0x1e/+0x2a, combat +0x64/+0x70, misc +0xae/+0xba. Not hooked:
+// gives Fill (hooked) and the stat ids the checks use. (0x141823950)
 SIG(kSigEqdStats, "48 89 5C 24 08 48 89 74 24 10 57 48 81 EC 80 00 00 00 4D 8B D1 49 8B F8 48 8B F2 48 8B D9 48 8D 05 ?? ?? ?? ?? 48 89 44 24 30 48 8D 05 ?? ?? ?? ?? 48 89 44 24 38 8B 81 ?? ?? ?? ?? 41 0F 10 00")
 static const size_t kSigEqdStatsExtraDisp = 0x38, kSigEqdStatsFillCall = 0x5e;
 static const size_t kSigEqdStatsLea0 = 0x1e, kSigEqdStatsLea1 = 0x2a, kSigEqdStatsLea2 = 0x64, kSigEqdStatsLea3 = 0x70,
                     kSigEqdStatsLea4 = 0xae, kSigEqdStatsLea5 = 0xba;
+// The stats dispatcher (view, from the refresh): by kind view->[disp32 +0xf] the ship filler (E8 at
+// +0x9b, same arguments as kSigEqdStats), the tank filler (E8 at +0x1e5, kSigEqdStats) or the
+// plane filler (view) (kCodeEqdStatsPlane). Each filler calls Fill three times: base, combat, misc.
+// Hooked (marks the view for the Fill hook). (0x141823510)
+SIG(kSigEqdStatsDispatch, "40 55 53 57 41 56 48 8B EC 48 83 EC 78 8B 81 ?? ?? ?? ?? 4C 8B F1 85 C0 0F 85")
+static const size_t kSigEqdStatsDispatchKindDisp = 0xf, kSigEqdStatsDispatchShipCall = 0x9b, kSigEqdStatsDispatchTankCall = 0x1e5;
+// In the dispatcher (SigFindIn 0x300): cmp eax,2; jne; call the plane filler (E8 at +5). Hooked
+// too (it has three more callers). (0x141823775 -> 0x141823790)
+CODE(kCodeEqdStatsPlane, "83 F8 02 75 05 E8")
+static const size_t kCodeEqdStatsPlaneCall = 5;
+// The comparison panels (ref_*_stats, view): the ship filler (E8 at +0x13c), the tank filler (E8 at
+// +0x1bb) or, for planes, Fill itself, three times. Hooked (marks the view). (0x1418247c0)
+SIG(kSigEqdStatsRef, "48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20 55 41 56 41 57 48 8D 6C 24 B9 48 81 EC 90 00 00 00 4C 8B F1 48 83 B9 ?? ?? ?? ?? 00 0F 84 ?? ?? ?? ?? 48 8D B1")
+static const size_t kSigEqdStatsRefShipCall = 0x13c, kSigEqdStatsRefTankCall = 0x1bb;
 // A stat row's label: Localize(table[id]); the table's lea rel32 at +0xc: one loc key per stat id
 // (STAT_ARMY_DEFAULT_MORALE ... STAT_COMMON_BUILD_COST_IC). (0x1414822a0)
 SIG(kSigEqdStatName, "40 53 48 83 EC 30 48 63 D2 48 8D 05 ?? ?? ?? ?? 45 33 C9 45 33 C0 48 8B D9 48 8B 14 D0 E8")
@@ -1092,18 +1106,20 @@ SIG(kSigEqdTooltip, "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 55 48 8D 6C 24
 // designer mask (E8 at +0x14). Not hooked (gameplay callers). (0x140cf5670)
 CODE(kCodeEqdDesignable, "40 53 48 83 EC 20 83 79 ?? 00 48 8B D9 74 ?? 48 89 7C 24 30 E8")
 static const size_t kCodeEqdDesignableCountDisp = 8, kCodeEqdDesignableMaskCall = 0x14;
-// The DLC designer mask: per DLC (id imm8 at +0xb, +0x17, ...) its designer type bits; the second
-// DLC (No Step Back, the tank designer) ORs imm8 +0x3b. (0x14100bfe0)
-CODE(kCodeEqdDlcMask, "48 89 5C 24 08 57 48 83 EC 20 B9 ?? 00 00 00 E8 ?? ?? ?? ?? F6 D8 B9 ?? 00 00 00 48 B8 ?? ?? ?? ?? ?? ?? ?? ?? 48 1B DB 48 23 D8 E8 ?? ?? ?? ?? 48 8B FB B9 ?? 00 00 00 48 83 CF ??")
-static const size_t kCodeEqdDlcTankBit = 0x3b;
+// The DLC designer mask: per DLC (id imm8 at +0xb, +0x17, +0x35) its designer type bits: Man the
+// Guns (ships) imm64 at +0x1d, No Step Back (tanks) ORs imm8 +0x3b, By Blood Alone (planes) imm64
+// at +0x4e. (0x14100bfe0)
+CODE(kCodeEqdDlcMask, "48 89 5C 24 08 57 48 83 EC 20 B9 ?? 00 00 00 E8 ?? ?? ?? ?? F6 D8 B9 ?? 00 00 00 48 B8 ?? ?? ?? ?? ?? ?? ?? ?? 48 1B DB 48 23 D8 E8 ?? ?? ?? ?? 48 8B FB B9 ?? 00 00 00 48 83 CF ?? 84 C0 48 0F 44 FB E8 ?? ?? ?? ?? 48 8B 5C 24 30 48 BA ?? ?? ?? ?? ?? ?? ?? ?? 48 8B CF 48 0B CA")
+static const size_t kCodeEqdDlcTankBit = 0x3b, kCodeEqdDlcShipMask = 0x1d, kCodeEqdDlcPlaneMask = 0x4e;
 // In Open (SigFindIn 0x300): title = TitleText(view->[disp32 +2] window kind) (E8 at +0x12) on
 // element view->[disp32 +0xe] through SetText (E8 at +0x1d). (0x14181cfe7)
 CODE(kCodeEqdTitle, "8B 97 ?? ?? ?? ?? 48 8D 4C 24 ?? 48 8B 9F ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B D0 48 8B CB E8")
 static const size_t kCodeEqdKindDisp = 2, kCodeEqdTitleDisp = 0xe, kCodeEqdTitleTextCall = 0x12, kCodeEqdSetTextCall = 0x1d;
-// TitleText(out, kind): kind 0 ship, then `sub edx,1; jz` (rel8 at +0x11) to the tank title's lea.
-// (0x141813d40)
-CODE(kCodeEqdTitleText, "40 53 48 83 EC 30 48 8B D9 85 D2 74 ?? 83 EA 01 74 ??")
-static const size_t kCodeEqdTitleTankJump = 0x10;
+// TitleText(out, kind): kind 0 `test edx,edx; jz` (rel8 at +0xc) to the ship title's lea, then `sub
+// edx,1; jz` (rel8 at +0x11) to the tank title's, then `cmp edx,1; jz` (rel8 at +0x1c) to the plane
+// title's. (0x141813d40)
+CODE(kCodeEqdTitleText, "40 53 48 83 EC 30 48 8B D9 85 D2 74 ?? 83 EA 01 74 ?? 45 33 C9 45 33 C0 83 FA 01 74 ??")
+static const size_t kCodeEqdTitleShipJump = 0xb, kCodeEqdTitleTankJump = 0x10, kCodeEqdTitlePlaneJump = 0x1b;
 // The slot assignment (kSigEqdRefresh's call): archetype view->[disp32 +0x31], its slots
 // ->[disp8 +0x48] (0x50 bytes each), count ->[disp8 +0x4c]. (0x14181bb90)
 CODE(kCodeEqdSlotAssign, "48 8B C4 53 57 41 54 48 83 EC 60 48 89 68 18 48 8B F9 48 89 70 E0 48 81 C1 ?? ?? ?? ?? 4C 89 68 D8 4C 89 70 D0 4C 89 78 C8 E8 ?? ?? ?? ?? 48 8B 87 ?? ?? ?? ?? 4C 8D 3D ?? ?? ?? ?? 45 33 E4 41 8B DC 41 8B EC 48 8B 70 ?? 48 63 40 ?? 4C 8D 2C 80 49 C1 E5 04")
@@ -1154,6 +1170,12 @@ static const size_t kCodeEqdRootDisp = 3, kCodeEqdRootFindSlot = 0x3f, kCodeEqdR
 // (FF 90) at +0x21. 1.19.5: 0x78, 0x88, 0x68, 0xa0, 0x1b0. (0x14181da50 ...)
 CODE(kCodeEqdRootFind, "48 8B 03 0F 28 85 ?? ?? ?? ?? 66 0F 7F 85 ?? ?? ?? ?? ?? ?? ?? 48 8D 95 ?? ?? ?? ?? 48 8B CB FF")
 static const size_t kCodeEqdRootFindCall = 0x1f;
+// Setup's lookup of the plane window's role line (a container window): rcx = view->[root] (`48 8B 8E
+// disp32; 48 8B 01` right before the lea), then Find through the root's container slot (disp32 at
+// +0x34 of kCodeEqdRootFindContainer, from the lea). `hide` adds that slot. (0x14181e188)
+ANCHOR(kAnchorEqdPlaneRole, "plane_role")
+CODE(kCodeEqdRootFindContainer, "48 8D 15 ?? ?? ?? ?? 48 89 95 ?? ?? ?? ?? 48 C7 85 ?? ?? ?? ?? 0A 00 00 00 0F 28 85 ?? ?? ?? ?? 66 0F 7F 85 ?? ?? ?? ?? 45 33 C0 48 8D 95 ?? ?? ?? ?? FF 90")
+static const size_t kCodeEqdRootFindContainerSlot = 0x34;
 // Pool: the land branch (SigFindIn 0x100): container +disp8 at +3, Copy(out, pool) (E8 at +7).
 // (0x141338950)
 CODE(kCodeEqdPoolArmy, "48 8D 56 ?? 48 8B CB E8")
