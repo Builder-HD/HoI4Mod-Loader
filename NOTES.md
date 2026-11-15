@@ -7038,3 +7038,109 @@ air = { enabled = my_has_air_tabs }   # the vanilla tabs too
   reopened, both show the disabled look, the others are unchanged; clicking either opens nothing.
   "Tabs: unlock them": both enabled again, the ship tab opens the dockyard list. No fault, no ERROR.
 - Offline: 40 unit checks (3 new), smoke OVERALL PASSED; no new signatures.
+
+# Part P: province terrain (`province_terrain`, investigation)
+
+Owner's request (2026-11-15): script changes a province's terrain type at runtime, e.g. a decision
+turns a plains province into marsh. Branch `feature/province-terrain`.
+
+## P1: what vanilla and the wiki have
+
+- **Two layers** (wiki, Map_modding): the gameplay terrain of a province is the category in
+  `map/definition.csv` (`114;40;15;15;land;false;plains;1`): "This does not change the
+  appearance of the province, just the terrain it's assigned". `map/terrain.bmp` (with the atlas
+  textures) is only the look: "This does not change the actual province terrain".
+- **Categories** (`common/terrain/*.txt`, `categories = { ... }`; vanilla: unknown, ocean, lakes,
+  forest, hills, mountain, plains, urban, jungle, marsh, desert, water_fjords, water_shallow_sea,
+  water_deep_ocean): `movement_cost`, `attrition`, `combat_width` / `combat_support_width`,
+  `units = { ... }` (unit modifiers, e.g. attack), `supply_flow_penalty_factor`,
+  `truck_attrition_factor`, `enemy_army_bonus_air_superiority_factor`, `match_value`,
+  `ai_terrain_importance_factor`, `buildings_max_level`, a modifier block (any province modifier),
+  `is_water` (seas and lakes only), `naval_terrain`, `color` (the simplified terrain map mode).
+- **No effect** changes a province's terrain. The only effect mentioning terrain is
+  `start_border_war`'s `terrain_factor` (a combat factor).
+- **Triggers:** `has_terrain = marsh` (country scope: "has any provinces of the specified
+  terrain"), `is_fighting_in_terrain` (combatant scope), `state_and_terrain_strategic_value`
+  (state). **None checks one province's terrain.** HOI4 has no province scope; provinces are
+  passed by id (`controls_province = 1239`, `province = { id = ... }`).
+
+## P2: engine findings (1.19.5, Ghidra on the copy)
+
+- **Where a province's terrain is:** `CProvince+0xb8` is the map province (already used:
+  pixel rect `+0x88`, neighbours `+0x70`, spans `+0x58`, NOTES M); its `+0xa8` is the
+  `CTerrainType*`. 61 reads of `province->+0xb8->+0xa8` in about 48 functions (combat, movement,
+  supply, AI, the masks below, UI). They read the pointer when they need it, so changing it
+  changes what they see, except the copies below.
+- **The terrain type** (`CTerrainType`, vtable `0x142a3b470`): `+8` name token, `+0x10` valid,
+  `+0x88` category index, `+0x8c` its bit in the masks below, more values from `+0x60` on (fixed
+  point, parsed by token in `0x1414db9d0`; the field per key to be mapped from live objects).
+- **The database** (`CTerrainDatabase`, getter `0x1402473c0`, global `0x1433dd4f0`): `+0x40`
+  array of `CTerrainType*`, count `+0x4c`, index 0 the default. `has_terrain`'s parser
+  (`CHasTerrainTrigger` slot 5, `0x1404545b0`) looks a name up exactly so: the parsed token
+  against each entry's `+8`, from index 1. The loader can do the same with `Intern(name)`.
+- **Copies (caches) of a province's terrain:**
+  1. **State mask** `state+0x860`: OR of its provinces' terrain bits, built when provinces join
+     (`0x140717f20`, `0x140719940`).
+  2. **Country mask** `country+0x15f8`: OR of its states' masks; rebuilt in `0x140745f60` when
+     the dirty byte `country+0x15f2` is set. `has_terrain`'s evaluate (`0x1403f72a0`) reads only
+     this mask.
+  3. **Battles:** `CCombat::SetLocation` (slot 17 of `CCombat`, `CLandCombat`,
+     `CLandBorderWarCombat`, `0x14147faa0`) stores the province at `+0x38` and its terrain at
+     `+0x48` when the battle starts; `is_fighting_in_terrain` and the battle read that copy. A
+     running battle keeps its terrain until it ends.
+  4. **Supply:** `CSupplySystem` recomputes flows only for provinces on its dirty lists (NOTES I1);
+     the loader already marks provinces dirty for railways (`engine_railway.cpp` `FinishChange`).
+- **To check in game** (not settled statically): whether the terrain's province modifiers
+  (attrition and the modifier block) are copied into the province's modifiers at load, and
+  whether the pathfinder or the AI keep per-province terrain costs between updates.
+- **Threads:** script effects run on the main thread in serial code (NOTES "Threading model"),
+  never inside a parallel section. A change made inside the effect happens at the same tick on
+  every machine in multiplayer.
+
+## P3: what is hard-coded (loader material) and what isn't
+
+- Hard-coded: the province's category comes only from `definition.csv` at map load; nothing in
+  script changes it, and no trigger reads one province's terrain. So the change, the caches and a
+  per-province trigger are loader material.
+- Not loader material: the categories themselves (`common/terrain`, mods add their own), what a
+  category does (its values), when a change happens (mod script: decisions, events, focuses).
+
+## P4: proposal (for the owner's decisions)
+
+```
+set_province_terrain = { province = 1234 terrain = marsh }   # several `province = ` allowed
+reset_province_terrain = { province = 1234 }                 # back to definition.csv's
+# trigger, with the guard as every native trigger:
+hoi4_loader_feature_province_terrain = yes
+province_has_terrain = { province = 1234 terrain = marsh }    # the current terrain, also vanilla's
+```
+- **Categories:** any land category from `common/terrain` (vanilla's and mods'). Water categories
+  and water provinces (sea, lake) are refused with a log line: land/sea is a different layer
+  (naval movement, coasts, strategic regions).
+- **Takes effect at once, inside the effect:** the province's terrain pointer, then the caches:
+  its state's mask, the countries' masks (dirty byte), the supply dirty list. New battles use the
+  new terrain; **running battles keep theirs** until they end (as their own copy works).
+- **Storage: a global flag per changed province**, `hoi4_ptr_<province>_<category>`, as
+  `region_names`: the effects only manage these flags and change the terrain. On loading a save
+  (and at game start), the loader applies the flags before the game runs. Without the loader
+  the flags are inert and the province has its `definition.csv` terrain: saves stay vanilla.
+- **Multiplayer:** this changes the game simulation (movement, combat, supply), so every player
+  needs the loader and the mods, as with `equipment_designers`' `xp`. Since the change is made
+  in the effect (serial, same tick everywhere) and at load from saved flags, it is deterministic.
+- **What doesn't change: the map's look.** Trees, ground textures and the terrain map mode come
+  from `terrain.bmp` and the atlas, which the game turns into textures at start. The province
+  window and tooltips show the new category; the map still looks like plains. Changing the look
+  would be a separate, much bigger feature (the game has a debug path that rebuilds the world
+  texture from the terrain bitmap, unexplored).
+- **Buildings:** a lower `buildings_max_level` of the new category doesn't remove levels already
+  built (to check what the game does with levels above the maximum).
+- **Fail safe:** without its signatures the feature is off, the commands don't exist (parse
+  errors as for every native command), `hoi4_loader_feature_province_terrain` is `no`.
+
+**Open decisions for the owner:**
+1. The map's look stays (only gameplay and the UI's terrain name change); a visible change would
+   be a later, separate feature. OK?
+2. Running battles: keep their terrain until they end (recommended, as the game's own copy), or
+   also switch them?
+3. Extras: a `state = 42` form (every land province of a state) and a trigger "the province's
+   terrain was changed" — wanted?
