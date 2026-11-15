@@ -52,7 +52,8 @@ A–F; NOTES.md has the findings and test results behind each.
   `remove_types` select by equipment type (`type = { ... }` names, through the game's own name
   lookup), the more specific archetype entries win. `visible = <scripted trigger>` (any tab, vanilla
   ones too) shows the button only while the trigger is true for the player's country (evaluated in
-  the UI, outside the synced RNG). The game's own checks
+  the UI, outside the synced RNG); `enabled = <scripted trigger>` keeps the button but greys it out
+  while the trigger is false. The game's own checks
   (research, `can_be_produced`, outdated) and the add-line command stay; UI only. Hooks the view's
   setup (binds the new buttons), the buttons' state and the two add-line lists; 7 new signatures
   (smoke `2/155`). Checked on 1.19.4.2 and 1.19.5; tested in game on 1.19.5 (2026-11-15). The test
