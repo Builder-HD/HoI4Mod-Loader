@@ -46,8 +46,8 @@ Current features:
 | `equipment_conversion` | engine (needs `lifecycle`) | `hoi4_loader_plugin_equipment_conversion` | tools a mod switches on with global flags: "Convert from Stockpile" from every earlier generation, a cost factor, "same role only"; off until a mod sets them, see below |
 | `air_scenarios` | engine | `hoi4_loader_plugin_air_scenarios` | new air scenarios (the 3D air animations on the map) for chosen missions, planes and countries, defined in `common/hoi4_loader_air_scenarios/`; no script commands, see below |
 | `equipment_designers` | engine | `hoi4_loader_plugin_equipment_designers` | designer windows for equipment the game gives none (e.g. `type = infantry`, `air_transport`, `convoy`): the tank, plane or ship designer window with the mod's title, slots, stats, experience and hidden elements, defined in `common/hoi4_loader_equipment_designers/`; no script commands, see below |
-| `equipment_designers` | engine | `hoi4_loader_plugin_equipment_designers` | designer windows for equipment the game gives none (e.g. `type = infantry`): the tank designer window with the mod's title, slot count and slot places, defined in `common/hoi4_loader_equipment_designers/`; no script commands, see below |
 | `production_tabs` | engine | `hoi4_loader_plugin_production_tabs` | which archetypes the production screen's "add production line" tabs list (`add` / `remove` per tab), and new tabs with the mod's own buttons, defined in `common/hoi4_loader_production_tabs/`; no script commands, see below |
+| `province_terrain` | engine (needs `lifecycle`) | `hoi4_loader_plugin_province_terrain` | `set_province_terrain`, `reset_province_terrain`, `province_has_terrain`, `state_has_terrain`: change provinces' terrain category at runtime (movement, combat, supply, attrition; not the map's look), saved, see below |
 | `attention_area` | engine (needs `lifecycle`) | `hoi4_loader_plugin_attention_area` | `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area`: mark any set of provinces on the map (a line and a fill shader each, built-in or a mod's own) and move the camera to it; display only, not saved, see below |
 
 On an unknown build the file tier stays on, the engine tier is off, and `loader.log` lists the
@@ -158,6 +158,7 @@ when the loader is missing or a feature is off. Without them, using a loader tri
 | `air_scenarios` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_air_scenarios.txt` |
 | `equipment_designers` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_equipment_designers.txt` |
 | `production_tabs` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_production_tabs.txt` |
+| `set_province_terrain`, `reset_province_terrain`, `province_has_terrain`, `state_has_terrain` | `scripted_triggers/hoi4_loader_feature_province_terrain.txt` |
 | `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area` | `scripted_triggers/hoi4_loader_feature_attention_area.txt` |
 
 - **Combinations:** a block that combines features needs each feature's stub and guard, e.g.
@@ -1798,6 +1799,91 @@ add the elements above with the names `hoi4_loader_test_guns_button` /
 `hoi4_loader_test_guns_button_glow` (tooltip `HOI4_LOADER_TEST_GUNS_TAB`) and
 `hoi4_loader_test_ships_button` (`HOI4_LOADER_TEST_SHIPS_TAB`) to test the new tabs; without them
 only the vanilla tab changes apply.
+
+## Province terrain (`province_terrain`)
+
+Change a province's terrain category at runtime, e.g. a decision turns plains into marsh. Vanilla
+reads a province's terrain only from `map/definition.csv` and has no effect to change it, nor a
+trigger for one province's terrain (`has_terrain` is country scope).
+
+```
+# one or several provinces
+set_province_terrain = { province = 1234 terrain = marsh }
+set_province_terrain = { province = 1234 province = 1235 if_terrain = plains terrain = marsh }  # only if plains now
+# the provinces of a state that have one of the if_terrain categories (in a state scope, or state = 42)
+42 = { set_province_terrain = { if_terrain = plains if_terrain = forest terrain = marsh } }
+set_province_terrain = { state = 42 if_terrain = plains terrain = marsh }
+# back to map/definition.csv's terrain
+reset_province_terrain = { province = 1234 }
+reset_province_terrain = { state = 42 }      # every changed province of the state (or in a state scope)
+
+# triggers (guard them, see "Native script commands")
+hoi4_loader_feature_province_terrain = yes
+province_has_terrain = { province = 1234 terrain = marsh }   # the province's terrain now
+state_has_terrain = { terrain = plains }                     # any province of the state (state scope or state = 42)
+```
+
+Pick the states with vanilla's state scopes, e.g. every owned state with plains turns them into marsh:
+```
+every_owned_state = {
+    limit = { hoi4_loader_feature_province_terrain = yes state_has_terrain = { terrain = plains } }
+    set_province_terrain = { if_terrain = plains terrain = marsh }
+}
+```
+
+- **`terrain` and `if_terrain`** are category names from `common/terrain` (`categories = { ... }`),
+  vanilla's or a mod's. Only land categories: a water category (`is_water = yes`: ocean, lakes,
+  the `water_` ones) is refused, and sea and lake provinces are skipped. Land and sea are a
+  separate layer of the map (coasts, naval movement, strategic regions).
+- **Which provinces:** `province` (may be written several times), else the state (`state = N`,
+  else the state scope). Both given: the provinces only. A state needs `if_terrain` (several
+  allowed); without it nothing changes and `loader.log` says why, so a state is never switched
+  wholesale by accident. With `province`, `if_terrain` is an optional check ("only if it is still
+  plains").
+- **What follows at once** (inside the effect): movement cost, combat (combat width, the unit
+  modifiers of the category), attrition, the province tooltip ("A Marsh province in Brandenburg")
+  and `has_terrain`; supply from its next update (the province is marked for it, as railway changes
+  do); the AI reads the terrain when it plans. **Battles already
+  running in the province switch too**: their terrain, combat width and modifiers change on the
+  spot (the battle window shows it; its picture changes when it is opened again).
+- **Not the map's look:** trees, ground textures and the terrain map mode come from
+  `map/terrain.bmp` and the terrain textures, which the game builds at start. The map still looks
+  like plains.
+- **Buildings:** levels above the new category's `buildings_max_level` stay.
+- **Tooltips:** "The terrain of province 1234 becomes Marsh.", "Its Plains provinces become Marsh."
+  (in a state scope; the game puts the state's name in front), "Brandenburg has Plains terrain",
+  "Province 1234 has Jungle terrain". Translatable: `HOI4_LOADER_SET_PROVINCE_TERRAIN`,
+  `..._IF`, `HOI4_LOADER_SET_STATE_TERRAIN`, `..._IN_SCOPE`, `HOI4_LOADER_RESET_PROVINCE_TERRAIN`,
+  `HOI4_LOADER_RESET_STATE_TERRAIN`, `..._IN_SCOPE` (texts in `loader_script_docs.md`).
+
+**Storage: a global flag per changed province**, `hoi4_ptr_<province>_<category>` (e.g.
+`hoi4_ptr_6487_jungle`); the effects set and clear them. Loading a save applies its flags (the most
+recently set one per province). A reset clears them. Without the loader, or with the feature off,
+the flags do nothing and every province has its `map/definition.csv` terrain: saves stay vanilla.
+A flag set by hand (`set_global_flag`) takes effect when the save is next loaded; use the effects.
+
+**Multiplayer:** this changes the game itself (movement, combat, supply), so **every player needs
+the loader and the mods**, as with `equipment_designers`' `xp`. The change runs inside the effect,
+at the same tick on every machine, and a loaded save (also a hot join) rebuilds it from the
+saved flags, so all machines agree. Not tested in multiplayer yet.
+
+**Timing:** after loading a save, the flags are applied when the game is entered, after
+`on_startup`; in `on_game_loaded` (feature `game_loaded`) the terrain is already back.
+
+**Checks and messages** (`loader.log`):
+- At start: `Province terrain: province -> map +0xb8 -> terrain +0xa8, ...` (the resolved layout).
+- Each game: `Province terrain: 14 categories, water bit 0x2 (... sea and ... land provinces), 1081
+  state masks match`, then `province_terrain: save loaded: 37 province(s) changed by saved flags`.
+  If the check fails, the feature switches itself off for the session (`DEACTIVATED`, guard `no`).
+- Each change: `set_province_terrain: state 64: 4 province(s) -> marsh, 0 battle(s) switched`
+  (only when something changed). Errors: an unknown or water category, a state without
+  `if_terrain`, a province id that does not exist, water provinces skipped.
+
+**Test mod** (`common/decisions/hoi4_loader_test_terrain_decisions.txt`, any country):
+"Terrain: status (hover)" shows the triggers; "Brandenburg's plains become marsh" (state 64, four
+provinces); "province 6487 becomes jungle" (then `has_terrain = jungle` is true); "Ethiopia becomes
+marsh" (with the Italian-Ethiopian war's battles); "reset every state"; "invalid uses (see
+loader.log)".
 
 ## Attention areas (`attention_area`)
 

@@ -58,6 +58,23 @@ A–F; NOTES.md has the findings and test results behind each.
   setup (binds the new buttons), the buttons' state and the two add-line lists; 7 new signatures
   (smoke `2/155`). Checked on 1.19.4.2 and 1.19.5; tested in game on 1.19.5 (2026-11-15). The test
   mod moves the towed guns into a "Towed guns" tab and copies the test small arms into the armor tab.
+- **New feature `province_terrain`** (engine tier; guard `hoi4_loader_feature_province_terrain`;
+  NOTES.md Part P, MODDING.md "Province terrain"). `set_province_terrain = { province = N terrain =
+  marsh }` changes a province's terrain category at runtime; in a state scope (or `state = N`) with
+  `if_terrain = plains` (repeatable) every matching province of the state. `reset_province_terrain`
+  goes back to `map/definition.csv`'s. Triggers `province_has_terrain` and `state_has_terrain`.
+  Land categories only (vanilla's and mods'). Movement, combat (running battles switch at once),
+  attrition, `has_terrain` and the province tooltip follow; supply is notified; the map's look
+  stays. Stored as global flags `hoi4_ptr_<province>_<category>`, applied when a save is loaded;
+  without the loader saves stay vanilla. Changes the simulation: in multiplayer every player needs
+  the loader. 5 new signatures (smoke `2/160`). Checked on 1.19.4.2 and 1.19.5; tested in game on
+  1.19.5 (2026-11-15). The test mod changes Brandenburg, a single province and Ethiopia.
+- **Native script API:** a Token parameter may be repeated (`repeat = true`, as Int and Block);
+  `Args::at` gives the tokens in script order.
+- **Shared code:** `Engine::ProvinceById`, `MapProvinceById`, `StateObjectOwner`,
+  `StateObjectProvinces`, `ProvinceCombatObjects` and `SupplyProvinceChanged` (the supply system's
+  "province changed" notification railway changes use) for any feature.
+- **Docs:** MODDING.md's feature table listed `equipment_designers` twice (the tank-only row is gone).
 - **Shared code:** `Engine::BindButtonClick` (a click handler on a GUI button through the engine's
   `CButtonWrapper`, from province_building_removal) for any feature.
 - **Shared code:** the Paradox script reader (`src/script_tree.cpp`) and the mod folder scan

@@ -7185,3 +7185,59 @@ every_owned_state = {
 - Everything else as P4: the change inside the effect (pointer, state and country masks, supply
   dirty, and now the province's battles), global flags `hoi4_ptr_<province>_<category>` as storage
   applied at load, multiplayer needs the loader everywhere, saves vanilla-safe, fail safe.
+
+## P6: implementation and in-game test (2026-11-15)
+
+**Live layout** (a temporary diagnostic dump of the terrain database and seven provinces, 1.19.5):
+- The database has 15 entries: index 0 a default object of another class, 1..14 vanilla's
+  categories in file order. `CTerrainType`: `+8` name token, `+0x10` valid, `+0x60` movement_cost,
+  `+0x68` / `+0x70` combat width / support width, `+0x78` ai_terrain_importance_factor, `+0x88`
+  index, `+0x8c` bits, `+0x98` match_value, `+0x1f0` supply_flow_penalty_factor (all x100000).
+- `+0x8c` holds the category's own bit and, ORed in by the parser, `is_water` as `0x2` (token
+  `0x28b2`; `naval_terrain`'s branch ORs `0x1` the same way). Ocean `0x1002`, lakes `0x2`, the
+  water_ categories `0x82` / `0x102` / `0x202`. So a byte pattern can't tell the two flags apart:
+  the water bit is found per game as the bit every sea province's category has (sea provinces
+  have no state, `province+0xc0` null), and the state masks are checked against the provinces.
+- `province+0xb8` (the map province) is the same object as the static map entry (`map data`
+  array, NOTES M14), so a category can be read and restored without a game.
+
+**Implementation:** `engine_terrain.cpp` (5 signatures, cross-checked), `plugin_province_terrain.cpp`.
+Shared: `Engine::ProvinceById`, `MapProvinceById`, `StateObjectOwner`, `StateObjectProvinces`,
+`ProvinceCombatObjects`, `SupplyProvinceChanged` (railways' supply notify slot). Native API: Token
+parameters may repeat (`if_terrain`).
+
+**Finding: the game builds the state masks before `OnGameEntering`.** First in-game run, a second
+game in the same session (after changing 11 states): the self-check found "11 of 1081 state terrain
+masks differ", exactly the changed states, and switched the feature off (fail safe). The restore
+now records the provinces it put back; after the entry the self-check skips their states and the
+plugin refreshes them (`SetProvinceTerrain` with the current category: masks, battles, supply).
+
+**In-game test** (1.19.5, branch build on main, test mod):
+1. Germany 1936: resolve line and `14 categories, water bit 0x2 (3141 sea and 10272 land
+   provinces), 1081 state masks match`; the four commands registered, guard yes.
+2. "Terrain: status": Brandenburg has Plains (yes), Marsh (no), 6487 Jungle (no), `has_terrain =
+   jungle` (no), Brandenburg Urban (yes).
+3. "Brandenburg's plains become marsh": `state 64: 4 province(s) -> marsh`; the map tooltip west of
+   Berlin reads "A Marsh province in Brandenburg" (Vorpommern next to it still Plains).
+4. "province 6487 becomes jungle": status: plains no, marsh yes, 6487 jungle yes, `has_terrain =
+   jungle` yes (the country mask follows at once).
+5. 11 Jan: "Ethiopia becomes marsh": 33 provinces in 11 states, 4 battles switched (Germany has no
+   intel on them). Saved (`GER_1936_01_11_05`).
+6. Same session, new game as Italy (with the fix): `1081 state masks match`, 0 flags. An Italian
+   attack in Eritrea: the battle window shows Hills, combat width 70 (+35). "Ethiopia becomes marsh"
+   with the window open: 2 battles switched; the width shows 50 at once, the terrain tooltip
+   "Marsh" with marsh's effects (attack 60%, width 50, division attrition +35%, sickness +100%,
+   truck attrition +400%, supply flow -16%, movement x2.00); reopened, the picture is a marsh.
+7. Same session, the Germany save loaded: `1071 state masks match` (10 skipped), `33 province(s)
+   restored`, `save loaded: 37 province(s) changed by saved flags`; status as after step 4.
+8. "invalid uses": water category, sea province 4 (skipped), state without if_terrain, unknown
+   category: each logged, nothing changed.
+9. "reset every state" (an every_state loop over 1081 states, about 20 ms): all 37 provinces back,
+   status as in step 2, the decisions that need plains visible again. It logged a line per state;
+   now only uses that change something are logged.
+
+**Offline:** both checkers on 1.19.5 and 1.19.4.2 (160 signatures), smoke `2/160` OVERALL PASSED,
+native_script_test 237 (the repeated Token), all unit tests.
+
+**Not tested:** multiplayer; the supply network's values after a change (the province is notified
+as for railways); the AI's behaviour; 1.19.4.2 in game.
