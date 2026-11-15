@@ -161,6 +161,38 @@ int main(int argc, char** argv) {
               !defs[0].hasStats[kStatsMisc] && defs[0].hide.empty(),
           "options: all optional (the game's experience, the window's stats, nothing hidden)");
 
+    // --- roles ------------------------------------------------------------------------------------
+    problems.clear();
+    defs = Parse(
+        "guns = {\n"
+        "\tarchetypes = { field_gun }\n"
+        "\troles = {\n"
+        "\t\tfield_gun = { name = ROLE_HOWITZER }\n"
+        "\t\tfield_gun_at = { name = ROLE_AT stats = { combat = { hard_attack ap_attack } } }\n"
+        "\t\tfield_gun_aa = { }\n"
+        "\t}\n"
+        "}\n"
+        "twice_role = { archetypes = { a } roles = { x = { } X = { } } }\n"
+        "bad_role_key = { archetypes = { a } roles = { x = { icon = 3 } } }\n"
+        "loose_role = { archetypes = { a } roles = { x } }\n"
+        "empty_roles = { archetypes = { a } roles = { } }\n"
+        "air_roles = { archetypes = { p } window = air roles = { p = { } } }\n",
+        &problems);
+    Check(defs.size() == 2 && defs[0].name == "guns" && defs[1].name == "air_roles", "roles: the valid entries remain");
+    if (defs.size() == 2) {
+        const std::vector<Role>& r = defs[0].roles;
+        Check(r.size() == 3 && r[0].equipment == "field_gun" && r[0].name == "ROLE_HOWITZER" && r[2].name.empty(),
+              "roles: kept in order, name optional");
+        Check(r.size() == 3 && r[1].hasStats[kStatsCombat] && r[1].stats[kStatsCombat].size() == 2 && !r[1].hasStats[kStatsBase],
+              "roles: per-role stats");
+        Check(defs[1].roles.empty(), "roles: dropped outside the land window");
+    }
+    Check(HasProblem(problems, "roles: X is listed twice"), "roles: a role twice (any case)");
+    Check(HasProblem(problems, "unknown key 'icon'"), "roles: unknown role key");
+    Check(HasProblem(problems, "must be <equipment> = { ... }"), "roles: a loose value");
+    Check(HasProblem(problems, "list at least one role"), "roles: an empty list");
+    Check(HasProblem(problems, "roles need the land window"), "roles: other windows reported");
+
     // --- The stat names ---------------------------------------------------------------------------
     Check(StatNameCount() == 78, "stats: 78 names (the game's table has ids 0..77)");
     Check(std::string(StatLocKey("ap_attack")) == "STAT_COMMON_PIERCING" && std::string(StatLocKey("ARMOR_VALUE")) == "STAT_COMMON_ARMOR" &&

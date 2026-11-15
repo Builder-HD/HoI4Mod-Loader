@@ -628,18 +628,29 @@ bool HookDesigners(DesignerFind_t find, DesignerOpened_t opened, DesignerRefresh
 // int8 kind} entries (8 bytes each, kept alive by the plugin), or null for the window's own list.
 // xpFor(type): the experience pool of a listed type (0 army, 1 navy, 2 air) or -1 for the game's.
 // A game rule: the variant commands then pay from that pool on every machine.
-using DesignerStats_t = const uint64_t* (*)(int kind, const void* archetype, int panel, int* count);
+using DesignerStats_t = const uint64_t* (*)(int kind, const void* archetype, uint64_t designMask, int panel, int* count);
 using DesignerXp_t = int (*)(const void* type);
 bool HaveDesignerStats();
 bool HaveDesignerXp();
 bool HaveDesignerButtons();  // `hide` can be kept up when the game updates the window's buttons
 // afterButtons(view, archetype): after the window updated its buttons (it may show elements again).
 bool HookDesignerExtras(DesignerStats_t statsFor, DesignerXp_t xpFor, DesignerRefreshed_t afterButtons);
+// Roles (tank window): rolesFor(archetype, &count): the type masks of its roles in order (kept alive
+// by the plugin), or null for the game's own roles; roleName(archetype token, mask): the loc key of
+// that role's name, or null for the game's.
+using DesignerRoles_t = const uint64_t* (*)(const void* archetype, int* count);
+using DesignerRoleName_t = const char* (*)(int token, uint64_t mask);
+bool HaveDesignerRoles();
+bool HookDesignerRoles(DesignerRoles_t rolesFor, DesignerRoleName_t roleName);
+uint64_t DesignerTypeMask(const void* type);  // an equipment type's mask, as the role dropdown compares it
 int StatIdByKey(const char* key);          // the game's stat id for a STAT_* loc key, -1 if unknown
 void DesignerSetShownXp(void* view, int pool);  // the window shows a design paying from this pool (-1: the game's)
 bool DesignerShowXp(void* view, int pool); // the window's experience line for that pool
 void* DesignerElement(void* view, const char* name);  // an element of the window by name (null: none)
 const void* TypeArchetypeOf(const void* type);  // the type itself for an archetype
+// The archetype a type belongs to, through duplicate_archetypes copies (role twins) to the one they
+// were made from (as the role dropdown reads it; TypeArchetypeOf without the roles' offsets).
+const void* DesignerBaseArchetype(const void* type);
 int DesignerWindowOf(const void* type);         // the game's window picker: the kind it sends this type to, -1 none
 bool DesignerWindowUnlocked(int kind);          // the window's DLC (Man the Guns, No Step Back, By Blood Alone)
 bool DesignerDesignable(const void* type);      // the game's own test: it would open a designer anyway (DLC and slots)
