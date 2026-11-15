@@ -64,6 +64,7 @@ void** g_triggerDb = nullptr;  // the CScriptedTriggerTemplateDatabase global
 TriggerFind_t g_triggerFind = nullptr;
 uint32_t g_triggerValid = 0, g_triggerEvalSlot = 0;
 PtabCondition_t g_condition = nullptr;
+void* g_openButton = nullptr;  // the selected tab button of the view at its last state update (UI thread)
 volatile LONG g_conditionFaultLogged = 0;
 TypeByName_t g_typeByName = nullptr;
 int g_typesChecked = 0;  // 0 not yet, 1 passed, -1 failed
@@ -403,6 +404,11 @@ void __fastcall ListNavalDetour(void* window, const void* designs, int* used) { 
 
 void CallSlot(void* element, uint32_t slot) { ((ElementFn_t)(*(void***)element)[slot / 8])(element); }
 
+void HideGlow(void* glow) {
+    CallSlot(glow, g_hideSlot);
+    Wr<uint8_t>(glow, g_flags, (uint8_t)(Rd<uint8_t>(glow, g_flags) | g_glowBit));
+}
+
 // As the game's state function: selected while open; else enabled when the country has a member
 // (and the factories), disabled without; the glow while a member is new and buildable.
 void ApplyState(void* button, void* glow, void* open, int tab, uint64_t vanillaMask, uint64_t factoryMask) {
@@ -429,8 +435,7 @@ void ApplyState(void* button, void* glow, void* open, int tab, uint64_t vanillaM
         Wr<uint8_t>(glow, g_flags, (uint8_t)(flags & ~g_glowBit));
         CallSlot(glow, g_showSlot);
     } else {
-        CallSlot(glow, g_hideSlot);
-        Wr<uint8_t>(glow, g_flags, (uint8_t)(Rd<uint8_t>(glow, g_flags) | g_glowBit));
+        HideGlow(glow);
     }
 }
 
@@ -440,38 +445,45 @@ bool EvalTrigger(const void* scope, void* trigger) {
     return ((TriggerEval_t)(*(void***)trigger)[g_triggerEvalSlot / 8])(trigger, scope);
 }
 
-// The tab's `visible` for the player's country: true without a condition, and (logged once) when
-// the evaluation fails.
-bool Visible(int tab, bool* conditioned) {
-    const void* trigger = g_condition && g_triggerEvalSlot ? g_condition(tab) : nullptr;
+// The tab's condition of a kind (kPtabVisible, kPtabEnabled) for the player's country: true without
+// a condition, and (logged once) when the evaluation fails.
+bool ConditionHolds(int tab, int kind, bool* conditioned) {
+    const void* trigger = g_condition && g_triggerEvalSlot ? g_condition(tab, kind) : nullptr;
     *conditioned = trigger != nullptr;
     if (!trigger) return true;
     bool result = true;
     if (!WithCountryScope(PlayerCountryTag(), &EvalTrigger, (void*)trigger, &result)) {
         if (!InterlockedExchange(&g_conditionFaultLogged, 1))
-            Log("production_tabs: a tab's visible trigger could not be evaluated; the tab shows");
+            Log("production_tabs: a tab's visible or enabled trigger could not be evaluated; the tab shows and stays enabled");
         return true;
     }
     return result;
 }
 
-// A conditioned tab's button and glow: hidden while its trigger is false. The glow is only hidden
-// here; ApplyState shows it again when a design is new.
-void ApplyVisible(int tab, void* button, void* glow) {
+// After the button's own state (the game's or ApplyState): `visible` hides the button and glow while
+// false; `enabled` disables the button and hides the glow while false (not the open tab's). The
+// glow is only hidden here; ApplyState shows it again when a design is new.
+void ApplyConditions(int tab, void* button, void* glow, void* open) {
     bool conditioned = false;
-    bool show = Visible(tab, &conditioned);
-    if (!conditioned) return;
-    SetElementVisible(button, show);
-    if (!show && glow) SetElementVisible(glow, false);
+    bool show = ConditionHolds(tab, kPtabVisible, &conditioned);
+    if (conditioned) {
+        SetElementVisible(button, show);
+        if (!show && glow) SetElementVisible(glow, false);
+    }
+    if (!show || button == open || ConditionHolds(tab, kPtabEnabled, &conditioned)) return;
+    CallSlot(button, g_disableSlot);
+    ((Frame_t)(*(void***)button)[g_frameSlot / 8])(button, kFrameDisabled);
+    if (glow) HideGlow(glow);
 }
 
 void StatesBody(void* view, void* open) {
+    if (view == g_view) g_openButton = open;
     for (int i = 0; i < 4; ++i) {
         void* button = Rd<void*>(view, g_vanilla[i].buttonDisp);
         if (!button) continue;
         void* glow = Rd<void*>(view, g_vanilla[i].glowDisp);
         if (g_changed[i]) ApplyState(button, glow, open, i, g_vanilla[i].stateMask, g_vanilla[i].stateMask);
-        ApplyVisible(i, button, glow);
+        ApplyConditions(i, button, glow, open);
     }
     if (view != g_view) return;
     for (size_t t = 0; t < g_tabs.size(); ++t) {
@@ -482,7 +494,7 @@ void StatesBody(void* view, void* open) {
         bool naval = NewTabNaval(4 + (int)t, &types);
         // The factory check of the land/air tabs (military factories) or of the naval tab (dockyards).
         ApplyState(nt.buttonEl, nt.glowEl, open, 4 + (int)t, 0, g_vanilla[naval ? 3 : 1].stateMask);
-        ApplyVisible(4 + (int)t, nt.buttonEl, nt.glowEl);
+        ApplyConditions(4 + (int)t, nt.buttonEl, nt.glowEl, open);
     }
 }
 void StatesSafe(void* view, void* open) {
@@ -524,6 +536,10 @@ void ClickBody(int t) {
     void* view = g_view;
     const NewTab& nt = g_tabs[(size_t)t];
     if (!view || !nt.buttonEl) return;
+    // A disabled tab doesn't open (as a disabled vanilla button doesn't click); the open one still
+    // closes.
+    bool conditioned = false;
+    if (nt.buttonEl != g_openButton && !ConditionHolds(4 + t, kPtabEnabled, &conditioned)) return;
     uint64_t types = 0;
     bool naval = NewTabNaval(4 + t, &types);
     uint64_t mask = types | (1ull << (63 - t));  // the tab's own bit keeps its mask apart from every other tab's
@@ -573,6 +589,7 @@ bool TryBind(void* view, size_t t, bool atSetup) {
 
 void SetupBody(void* view) {
     g_view = view;
+    g_openButton = nullptr;
     for (size_t t = 0; t < g_tabs.size(); ++t) {
         g_tabs[t].buttonEl = nullptr;
         g_tabs[t].glowEl = nullptr;

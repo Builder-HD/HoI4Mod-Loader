@@ -7,6 +7,7 @@
 //       button = artillery_tab_button      # a buttonType the mod adds to countryproductionlineview.gui
 //       glow = artillery_tab_button_glow   # optional iconType, shown while a design of the tab is new
 //       visible = my_tab_visible           # optional scripted trigger (player's country); any tab
+//       enabled = my_tab_enabled           # optional scripted trigger: greyed out while false
 //       add = { artillery_equipment }      # archetypes ...
 //       add_types = { anti_tank anti_air } # ... and equipment types (remove / remove_types too)
 //   }
@@ -40,7 +41,8 @@ std::vector<size_t> g_newDefs;           // g_defs index per new tab (engine tab
 // Resolved once on the main thread, before each game entry or at an earlier first use there (the
 // equipment database is loaded by then).
 struct Sets {
-    const void* visible = nullptr;  // the scripted trigger template, or null (always shown)
+    const void* visible = nullptr;  // scripted trigger templates, or null (always shown / enabled)
+    const void* enabled = nullptr;
     std::unordered_set<const void*> add, remove;
     uint64_t addTypes = 0, removeTypes = 0;  // type mask bits
 };
@@ -87,6 +89,20 @@ uint64_t ResolveTypes(const Ptab::Tab& t, const std::vector<Ptab::Archetype>& li
     return mask;
 }
 
+// A condition's scripted trigger (`visible` / `enabled`), or null with the reason logged.
+const void* ResolveTrigger(const Ptab::Tab& t, const std::string& name, const char* key, const char* without) {
+    if (name.empty()) return nullptr;
+    const void* trigger = nullptr;
+    if (!Engine::HavePtabConditions())
+        Log("%s: %s: %s is unavailable on this build; the tab %s", kFeature, t.name.c_str(), key, without);
+    else if (!(trigger = Engine::PtabScriptedTrigger(name.c_str())))
+        Log("%s: %s (%s line %d): %s: no scripted trigger %s (common/scripted_triggers); the tab %s", kFeature, t.name.c_str(),
+            t.file.c_str(), t.line, key, name.c_str(), without);
+    else
+        Log("%s: %s: %s while %s", kFeature, t.name.c_str(), key, name.c_str());
+    return trigger;
+}
+
 void Resolve() {
     g_resolved = true;
     g_sets.assign(4 + g_newDefs.size(), Sets());
@@ -98,15 +114,8 @@ void Resolve() {
         ResolveList(*t, t->remove, "remove", &s.remove);
         s.addTypes = ResolveTypes(*t, t->addTypes, "add_types");
         s.removeTypes = ResolveTypes(*t, t->removeTypes, "remove_types");
-        if (!t->visible.empty()) {
-            if (!Engine::HavePtabConditions())
-                Log("%s: %s: visible is unavailable on this build; the tab always shows", kFeature, t->name.c_str());
-            else if (!(s.visible = Engine::PtabScriptedTrigger(t->visible.c_str())))
-                Log("%s: %s (%s line %d): visible: no scripted trigger %s (common/scripted_triggers); the tab always shows",
-                    kFeature, t->name.c_str(), t->file.c_str(), t->line, t->visible.c_str());
-            else
-                Log("%s: %s: visible while %s", kFeature, t->name.c_str(), t->visible.c_str());
-        }
+        s.visible = ResolveTrigger(*t, t->visible, "visible", "always shows");
+        s.enabled = ResolveTrigger(*t, t->enabled, "enabled", "is always enabled");
         Log("%s: %s%s: %zu archetype(s) added, %zu removed; types added 0x%llx, removed 0x%llx", kFeature, t->name.c_str(),
             tab < 4 ? " (vanilla tab)" : "", s.add.size(), s.remove.size(), (unsigned long long)s.addTypes,
             (unsigned long long)s.removeTypes);
@@ -133,10 +142,11 @@ bool Member(int tab, const void* archetype, uint64_t types, bool vanilla) {
     return vanilla;
 }
 
-// The tab's condition (UI thread, after Resolve). Null: always shown.
-const void* Condition(int tab) {
+// The tab's condition of a kind (UI thread, after Resolve). Null: none.
+const void* Condition(int tab, int kind) {
     if (!g_resolved || tab < 0 || (size_t)tab >= g_sets.size()) return nullptr;
-    return g_sets[(size_t)tab].visible;
+    const Sets& s = g_sets[(size_t)tab];
+    return kind == Engine::kPtabEnabled ? s.enabled : kind == Engine::kPtabVisible ? s.visible : nullptr;
 }
 
 void OnFault(const char* where) { FeatureDeactivate(kFeature, (std::string("fault in the ") + where).c_str()); }

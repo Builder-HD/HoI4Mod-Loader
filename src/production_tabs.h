@@ -26,6 +26,7 @@ struct Tab {
     int vanilla = -1;  // a VanillaTab, or -1 for a new tab
     std::string button, glow;  // new tabs: element names in the production view (glow optional)
     std::string visible;       // optional: a scripted trigger; the button shows while it is true
+    std::string enabled;       // optional: a scripted trigger; the button is disabled while it is false
     std::vector<Archetype> add, remove;            // archetypes
     std::vector<Archetype> addTypes, removeTypes;  // equipment types (`type = ...` names), same entries
     std::string file;  // where it was first defined
@@ -43,8 +44,8 @@ struct Problem {
 void ParseFile(const std::string& text, const std::string& fileName, std::vector<Tab>* out, std::vector<Problem>* problems);
 
 // Merges entries in load order: the same tab (case-insensitive) in a later file or mod adds its
-// `add` and `remove` lists to the earlier ones; `button` and `glow` keep the first definition's
-// (a different later one is reported). Order of first appearance is kept.
+// `add` and `remove` lists to the earlier ones; `button`, `glow`, `visible` and `enabled` keep the
+// first definition's (a different later one is reported). Order of first appearance is kept.
 void Merge(std::vector<Tab>* all, const std::vector<Tab>& later, std::vector<Problem>* problems);
 
 // After every file: new tabs without a button are dropped, the ones past kMaxNewTabs too (reported).

@@ -624,8 +624,10 @@ bool HaveProductionTabs();
 // always false for new tabs).
 using PtabMember_t = bool (*)(int tab, const void* archetype, uint64_t types, bool vanilla);
 using PtabFault_t = void (*)(const char* where);  // a contained fault; the game's own tabs from now on
-// The tab's `visible` condition: a scripted trigger template (PtabScriptedTrigger), or null (always shown).
-using PtabCondition_t = const void* (*)(int tab);
+// A tab's condition of a kind: a scripted trigger template (PtabScriptedTrigger), or null (none:
+// always shown / enabled).
+enum PtabConditionKind { kPtabVisible = 0, kPtabEnabled = 1 };
+using PtabCondition_t = const void* (*)(int tab, int kind);
 struct PtabNewTab {
     const char* name;    // for messages
     const char* button;  // element names in the production view (glow: null or empty for none)
@@ -634,7 +636,7 @@ struct PtabNewTab {
 // changed[i]: vanilla tab i has add / remove (else the game alone lists it). All hooks or none.
 bool HookProductionTabs(const bool changed[4], const PtabNewTab* tabs, int count, PtabMember_t member, PtabCondition_t condition,
                         PtabFault_t fault);
-// Scripted triggers (`visible`): the template of a scripted trigger by name, or null (no such trigger,
+// Scripted triggers (`visible`, `enabled`): the template of a scripted trigger by name, or null (no such trigger,
 // or HavePtabConditions false). Main thread, after the game loaded its scripted triggers.
 bool HavePtabConditions();
 const void* PtabScriptedTrigger(const char* name);

@@ -92,6 +92,22 @@ int main() {
     Check(!vis.empty() && vis[0].visible == "guns_visible" && HasProblem(problems, "visible = other_trigger ignored"),
           "visible: first definition kept, a different later one reported");
 
+    // enabled: as visible, both on one tab.
+    problems.clear();
+    tabs = Parse("guns = { button = g visible = guns_visible enabled = guns_enabled }\nair = { enabled = has_air_tabs }\n"
+                 "bad = { button = b enabled = { tag = GER } }\n",
+                 &problems);
+    Check(tabs.size() == 2 && tabs[0].visible == "guns_visible" && tabs[0].enabled == "guns_enabled" && tabs[1].enabled == "has_air_tabs" &&
+              tabs[1].visible.empty(),
+          "enabled read next to visible, on new and vanilla tabs");
+    Check(HasProblem(problems, "enabled takes the name of a scripted trigger"), "enabled with a block reported");
+    std::vector<Tab> en;
+    Merge(&en, tabs, &problems);
+    Merge(&en, Parse("guns = { enabled = other_trigger }\nair = { enabled = has_air_tabs }", &problems), &problems);
+    Check(!en.empty() && en[0].enabled == "guns_enabled" && HasProblem(problems, "enabled = other_trigger ignored") &&
+              !HasProblem(problems, "enabled = has_air_tabs ignored"),
+          "enabled: first definition kept, a different later one reported, the same one quiet");
+
     // Several add blocks in one entry append.
     problems.clear();
     tabs = Parse("armor = { add = { a } add = { b } remove = { c } }", &problems);
