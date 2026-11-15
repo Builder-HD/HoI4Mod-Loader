@@ -6797,3 +6797,35 @@ naval = { visible = has_navy_tabs }      # the vanilla tabs too
   tabs" (sets the country flag): reopened, both are gone, the other tabs (infantry, armor, air, the
   ship tab) stay. "Tabs: show them again": both back. No fault, no ERROR.
 - Offline: both checkers on 1.19.5 and 1.19.4.2 (one more signature: smoke `2/151`); 37 unit checks.
+
+## O9: `enabled` = a scripted trigger (owner's choice, 2026-11-15)
+
+The last addition to the tabs on this branch. Next to `visible` (hide the button), `enabled` keeps
+the button but greys it out, e.g. a tab that is seen from the start and unlocks with research.
+
+**Findings:** nothing new. The pieces are O2's (the disable slot, the disabled frame `3`, the glow
+hide) and O8's (scripted trigger lookup, evaluation in a country scope with seed 0).
+
+**Design:**
+```
+rocket_tab = {
+    button = rocket_tab_button
+    enabled = my_rocket_tab_enabled   # a scripted trigger; ROOT/THIS = the player's country
+    add_types = { ... }
+}
+air = { enabled = my_has_air_tabs }   # the vanilla tabs too
+```
+- While the trigger is false the button is disabled (the game's own disabled look, as for a tab
+  without designs or factories) and its glow is hidden. True: the button's normal state (enabled
+  when the country has a design of the tab, else disabled, as now).
+- `visible` wins: a hidden button stays hidden whatever `enabled` says. Both may be set.
+- Evaluated at the same moments as `visible` (each update of the buttons' state), after the game's
+  or the loader's own state for the button, so it only ever disables.
+- The open tab: a tab whose list is open keeps its "selected" look and its list until closed (as
+  `visible`). A click on a disabled new tab's button is also refused in the loader's click handler
+  (the vanilla buttons don't click while disabled).
+- No tooltip of its own: the button's `pdx_tooltip` is the mod's and can't depend on the trigger;
+  a mod that wants to explain the lock says so in the tooltip text.
+- Unknown trigger name, merging, unavailable signature, faults: as `visible` (logged; the tab stays
+  enabled; first definition wins; the feature's fault path).
+- Engine API: `PtabCondition_t` gets the condition kind (`kPtabVisible`, `kPtabEnabled`).
