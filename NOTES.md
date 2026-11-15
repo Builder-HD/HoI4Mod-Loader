@@ -6494,3 +6494,65 @@ game: the title stays on every reopening.
 4. `loader.log`: no ERROR, no fault.
 
 **Not tested:** multiplayer with `xp`, `xp = air`.
+
+## N14: air and naval windows, backgrounds and module pictures (2026-11-15, branch `feature/equipment-designers-air-naval`)
+
+**Owner (2026-11-15):** a test of a custom background and module pictures (vanilla mechanism,
+checked in game); the air and naval windows as planned; more ideas for what is hard-coded or could
+improve the designers.
+
+### Findings (1.19.5; same addresses on 1.19.4.2)
+
+**Backgrounds and module pictures are vanilla.** In each designer GUI the window `equipment_preview`
+(508x248) has the generic blueprint background, and the archetype's layout window
+(`equipment_designer_<archetype>`) is inserted into it by code ("inserted here by code"). A layout
+whose first element is a full-size picture covers the background; the `module_slots` windows show a
+picture per installed module (`_documentation.info`). No loader key is needed; a see-through
+background would be the only case for one (not planned).
+
+**The three windows share one class** (N2) and one GUI structure: `designer_title`, `experience`,
+`base_stats` / `combat_stats` / `misc_stats` and their `ref_*` twins, `historical_design_button`,
+`equipment_preview` and the `pos_custom_module_slot_window_N` / `pos_fixed_module_slot_window_N`
+positionTypes. Files: ships `equipmentdesignerview.gui` (`countryequipmentdesignerview`, 7 custom
+and 7 fixed positions), tanks `tank_designer_view.gui` (9 custom), planes `plane_designer_view.gui`
+(7 custom, 5 fixed). Only the tank window has the role dropdown and "Select Model".
+- Kind `view+0x3ce0`: TitleText (`FUN_141813d40`) gives kind 0 `SHIP_DESIGNER_TITLE`, 1
+  `TANK_DESIGNER_TITLE`, 2 `PLANE_DESIGNER_TITLE`, else `EQUIPMENT_DESIGNER_TITLE`.
+- **Which DLC:** the DLC designer mask (`FUN_14100bfe0`) is `(DLC 0x14 ? imm64 at +0x1d : 0) |
+  (DLC 0x1d ? imm8 at +0x3b : 0) | (DLC 0x26 ? imm64 at +0x4e : 0)`: Man the Guns
+  `0x80004001c0` (ships), No Step Back `4` (tanks), By Blood Alone `0x1d0026fc00` (planes).
+  The window picker's masks (N2) are wider: naval `0x80004003c1`, air `0x1f0037fc00`. So some naval
+  (bits 0, 9) and air (bits 16, 20, 33) types route to a window but are never designable: the same
+  gap as `infantry` for the tank window.
+- **Stats:** the dispatcher `FUN_141823510(view)` (from the refresh) calls by kind the ship filler
+  `FUN_141823c70` (same arguments as the tank's `FUN_141823950`), the tank filler, or the plane
+  filler `FUN_141823790(view)` (builds its arguments itself; also writes the air experience line).
+  The comparison panels (`ref_*`, `view+0x133c0..`) come from `FUN_1418247c0(view)`, which calls the
+  ship or tank filler or, for planes, Fill itself. Fill (`FUN_141e57270`) has 12 callers, all these;
+  each filler calls it three times, base, combat, misc, in that order. Arrays: ships `0x142a75a98`
+  / `ad0` / `b20`, tanks `b68` / `b90` / `bd0`, planes `c48` / `c70` / `cb0`; the ship's combat list
+  is filtered for some hulls, the ship's and plane's misc list is two rows shorter without DLC 0x13.
+
+### Decisions
+
+1. **`window = air | naval`**: the plane or ship window. As for `land`, the archetype's own `type`
+   must route there (the game's window picker, unchanged): `naval` needs a type the naval test
+   accepts, `air` a type the air test accepts and neither the naval nor the land test. The window's
+   DLC is required as vanilla requires it: Man the Guns for ships, By Blood Alone for planes (read
+   from the DLC mask, +0x1d / +0x4e). An archetype vanilla already designs (e.g. a fighter airframe)
+   simply gets the customisation.
+2. **Per window:** `title`, `slots` (positions in that window's coordinates; up to 20 + 20 windows,
+   added to that window's GUI file at load), `stats`, `xp`, `hide` (names from that window's GUI
+   file). `hide_roles` applies to the tank window only (the others have no dropdown).
+3. **Stats, one mechanism for all windows:** Fill is hooked; the dispatcher, the comparison function
+   and the plane filler mark the view being filled (main thread, nested calls restore the previous
+   mark); Fill's n-th call during a mark is panel n (base, combat, misc). For a listed archetype
+   with that panel in `stats`, Fill gets the definition's rows. This replaces the tank-only stats
+   hook and also covers the comparison panels. SIGs: dispatcher (kind at +0xf; tank filler call at
+   +0x1e5), comparison function (tank filler call at +0x1bb); the plane filler from the dispatcher's
+   `cmp eax,2; jne; call`. Cross-checks: both tank calls reach `kSigEqdStats`, the ship calls of
+   both agree, the plane filler calls Fill three times.
+4. **Test mod:** the small arms layout gets its own background and pictures per module (bayonet,
+   grenades, scope); a test air archetype (a type the plane window serves but By Blood Alone doesn't
+   design) with an air designer; a naval example in the docs. **Man the Guns is not installed here**,
+   so the naval window can be checked offline only; that stays open for the owner.
