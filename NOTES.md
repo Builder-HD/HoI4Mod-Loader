@@ -6686,3 +6686,63 @@ place): the button opens the dockyard list (ship filters, "infinite" amount) wit
 the destroyers. A Type VII line from the new tab: the game's MIO choice (HDW), then line 22 "Type
 VII" on dockyards ("U-31"). No ERROR, no fault. Tested on a local merge of this branch with the
 roles branch (both features together, not pushed).
+
+## O7: types and conditions (owner's requests, 2026-11-15)
+
+Owner's decisions on O6's list: a GUI injection feature no (the big mods are total overhauls and
+incompatible anyway); `types` yes; a condition for showing a tab yes; filters for existing lines no.
+
+### Types (`add_types` / `remove_types`)
+
+**Finding.** The type names of `type = { ... }` are the game's equipment categories
+(`script_enum_equipment_category`). `CategoryOf(const std::string*)` (`0x14100c8c0`) turns a name into
+the category's mask bit (0 for any other name): it looks the name up as a token (default token
+`0x4c17` = not found) and switches over the static token ids (`FUN_14100c900`; armor `4`, infantry
+`0x20`, motorized `8`, artillery bit 28, anti_tank bit 29, the masks the tabs and designs use). The
+game uses it for MIO equipment keys and `equipment_bonus` (`FUN_14100c750`, `FUN_140e247b0`). So no
+name table in the loader: `kSigPtabTypeByName` (unique on 1.19.5 and 1.19.4.2; both default token
+immediates equal), called with an engine string. Checked at first use: `armor` must give exactly
+the tank tab's mask and a made-up name 0, else `add_types` / `remove_types` are logged as unavailable.
+
+**Rule** (the plugin's answer per design): an archetype in `remove` -> out; in `add` -> in; the
+design's types (its archetype's and its modules' `add_equipment_type`, `+0x408`) meet
+`remove_types` -> out; meet `add_types` -> in; else the game's own answer. The more specific entry
+wins, and within a level `remove` wins. Lists merge across files and mods like the archetype lists.
+
+**In game** (1.19.5, Germany 1936, combined test build): `motorized` resolved to `0x8`;
+`infantry = { remove_types = { motorized } }` left Karabiner 98k and the civilian train in the
+infantry list; the truck, the armored car (`type = motorized`) and support equipment (`type =
+{ infantry motorized support }`) left it, as their types say. With `armor = { add_types = { motorized } }`
+(the test mod) the three show in the armor list next to the tanks: a move by type.
+
+### Conditions (a tab only for some countries, after a tech, ...)
+
+**What the game has.** Scripted GUIs (`common/scripted_guis`, `_documentation.md` there) can attach
+to the production screen: `parent_window_token = production_tab`, with `visible = { <trigger> }`
+and per element `<name>_click_enabled` triggers. That would make conditions vanilla: the mod puts
+its tab button in a scripted GUI, the loader only binds it.
+
+**Test** (local test mod only, not in the repo): a scripted GUI `parent_window_token =
+production_tab`, `visible = { tag = GER }`, with a button. The button shows on the production
+screen for Germany. The loader does not find it: not at the view's setup (the scripted GUI comes
+later), and not on later lookups either (a retry on every button update was added: it stays, as it
+is cheap and lets a late button work), neither by name in `production_win_top`, `military_tab` or
+the view's root, nor inside its window (`window_name`) looked up the same way.
+
+**Why.** Scripted GUIs live in `CScriptedWindowManager` (created by the in-game UI at `+0x2c8`,
+`FUN_140bb4940`; windows built by `FUN_140bdbb20`: an array at manager `+0x20`, count `+0x2c`, each a
+`CScriptedWindow` of 0xc10 bytes with its template at `+0xe8`, the template's `window_name` at `+0x30`).
+`CScriptedWindow` is not a `CContainerWindow` (its own short vtable `0x1429cb358`; slot `0x68` is not the
+container's lookup), so the named lookups the loader uses don't reach into it. Reaching its
+elements needs more analysis (how it holds its GUI tree), and holding the manager safely needs its
+lifetime (hook after its build; it dies with the in-game UI).
+
+**Options for the owner:**
+1. Finish the scripted GUI path: full vanilla triggers and the mod's own position for the button;
+   the most analysis (the scripted window's element tree, the manager's lifetime).
+2. A loader key reading a **flag**: `visible_flag = <country flag>` (and/or a global flag) for new
+   tabs and the vanilla ones (hidden when the flag is missing). Any script can set the flag with any
+   trigger logic (focus, decision, on_action); small analysis (where a country keeps its flags).
+3. A loader key naming a **scripted trigger** the loader evaluates for the player's country:
+   `visible = my_scripted_trigger`. Full trigger power without the scripted GUI, but the loader needs
+   to call the game's trigger evaluation with a country scope (not done before; medium analysis).
