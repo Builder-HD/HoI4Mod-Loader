@@ -1,0 +1,14 @@
+# hoi4_loader test: the field gun's role copies (vanilla duplicate_archetypes, as x_tank_chassis.txt;
+# this file must be read after the archetype's). Each role has its own type set.
+duplicate_archetypes = {
+	hoi4_loader_test_field_gun_at = {
+		archetype = hoi4_loader_test_field_gun
+		type = { anti_tank infantry }
+		default_modules = { fg_barrel_slot = hoi4_loader_test_fg_at_gun }   # a design of this role must be possible
+	}
+	hoi4_loader_test_field_gun_aa = {
+		archetype = hoi4_loader_test_field_gun
+		type = { anti_air infantry }
+		default_modules = { fg_barrel_slot = hoi4_loader_test_fg_aa_mount }
+	}
+}

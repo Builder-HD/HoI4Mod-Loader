@@ -47,3 +47,30 @@ hoi4_loader_test_drone_designer = {
 		drone_cargo_slot_3 = { x = 366 y = 300 }
 	}
 }
+
+# Roles (NOTES.md N16): one designer for the field gun and its two role copies; the dropdown lists
+# them with these names, each role with its own combat stats.
+hoi4_loader_test_artillery_designer = {
+	archetypes = { hoi4_loader_test_field_gun }
+	title = HOI4_LOADER_TEST_ARTILLERY_DESIGNER
+	stats = {
+		base = { reliability build_cost_ic }
+		combat = { soft_attack hard_attack ap_attack }
+		misc = { }
+	}
+	roles = {
+		hoi4_loader_test_field_gun = { name = HOI4_LOADER_TEST_ROLE_HOWITZER }
+		hoi4_loader_test_field_gun_at = {
+			name = HOI4_LOADER_TEST_ROLE_ANTI_TANK
+			stats = { combat = { hard_attack ap_attack } }
+		}
+		hoi4_loader_test_field_gun_aa = {
+			name = HOI4_LOADER_TEST_ROLE_ANTI_AIR
+			stats = { combat = { air_attack soft_attack } }
+		}
+	}
+	slots = {
+		fg_barrel_slot = { x = 1 y = 1 }
+		fg_carriage_slot = { x = 74 y = 1 }
+	}
+}
