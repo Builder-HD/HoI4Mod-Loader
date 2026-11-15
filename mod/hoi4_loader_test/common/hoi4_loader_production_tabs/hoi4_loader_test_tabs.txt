@@ -1,0 +1,17 @@
+# hoi4_loader test: production_tabs (MODDING.md "Production tabs", NOTES.md Part O).
+# - A new tab for the towed guns; they leave the infantry tab (add here, remove there: a move).
+# - The test small arms also show in the armor tab (add only: a copy; they stay in infantry too).
+# The new tab's button is the mod's own element in countryproductionlineview.gui; this test mod
+# doesn't ship a copy of that file (MODDING.md "Production tabs" has the two elements to add).
+# Without the button the loader logs it and the guns tab is off; the vanilla tab changes still work.
+hoi4_loader_test_guns_tab = {
+	button = hoi4_loader_test_guns_button
+	glow = hoi4_loader_test_guns_button_glow
+	add = { artillery_equipment rocket_artillery_equipment anti_tank_equipment anti_air_equipment }
+}
+infantry = {
+	remove = { artillery_equipment rocket_artillery_equipment anti_tank_equipment anti_air_equipment }
+}
+armor = {
+	add = { hoi4_loader_test_small_arms }
+}
