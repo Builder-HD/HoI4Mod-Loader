@@ -1571,8 +1571,10 @@ air and naval. Which equipment each one lists is fixed in the game by the equipm
 (NOTES.md Part O).
 
 With the loader, a mod changes **which archetypes a tab lists**, for the vanilla tabs and for
-**new tabs** with its own buttons. Two lists per tab, `add` and `remove`; everything else is the
-mod's choice:
+**new tabs** with its own buttons. Per tab, `add` and `remove` lists of archetypes, and
+`add_types` and `remove_types` lists of equipment types (the names of `type = { ... }`: `infantry`,
+`armor`, `artillery`, `anti_tank`, ..., including a mod's own types); everything else is the mod's
+choice:
 - **move** an archetype: `add` it to one tab, `remove` it from the tab the game lists it in;
 - **copy** it into a second tab: `add` only;
 - **hide** it from a tab: `remove` only (e.g. a tab of its own for the guns, without them in
@@ -1589,10 +1591,21 @@ artillery_tab = {
 infantry = {
     remove = { artillery_equipment anti_tank_equipment anti_air_equipment }
 }
+# By type: every design whose types include one of these, from any mod, without listing archetypes.
+guns_tab = {
+    button = guns_tab_button
+    add_types = { artillery anti_tank anti_air }
+}
+infantry = { remove_types = { artillery anti_tank anti_air } }
 ```
-- **A design is in a tab** when its archetype is in the tab's `add`, or (vanilla tabs) its type is
-  one the game lists there; and its archetype is not in the tab's `remove`. `remove` wins over
-  `add`, also across mods.
+- **A design is in a tab** by the most specific entry: its archetype in the tab's `remove` (out),
+  in `add` (in); else its types in `remove_types` (out), in `add_types` (in); else, for a vanilla tab,
+  whether the game lists it there. Within a level `remove` wins, also across mods. So an archetype
+  can be kept in a tab that removes its type, and the other way round.
+- **Types** are a design's types as the game counts them: its archetype's `type` and the
+  `add_equipment_type` of its modules. A type hits everything that has it: `remove_types = {
+  motorized }` takes trucks, armored cars (`type = motorized`) and support equipment (`type = {
+  infantry motorized support }`) out. A name the game doesn't know as a type is logged and skipped.
 - **Archetypes** by name (`is_archetype = yes`), with all their designs. `duplicate_archetypes`
   copies (vanilla's `light_tank_destroyer_chassis`, ...) are archetypes of their own: list them too.
   An archetype may be in any number of tabs.
@@ -1635,9 +1648,10 @@ their `add` and `remove` lists add up, so a submod can add its equipment to its 
 **Checks and messages** (`loader.log`):
 - At start: `production_tabs: 1 new tab(s), 1 vanilla tab(s) changed, from 1 file(s) ...`.
 - When the production view is built: `production_tabs: artillery_tab: button artillery_tab_button
-  bound (with glow)`, or `the production view has no button ...; the tab is off`.
-- Before the game starts: per tab `N archetype(s) added, M removed`, and every name that is not
-  found or is an equipment type instead of an archetype.
+  bound (with glow)`, or `no button ... in the production view ...; looked up again when the
+  buttons update, the tab is off until then`.
+- Before the game starts: per tab `N archetype(s) added, M removed; types added 0x8, removed 0x0`,
+  and every name that is not found, is an equipment type instead of an archetype, or is not a type.
 - Problems in the files, with file and line: syntax, unknown keys, `button` on a vanilla tab, a new
   tab without `button`, the same archetype in a tab's `add` and `remove`.
 - Without definitions the feature stays idle: `no tab definitions; the production tabs are left
@@ -1650,11 +1664,14 @@ country and the design, never the tab; each player sees the tabs of their own mo
 tab's button shows but does nothing. Guard: `hoi4_loader_feature_production_tabs`.
 
 **Test mod** (`common/hoi4_loader_production_tabs/hoi4_loader_test_tabs.txt`): towed artillery,
-rocket artillery, anti-tank and anti-air move from the infantry tab to a "Towed guns" tab, and the
-test small arms (decision "Unlock the test small arms") also show in the armor tab. The test mod
-doesn't ship a copy of `countryproductionlineview.gui`: add the two elements above with the names
-`hoi4_loader_test_guns_button` / `hoi4_loader_test_guns_button_glow` (tooltip
-`HOI4_LOADER_TEST_GUNS_TAB`) to test the new tab; without them only the vanilla tab changes apply.
+rocket artillery, anti-tank and anti-air move from the infantry tab to a "Towed guns" tab; the test
+small arms (decision "Unlock the test small arms") also show in the armor tab; every `motorized`
+design moves from infantry to armor by type; a ship tab takes the submarines out of the naval tab
+and also lists the destroyers. The test mod doesn't ship a copy of `countryproductionlineview.gui`:
+add the elements above with the names `hoi4_loader_test_guns_button` /
+`hoi4_loader_test_guns_button_glow` (tooltip `HOI4_LOADER_TEST_GUNS_TAB`) and
+`hoi4_loader_test_ships_button` (`HOI4_LOADER_TEST_SHIPS_TAB`) to test the new tabs; without them
+only the vanilla tab changes apply.
 
 ## Attention areas (`attention_area`)
 
