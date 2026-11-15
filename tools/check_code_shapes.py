@@ -713,6 +713,27 @@ def check_equipment_designers(img, codes, text_va, text):
     results.append(('kSigEqdStatsDispatch / Ref / plane filler (Fill calls plane/ship/tank/ref %s)' % counts, ok,
                     '%s %s' % (hex(disp or 0), hex(plane_fn))))
 
+    # Roles: the dropdown builder's entry and label functions, the type mask it compares, the base hop.
+    build = one('kSigEqdRoleBuild')
+    entry = rel32(img, build + k['kSigEqdRoleBuildEntryCall']) if build and u8(build + k['kSigEqdRoleBuildEntryCall']) == 0xE8 else 0
+    ok = bool(entry) and img.match_at(entry, codes['kCodeEqdRoleEntry']) and u8(entry + k['kCodeEqdRoleEntryLabelCall']) == 0xE8
+    label = rel32(img, entry + k['kCodeEqdRoleEntryLabelCall']) if ok else 0
+    ok = ok and img.match_at(label, codes['kCodeEqdRoleLabel'])
+    cmpm = find_in(img, build - 0x200, 0x200, codes['kCodeEqdRoleTypeMask']) if ok else None
+    basem = find_in(img, build - 0x400, 0x400, codes['kCodeEqdRoleBase']) if ok else None
+    mask_disp = u32(build + k['kSigEqdRoleBuildMaskDisp']) if build else -1
+    design_type = u32(pick + k['kSigEqdPickTypeDisp']) if (pick := one('kSigEqdPickWindow')) else -1
+    ok = ok and bool(cmpm and basem) and u32(cmpm + k['kCodeEqdRoleTypeMaskDesignDisp']) == mask_disp and \
+        u32(basem + k['kCodeEqdRoleBaseTypeDisp']) == design_type
+    types = rel32(img, entry + k['kCodeEqdRoleEntryTypesCall']) if ok and u8(entry + k['kCodeEqdRoleEntryTypesCall']) == 0xE8 else 0
+    ok = ok and bool(types) and img.match_at(types, codes['kCodeEqdDesignTypes']) and \
+        rel32(img, types + k['kCodeEqdDesignTypesJmp']) == rel32(img, types + k['kCodeEqdDesignTypesCall']) and \
+        u32(types + k['kCodeEqdDesignTypesBaseDisp']) == u32(basem + k['kCodeEqdRoleBaseDisp']) and \
+        u32(types + k['kCodeEqdDesignTypesTypeDisp']) == design_type
+    results.append(('kSigEqdRoleBuild / Entry / Label / TypeMask / Base (design mask +0x%x, type mask +0x%x, base +0x%x)' %
+                    (mask_disp, u32(cmpm + 3) if cmpm else -1, u32(basem + k['kCodeEqdRoleBaseDisp']) if basem else -1),
+                    ok, '%s %s' % (hex(entry), hex(label))))
+
     # Experience: pool offsets and tests, the window's line, the tooltip masks, the commands' tests.
     pick, pool, shown, tip = one('kSigEqdPickWindow'), one('kSigEqdPool'), one('kSigEqdXpShown'), one('kSigEqdTooltip')
     army = find_in(img, pool, 0x100, codes['kCodeEqdPoolArmy']) if pool else None

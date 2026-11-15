@@ -79,6 +79,19 @@ uint8_t* g_xpIconFn = nullptr;
 XpIcon_t g_xpIconOrig = nullptr;
 uint8_t* g_buttonsFn = nullptr;
 ViewFn_t g_buttonsOrig = nullptr;
+using RoleEntry_t = void(__fastcall*)(void* ctx, uint64_t mask);
+using RoleLabel_t = EngineString*(__fastcall*)(EngineString* out, uint64_t mask, int token);
+uint8_t* g_roleEntryFn = nullptr;
+RoleEntry_t g_roleEntryOrig = nullptr;
+uint8_t* g_roleLabelFn = nullptr;
+RoleLabel_t g_roleLabelOrig = nullptr;
+using TypeMask_t = uint64_t(__fastcall*)(const void* type);
+TypeMask_t g_typeMaskFn = nullptr;         // a type's mask as roles compare it
+uint32_t g_typeMask = 0, g_viewMask = 0;  // (the builder's comparison, checks only); the edited design's mask in the view
+uint32_t g_typeBase = 0;                   // a duplicate_archetypes copy -> the type it was made from
+const uint64_t kRoleBits = 0x7e000000;
+DesignerRoles_t g_rolesFor = nullptr;
+DesignerRoleName_t g_roleName = nullptr;
 DesignerRefreshed_t g_afterButtons = nullptr;
 
 // Stats.
@@ -284,6 +297,35 @@ bool ResolveAll() {
         }
     } else {
         Log("equipment_designers: the window's container lookup was not found; `hide` finds no container windows");
+    }
+    // Roles: the dropdown builder's entry and label functions, the masks it compares.
+    if (uint8_t* build = SigFindUnique("eqd_role_build", kSigEqdRoleBuild)) {
+        uint8_t* entry = build[kSigEqdRoleBuildEntryCall] == 0xE8 ? SigFollowRel32(build + kSigEqdRoleBuildEntryCall) : nullptr;
+        uint8_t* label = entry && SigMatchAt(entry, kCodeEqdRoleEntry) && entry[kCodeEqdRoleEntryLabelCall] == 0xE8
+                             ? SigFollowRel32(entry + kCodeEqdRoleEntryLabelCall)
+                             : nullptr;
+        uint8_t* cmp = SigFindIn(build - 0x200, 0x200, kCodeEqdRoleTypeMask);
+        uint8_t* base = SigFindIn(build - 0x400, 0x400, kCodeEqdRoleBase);
+        uint32_t maskDisp = Rd<uint32_t>(build, kSigEqdRoleBuildMaskDisp);
+        if (label && SigMatchAt(label, kCodeEqdRoleLabel) && cmp && Rd<uint32_t>(cmp, kCodeEqdRoleTypeMaskDesignDisp) == maskDisp &&
+            designType && g_archetype > designType && base && Rd<uint32_t>(base, kCodeEqdRoleBaseTypeDisp) == designType &&
+            TypeArchetypeOffset() && Rd<uint32_t>(base, kCodeEqdRoleBaseArchetypeDisp) == TypeArchetypeOffset() &&
+            entry[kCodeEqdRoleEntryTypesCall] == 0xE8) {
+            g_typeBase = Rd<uint32_t>(base, kCodeEqdRoleBaseDisp);
+            uint8_t* types = SigFollowRel32(entry + kCodeEqdRoleEntryTypesCall);
+            uint8_t* maskFn = SigMatchAt(types, kCodeEqdDesignTypes) ? SigFollowRel32(types + kCodeEqdDesignTypesJmp) : nullptr;
+            if (!maskFn || SigFollowRel32(types + kCodeEqdDesignTypesCall) != maskFn ||
+                Rd<uint32_t>(types, kCodeEqdDesignTypesTypeDisp) != designType || Rd<uint8_t>(types, kCodeEqdDesignTypesCountDisp) != g_typeSlotCount ||
+                Rd<uint32_t>(types, kCodeEqdDesignTypesBaseDisp) != g_typeBase)
+                entry = nullptr;  // `roles` unavailable
+            g_typeMaskFn = (TypeMask_t)maskFn;
+            g_roleEntryFn = entry;
+            g_roleLabelFn = entry ? label : nullptr;
+            g_typeMask = Rd<uint32_t>(cmp, kCodeEqdRoleTypeMaskDisp);
+            g_viewMask = g_archetype - designType + maskDisp;  // the design in the view: its archetype, its mask
+        } else {
+            Log("equipment_designers: the role dropdown's functions have an unexpected shape; `roles` is unavailable");
+        }
     }
     if ((g_buttonsFn = SigFindUnique("eqd_buttons", kSigEqdButtons)) != nullptr && Rd<uint32_t>(g_buttonsFn, kSigEqdButtonsRootDisp) != g_root) {
         Log("equipment_designers: the buttons update reads another root; `hide` is unavailable");
@@ -512,7 +554,8 @@ bool CustomRows(void* view, int panel, StatRange* r) {
     __try {
         const void* arch = Rd<const void*>(view, g_archetype);
         int n = 0;
-        const uint64_t* e = arch ? g_statsFor(Rd<int>(view, g_kind), arch, panel, &n) : nullptr;
+        uint64_t mask = g_viewMask ? Rd<uint64_t>(view, g_viewMask) : 0;
+        const uint64_t* e = arch ? g_statsFor(Rd<int>(view, g_kind), arch, mask, panel, &n) : nullptr;
         if (!e) return false;
         *r = StatRange{e, e + n};
         return true;
@@ -576,6 +619,43 @@ bool __fastcall IsNavalDetour(const void* type) {
     }
     return g_isNavalOrig(type);
 }
+// Roles: the dropdown builder's first call (the design's mask without role bits) lists the
+// definition's roles instead, each through the game's own entry; its role-bit calls are skipped.
+const uint64_t* RolesSafe(void* ctx, int* n) {
+    __try {
+        void* view = Rd<void*>(ctx, 0);
+        const void* arch = view && DesignerKind(view) == kDesignerTank ? Rd<const void*>(view, g_archetype) : nullptr;
+        return arch ? g_rolesFor(arch, n) : nullptr;
+    } __except (FaultFilter(GetExceptionInformation())) {
+        LogFaultOnce("role list hook");
+        return nullptr;
+    }
+}
+void __fastcall RoleEntryDetour(void* ctx, uint64_t mask) {
+    int n = 0;
+    const uint64_t* roles = !g_off && g_rolesFor && ctx ? RolesSafe(ctx, &n) : nullptr;
+    if (!roles) {
+        g_roleEntryOrig(ctx, mask);
+        return;
+    }
+    if (mask & kRoleBits) return;  // the game's fixed roles
+    for (int i = 0; i < n; ++i) g_roleEntryOrig(ctx, roles[i]);
+}
+const char* RoleNameSafe(uint64_t mask, int token) {
+    __try {
+        return g_roleName(token, mask);
+    } __except (FaultFilter(GetExceptionInformation())) {
+        LogFaultOnce("role name hook");
+        return nullptr;
+    }
+}
+EngineString* __fastcall RoleLabelDetour(EngineString* out, uint64_t mask, int token) {
+    const char* key = !g_off && g_roleName ? RoleNameSafe(mask, token) : nullptr;
+    if (!key) return g_roleLabelOrig(out, mask, token);
+    ConstructEngineString(out, key, strlen(key));
+    return out;
+}
+
 // While the tank window is open on a listed design with `xp`, the cost texts (tooltip and icon,
 // called only by the designer and its module picker) get one bit of that pool's mask.
 bool ShownPoolMask(uint64_t* mask) {
@@ -638,6 +718,22 @@ bool HaveDesignerXp() {
            g_airRet[1] && g_navalRet[0] && g_navalRet[1];
 }
 
+bool HaveDesignerRoles() { return g_roleEntryFn && g_roleLabelFn && g_typeMaskFn && g_viewMask && g_typeBase; }
+
+uint64_t DesignerTypeMask(const void* type) { return type && g_typeMaskFn ? g_typeMaskFn(type) : 0; }
+
+bool HookDesignerRoles(DesignerRoles_t rolesFor, DesignerRoleName_t roleName) {
+    if (!HaveDesignerRoles()) return false;
+    if (!HookQueue(g_roleEntryFn, (void*)&RoleEntryDetour, (void**)&g_roleEntryOrig, "eqd_role_entry")) return false;
+    if (!HookQueue(g_roleLabelFn, (void*)&RoleLabelDetour, (void**)&g_roleLabelOrig, "eqd_role_label")) {
+        HookUnqueue(g_roleEntryFn);
+        return false;
+    }
+    g_rolesFor = rolesFor;
+    g_roleName = roleName;
+    return true;
+}
+
 bool HookDesignerExtras(DesignerStats_t statsFor, DesignerXp_t xpFor, DesignerRefreshed_t afterButtons) {
     struct One {
         uint8_t* target;
@@ -692,6 +788,12 @@ bool HookDesigners(DesignerFind_t find, DesignerOpened_t opened, DesignerRefresh
 const void* TypeArchetypeOf(const void* type) {
     const void* a = type ? Rd<const void*>(type, TypeArchetypeOffset()) : nullptr;
     return a ? a : type;
+}
+
+const void* DesignerBaseArchetype(const void* type) {
+    const void* a = TypeArchetypeOf(type);
+    const void* base = a && g_typeBase ? Rd<const void*>(a, g_typeBase) : nullptr;  // as the role dropdown reads it
+    return base ? TypeArchetypeOf(base) : a;
 }
 
 int DesignerWindowOf(const void* type) {

@@ -48,6 +48,15 @@ std::vector<const EngineString*> g_titles;          // per definition, localised
 std::vector<bool> g_titleTried;
 // Per definition and panel: the stat rows as the game's arrays hold them ({int id; int8 kind}).
 std::vector<std::vector<uint64_t>> g_stats[Eqd::kStatPanels];
+// Per definition: its roles as the game tells them apart (type masks), in the definition's order.
+struct RoleData {
+    uint64_t mask = 0;
+    std::string key;                                 // the name's loc key
+    bool hasStats[Eqd::kStatPanels] = {false, false, false};
+    std::vector<uint64_t> stats[Eqd::kStatPanels];   // stat rows, as g_stats
+};
+std::vector<std::vector<RoleData>> g_roles;
+std::vector<std::vector<uint64_t>> g_roleMasks;
 
 // Per window kind (ship, tank, plane): whether a definition uses it, and the slot windows its GUI
 // file had before the loader's patch (windows past these are the loader's; -1: not patched).
@@ -84,6 +93,19 @@ Touched* TouchedOf(const void* view, bool create) {
 
 bool StartsWithFixed(const char* s) { return strncmp(s, "fixed_", 6) == 0; }
 
+// Stat rows by the game's ids (found by loc key at runtime); unknown ones are logged and left out.
+std::vector<uint64_t> StatRows(const std::string& who, const std::vector<std::string>& names) {
+    std::vector<uint64_t> rows;
+    for (const std::string& name : names) {
+        int id = Engine::StatIdByKey(Eqd::StatLocKey(name));
+        if (id < 0)
+            Log("%s: %s: the game has no stat %s (%s); left out", kFeature, who.c_str(), name.c_str(), Eqd::StatLocKey(name));
+        else
+            rows.push_back((uint64_t)(uint32_t)id);  // kind 0: a stat
+    }
+    return rows;
+}
+
 // The stat rows of each definition, by the game's ids (found by loc key at runtime).
 void BuildStats() {
     for (int g = 0; g < Eqd::kStatPanels; ++g) g_stats[g].assign(g_defs.size(), std::vector<uint64_t>());
@@ -95,20 +117,49 @@ void BuildStats() {
         return;
     }
     for (size_t i = 0; i < g_defs.size(); ++i)
-        for (int g = 0; g < Eqd::kStatPanels; ++g)
-            for (const std::string& name : g_defs[i].stats[g]) {
-                int id = Engine::StatIdByKey(Eqd::StatLocKey(name));
-                if (id < 0)
-                    Log("%s: %s: the game has no stat %s (%s); left out", kFeature, g_defs[i].name.c_str(), name.c_str(),
-                        Eqd::StatLocKey(name));
-                else
-                    g_stats[g][i].push_back((uint64_t)(uint32_t)id);  // kind 0: a stat
-            }
+        for (int g = 0; g < Eqd::kStatPanels; ++g) g_stats[g][i] = StatRows(g_defs[i].name, g_defs[i].stats[g]);
+}
+
+// A definition's roles: each the archetype or a twin of it, each with its own type mask.
+void ResolveRoles(size_t i, const void* archetype) {
+    const Eqd::Designer& d = g_defs[i];
+    if (d.roles.empty()) return;
+    if (!Engine::HaveDesignerRoles()) {
+        Log("%s: %s: the role dropdown could not be resolved on this build; `roles` is ignored", kFeature, d.name.c_str());
+        return;
+    }
+    for (const Eqd::Role& r : d.roles) {
+        const void* type = Engine::EquipmentByToken(Engine::Intern(r.equipment.c_str()));
+        if (!type || Engine::DesignerBaseArchetype(type) != archetype) {
+            Log("%s: %s (%s line %d): role %s is neither the archetype nor a duplicate_archetypes copy of it; left out", kFeature,
+                d.name.c_str(), d.file.c_str(), r.line, r.equipment.c_str());
+            continue;
+        }
+        RoleData rd;
+        rd.mask = Engine::DesignerTypeMask(type);
+        bool clash = rd.mask == 0;
+        for (const RoleData& o : g_roles[i]) clash = clash || o.mask == rd.mask;
+        if (clash) {
+            Log("%s: %s (%s line %d): role %s has the same types as another role (the game tells roles apart by type); left out",
+                kFeature, d.name.c_str(), d.file.c_str(), r.line, r.equipment.c_str());
+            continue;
+        }
+        rd.key = r.name.empty() ? r.equipment : r.name;
+        for (int g = 0; g < Eqd::kStatPanels; ++g) {
+            rd.hasStats[g] = r.hasStats[g] && Engine::HaveDesignerStats();
+            if (rd.hasStats[g]) rd.stats[g] = StatRows(d.name + " role " + r.equipment, r.stats[g]);
+        }
+        g_roles[i].push_back(rd);
+        g_roleMasks[i].push_back(rd.mask);
+    }
+    Log("%s: %s: %zu role(s) in the dropdown", kFeature, d.name.c_str(), g_roles[i].size());
 }
 
 void ResolveTypes() {
     g_resolved = true;
     BuildStats();
+    g_roles.assign(g_defs.size(), std::vector<RoleData>());
+    g_roleMasks.assign(g_defs.size(), std::vector<uint64_t>());
     std::vector<bool> served(g_defs.size(), false);
     for (const auto& e : g_byName) {
         const Eqd::Designer& d = g_defs[e.second];
@@ -138,6 +189,7 @@ void ResolveTypes() {
         }
         g_byType[type] = e.second;
         served[e.second] = true;
+        if (kind == Engine::kDesignerTank) ResolveRoles(e.second, type);
         int custom = 0, fixed = 0, placed = 0;
         LONG before[2] = {g_customBefore[kind], g_fixedBefore[kind]};
         for (int i = 0; i < slots; ++i) {
@@ -183,7 +235,7 @@ const Eqd::Designer* DesignerOf(const void* type) {
         if (!IsMainThread()) return nullptr;  // not built yet: the game's own answer
         EnsureResolved();
     }
-    auto it = g_byType.find(Engine::TypeArchetypeOf(type));
+    auto it = g_byType.find(Engine::DesignerBaseArchetype(type));
     return it == g_byType.end() ? nullptr : &g_defs[it->second];
 }
 
@@ -198,13 +250,37 @@ const Eqd::Designer* DesignerIn(int kind, const void* archetype) {
     return d && KindOf(*d) == kind ? d : nullptr;
 }
 
-const uint64_t* StatsFor(int kind, const void* archetype, int panel, int* count) {
+const uint64_t* StatsFor(int kind, const void* archetype, uint64_t designMask, int panel, int* count) {
     const Eqd::Designer* d = DesignerIn(kind, archetype);
-    if (!d || panel < 0 || panel >= Eqd::kStatPanels || !d->hasStats[panel]) return nullptr;
-    const std::vector<uint64_t>& v = g_stats[panel][(size_t)(d - &g_defs[0])];
+    if (!d || panel < 0 || panel >= Eqd::kStatPanels) return nullptr;
     static const uint64_t kNone = 0;
+    for (const RoleData& r : g_roles[(size_t)(d - &g_defs[0])])  // the design's role first
+        if (r.mask == designMask && r.hasStats[panel]) {
+            *count = (int)r.stats[panel].size();
+            return r.stats[panel].empty() ? &kNone : r.stats[panel].data();
+        }
+    if (!d->hasStats[panel]) return nullptr;
+    const std::vector<uint64_t>& v = g_stats[panel][(size_t)(d - &g_defs[0])];
     *count = (int)v.size();
     return v.empty() ? &kNone : v.data();  // an empty panel: begin == end
+}
+
+// Roles: the masks of a listed archetype's roles (tank window), and a role's name by archetype token.
+const uint64_t* RolesFor(const void* archetype, int* count) {
+    const Eqd::Designer* d = DesignerIn(Engine::kDesignerTank, archetype);
+    if (!d) return nullptr;
+    const std::vector<uint64_t>& m = g_roleMasks[(size_t)(d - &g_defs[0])];
+    *count = (int)m.size();
+    return m.empty() ? nullptr : m.data();
+}
+const char* RoleName(int token, uint64_t mask) {
+    if (!InterlockedCompareExchange(&g_ready, 0, 0)) return nullptr;
+    const char* name = Engine::TokenName(token);
+    auto it = name && *name ? g_byName.find(Eqd::Lower(name)) : g_byName.end();
+    if (it == g_byName.end() || it->second >= g_roles.size()) return nullptr;
+    for (const RoleData& r : g_roles[it->second])
+        if (r.mask == mask) return r.key.c_str();
+    return nullptr;
 }
 
 int XpFor(const void* type) {
@@ -283,7 +359,8 @@ void Refreshed(void* view, const void* archetype) {
     if (d) {
         int slots = Engine::TypeSlotCount(archetype);
         Touched* t = TouchedOf(view, true);
-        Engine::DesignerShowRoles(view, !d->hideRoles);
+        bool roles = !g_roleMasks[(size_t)(d - &g_defs[0])].empty();
+        Engine::DesignerShowRoles(view, roles || !d->hideRoles);
         if (t && t->archetype && t->archetype != archetype) {  // another listed design was shown: start from the GUI's positions
             ResetGroup(view, false);
             ResetGroup(view, true);
@@ -383,9 +460,12 @@ bool EquipmentDesignersInit() {
         Log("%s: hooks could not be queued", kFeature);
         return false;
     }
-    bool stats = false, xp = false, hide = false;
+    bool stats = false, xp = false, hide = false, roles = false;
     for (const Eqd::Designer& d : g_defs) {
         for (int g = 0; g < Eqd::kStatPanels; ++g) stats = stats || d.hasStats[g];
+        for (const Eqd::Role& r : d.roles)
+            for (int g = 0; g < Eqd::kStatPanels; ++g) stats = stats || r.hasStats[g];
+        roles = roles || !d.roles.empty();
         xp = xp || d.xp != Eqd::Xp::Game;
         hide = hide || !d.hide.empty();
     }
@@ -395,6 +475,8 @@ bool EquipmentDesignersInit() {
     if (xp && !Engine::HaveDesignerXp()) Log("%s: the experience hooks are unavailable on this build; `xp` is ignored", kFeature);
     if ((stats || xp || hide) && !Engine::HookDesignerExtras(stats ? &StatsFor : nullptr, xp ? &XpFor : nullptr, hide ? &AfterButtons : nullptr))
         Log("%s: the stats / experience hooks could not be queued; `stats` and `xp` are ignored", kFeature);
+    if (roles && !Engine::HookDesignerRoles(&RolesFor, &RoleName))
+        Log("%s: the role dropdown hooks are unavailable on this build; `roles` is ignored", kFeature);
     if (xp && Engine::HaveDesignerXp())
         Log("%s: `xp` is used: designs pay from the chosen pool; in multiplayer every player needs the loader and these mods",
             kFeature);

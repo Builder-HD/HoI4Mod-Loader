@@ -35,6 +35,14 @@ A–F; NOTES.md has the findings and test results behind each.
   test mod. 2 new signatures and 1 anchor (smoke `2/147`). Checked on 1.19.4.2 and 1.19.5; the plane
   window tested in game on 1.19.5 (2026-11-15); the ship window offline only (no Man the Guns here).
   The test mod has a test drone (`type = air_transport`) and pictures for the small arms.
+- **`equipment_designers`: custom roles** (NOTES.md N16/N17). `roles = { <equipment> = { name = <loc>
+  stats = { ... } } ... }` lists the tank window's role dropdown for a designer: the archetype and its
+  `duplicate_archetypes` copies (each with its own types), with the mod's names and optional
+  per-role stats, instead of the game's seven fixed tank roles and names. E.g. one artillery
+  designer with howitzer, anti-tank and anti-air roles. Which role a design may take, the save and
+  the layouts per role stay vanilla. Hooks the dropdown's entry and label functions; 1 new signature
+  (smoke `2/148`). Checked on 1.19.4.2 and 1.19.5; tested in game on 1.19.5 (2026-11-15). The test
+  mod has a field gun with three roles and battalions for them.
 - **Shared code:** the Paradox script reader (`src/script_tree.cpp`) and the mod folder scan
   (`ModList::ScanFolder`) moved out of air_scenarios, which now uses them; `UserFolder()` and
   `GameFolder()` in `loader.h`.

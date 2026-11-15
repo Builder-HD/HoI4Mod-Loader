@@ -23,10 +23,20 @@ enum class Xp { Game, Army, Navy, Air };
 // The stat panels of the designer window, in order.
 enum StatPanel { kStatsBase = 0, kStatsCombat = 1, kStatsMisc = 2, kStatPanels = 3 };
 
+// One role of the tank window's role dropdown (`roles`): the archetype itself or a twin of it
+// (`archetype = <archetype>` with its own type set), shown with its own name and stats.
+struct Role {
+    std::string equipment;                                // the archetype or its twin
+    std::string name;                                     // loc key; empty = the equipment's own key
+    bool hasStats[kStatPanels] = {false, false, false};  // false: the designer's (or window's) rows
+    std::vector<std::string> stats[kStatPanels];
+    int line = 0;
+};
+
 struct Designer {
     std::string name;                     // the entry's key
     std::vector<std::string> archetypes;  // archetype names (required)
-    std::string window = "land";          // land | air | naval; only land is served for now
+    std::string window = "land";          // land | air | naval
     std::string title;                    // loc key; empty = the window's own title
     bool hideRoles = true;                // hide the tank role dropdown
     std::vector<SlotPos> slots;
@@ -34,6 +44,7 @@ struct Designer {
     bool hasStats[kStatPanels] = {false, false, false};  // false: the window's own list
     std::vector<std::string> stats[kStatPanels];          // stat script names, in order
     std::vector<std::string> hide;                        // GUI element names to hide
+    std::vector<Role> roles;                              // the role dropdown's entries (empty: the game's)
     std::string file;  // for messages
     int line = 0;
 };

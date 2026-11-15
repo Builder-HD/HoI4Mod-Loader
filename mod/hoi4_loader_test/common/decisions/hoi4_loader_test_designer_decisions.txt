@@ -17,6 +17,14 @@
 #    "drone hangar" background, the engine at the top left, three cargo pods on the right of the
 #    bottom row, the definition's stats (4 base, 2 combat, no misc) and no historical design button;
 #    a pod adds its picture; a design costs air experience.
+# 6. Production > infantry/artillery: "Test Field Gun" opens the "Artillery Designer" with the role
+#    dropdown: Howitzer, Anti-Tank, Anti-Air (the definition's names). Anti-Tank needs the AT barrel,
+#    Anti-Air the AA mount (vanilla allow_equipment_type; the disabled role's tooltip is
+#    <name>_role_disallowed). Each role shows its own background (its own layout) and stats
+#    (Howitzer soft attack..., Anti-Tank hard attack and piercing, Anti-Air air attack). A saved
+#    Anti-Tank design is listed apart and reopens in that role. The decision also creates the design
+#    "Test AT Gun M36". A role needs its equipment researched and a battalion that uses it (the test
+#    tech unlocks both, hoi4_loader_test_field_gun_units.txt), as vanilla's tank roles do.
 # Without the loader the decision is hidden; the equipment, if unlocked, opens the old window.
 
 hoi4_loader_test_category = {
@@ -32,6 +40,11 @@ hoi4_loader_test_category = {
 			army_experience = 50
 			navy_experience = 50
 			air_experience = 50
+			create_equipment_variant = {   # a design of the anti-tank role (as vanilla history files make them)
+				name = "Test AT Gun M36"
+				type = hoi4_loader_test_field_gun_at_1
+				modules = { fg_barrel_slot = hoi4_loader_test_fg_at_gun }
+			}
 			log = "hoi4_loader_test: test small arms unlocked"
 		}
 		ai_will_do = { base = 0 }

@@ -1070,6 +1070,34 @@ static const size_t kSigEqdStatsDispatchKindDisp = 0xf, kSigEqdStatsDispatchShip
 // too (it has three more callers). (0x141823775 -> 0x141823790)
 CODE(kCodeEqdStatsPlane, "83 F8 02 75 05 E8")
 static const size_t kCodeEqdStatsPlaneCall = 5;
+// The tank window's role dropdown (inside its builder): rbx = the design's type mask (design
+// ->[disp32 +3]) without the six role bits (0x7e000000), then Entry(ctx, mask) (E8 at +0x15,
+// kCodeEqdRoleEntry), once per role. ctx = {view, archetype token, ...}. (0x141826c8f)
+SIG(kSigEqdRoleBuild, "48 8B 9E ?? ?? ?? ?? 48 81 E3 FF FF FF 81 48 8B D3 48 8D 4D ?? E8")
+static const size_t kSigEqdRoleBuildMaskDisp = 3, kSigEqdRoleBuildEntryCall = 0x15;
+// Entry(ctx, mask): adds one role entry (role bits & 0x7e000000 tested first), label from
+// Label(out, mask, token) (E8 at +0xba). Hooked (the definition's roles). (0x14180f740)
+CODE(kCodeEqdRoleEntry, "48 89 54 24 10 55 53 56 57 41 54 41 56 41 57 48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? 4C 8B D2 4C 8B F9 C7 85 ?? ?? ?? ?? 00 00 00 00 4C 8B C2 41 81 E0 00 00 00 7E")
+static const size_t kCodeEqdRoleEntryLabelCall = 0xba, kCodeEqdRoleEntryTypesCall = 0x8f;
+// DesignTypes(design) (the entry's E8 at +0x8f): the types the design can have: for a type without
+// slots (count design->[disp32 +0xc]->[disp8 +0x12]) TypeMask(type) (jmp at +0x1b), else
+// TypeMask(type->[disp32 +0x23], the base) (E8 at +0x27) plus what its modules allow. TypeMask is a
+// type's mask as roles compare it; the loader calls it for each role's equipment. (0x140c2ee50)
+CODE(kCodeEqdDesignTypes, "40 53 48 83 EC 20 48 8B D9 48 8B 89 ?? ?? ?? ?? 83 79 ?? 00 75 0A 48 83 C4 20 5B E9 ?? ?? ?? ?? 48 8B 89 ?? ?? ?? ?? E8")
+static const size_t kCodeEqdDesignTypesTypeDisp = 0xc, kCodeEqdDesignTypesCountDisp = 0x12, kCodeEqdDesignTypesJmp = 0x1b,
+                    kCodeEqdDesignTypesBaseDisp = 0x23, kCodeEqdDesignTypesCall = 0x27;
+// Label(out std::string, mask, archetype token): the role's loc key, a switch on the exact mask.
+// Hooked (the definition's role names). (0x14100de60)
+CODE(kCodeEqdRoleLabel, "48 89 5C 24 18 48 89 4C 24 08 57 48 83 EC 40 48 8B D9 33 FF 89 7C 24 30 48 81 FA 00 00 04 00")
+// In the builder before kSigEqdRoleBuild (SigFindIn 0x200 back): an equipment type's mask
+// type->[disp32 +3] without bit 24 compared with the design's mask design->[disp32 +0xf]. (0x141826b43)
+CODE(kCodeEqdRoleTypeMask, "48 8B 81 ?? ?? ?? ?? 48 0F BA F0 18 48 39 86 ?? ?? ?? ??")
+static const size_t kCodeEqdRoleTypeMaskDisp = 3, kCodeEqdRoleTypeMaskDesignDisp = 0xf;
+// In the builder (SigFindIn 0x400 back from kSigEqdRoleBuild): the label's token is the design's
+// type (->[disp32 +3]) ->[disp32 +0xa] (the base a duplicate_archetypes copy was made from; an
+// original points to itself) ->[disp32 +0x11] (its archetype) ->+8. (0x141826908)
+CODE(kCodeEqdRoleBase, "48 8B 86 ?? ?? ?? ?? 48 8B 88 ?? ?? ?? ?? 48 8B 99 ?? ?? ?? ?? 8B 5B 08")
+static const size_t kCodeEqdRoleBaseTypeDisp = 3, kCodeEqdRoleBaseDisp = 0xa, kCodeEqdRoleBaseArchetypeDisp = 0x11;
 // The comparison panels (ref_*_stats, view): the ship filler (E8 at +0x13c), the tank filler (E8 at
 // +0x1bb) or, for planes, Fill itself, three times. Hooked (marks the view). (0x1418247c0)
 SIG(kSigEqdStatsRef, "48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20 55 41 56 41 57 48 8D 6C 24 B9 48 81 EC 90 00 00 00 4C 8B F1 48 83 B9 ?? ?? ?? ?? 00 0F 84 ?? ?? ?? ?? 48 8D B1")

@@ -153,7 +153,7 @@ bool ReadSlots(const Node& n, std::vector<SlotPos>* out, std::string* why) {
     return true;
 }
 
-bool ReadStats(const Node& n, Designer* d, std::string* why) {
+bool ReadStats(const Node& n, bool* hasStats, std::vector<std::string>* stats, std::string* why) {
     static const char* const kPanels[kStatPanels] = {"base", "combat", "misc"};
     if (!n.block) {
         *why = "'stats' takes a block: stats = { base = { ... } combat = { ... } misc = { ... } }";
@@ -167,7 +167,7 @@ bool ReadStats(const Node& n, Designer* d, std::string* why) {
             *why = "stats: '" + Label(g) + "' must be base, combat or misc = { <stat> ... }";
             return false;
         }
-        if (d->hasStats[panel]) {
+        if (hasStats[panel]) {
             *why = std::string("stats: ") + kPanels[panel] + " is listed twice";
             return false;
         }
@@ -178,8 +178,48 @@ bool ReadStats(const Node& n, Designer* d, std::string* why) {
                 *why = "stats: unknown stat '" + s + "' (MODDING.md lists the names)";
                 return false;
             }
-        d->hasStats[panel] = true;
-        d->stats[panel] = names;
+        hasStats[panel] = true;
+        stats[panel] = names;
+    }
+    return true;
+}
+
+bool ReadRoles(const Node& n, std::vector<Role>* out, std::string* why) {
+    if (!n.block) {
+        *why = "'roles' takes a block: roles = { <equipment> = { name = <loc key> } ... }";
+        return false;
+    }
+    for (const Node& r : n.children) {
+        if (r.key.empty() || !r.block) {
+            *why = "roles: '" + Label(r) + "' must be <equipment> = { ... } (the archetype or a twin of it)";
+            return false;
+        }
+        Role role;
+        role.equipment = r.key;
+        role.line = r.line;
+        for (const Node& c : r.children) {
+            if (EqualsNoCase(c.key, "name") && !c.block) {
+                role.name = c.value;
+            } else if (EqualsNoCase(c.key, "stats")) {
+                if (!ReadStats(c, role.hasStats, role.stats, why)) {
+                    *why = "roles: " + r.key + ": " + *why;
+                    return false;
+                }
+            } else {
+                *why = "roles: " + r.key + ": unknown key '" + Label(c) + "' (allowed: name, stats)";
+                return false;
+            }
+        }
+        for (const Role& o : *out)
+            if (EqualsNoCase(o.equipment, role.equipment)) {
+                *why = "roles: " + r.key + " is listed twice";
+                return false;
+            }
+        out->push_back(role);
+    }
+    if (out->empty()) {
+        *why = "roles: list at least one role (or leave 'roles' out)";
+        return false;
     }
     return true;
 }
@@ -228,7 +268,9 @@ void ParseFile(const std::string& text, const std::string& fileName, std::vector
             } else if (EqualsNoCase(c.key, "slots")) {
                 ok = ReadSlots(c, &d.slots, &why);
             } else if (EqualsNoCase(c.key, "stats")) {
-                ok = ReadStats(c, &d, &why);
+                ok = ReadStats(c, d.hasStats, d.stats, &why);
+            } else if (EqualsNoCase(c.key, "roles")) {
+                ok = ReadRoles(c, &d.roles, &why);
             } else if (EqualsNoCase(c.key, "xp") && !c.block) {
                 std::string v = Lower(c.value);
                 d.xp = v == "army" ? Xp::Army : v == "navy" ? Xp::Navy : v == "air" ? Xp::Air : Xp::Game;
@@ -240,7 +282,7 @@ void ParseFile(const std::string& text, const std::string& fileName, std::vector
                 ok = ScriptTree::ListOf(c, &d.hide, &why);
             } else {
                 why = "unknown key '" + Label(c) +
-                      "' (allowed: archetypes, window, title, hide_roles, slots, stats, xp, hide)";
+                      "' (allowed: archetypes, window, title, hide_roles, slots, stats, xp, hide, roles)";
                 ok = false;
             }
             if (!ok) {
@@ -252,6 +294,10 @@ void ParseFile(const std::string& text, const std::string& fileName, std::vector
         if (d.archetypes.empty()) {
             problem(e.line, d.name + ": needs 'archetypes' (the equipment archetypes this designer serves)");
             continue;
+        }
+        if (!d.roles.empty() && d.window != "land") {
+            problem(e.line, d.name + ": roles need the land window (the tank window's role dropdown); 'roles' is ignored");
+            d.roles.clear();
         }
         if (d.slots.size() > (size_t)(2 * kMaxSlotWindows)) {
             problem(e.line, d.name + ": more slot positions than the designer has slot windows (" +
