@@ -38,6 +38,7 @@ static Feature g_features[] = {
     {"equipment_designers", Tier::Engine, &EquipmentDesignersInit, nullptr, false, 0},
     {"production_tabs", Tier::Engine, &ProductionTabsInit, nullptr, false, 0},
     {"province_terrain", Tier::Engine, &ProvinceTerrainInit, "lifecycle", false, 0},
+    {"engine_on_actions", Tier::Engine, &EngineOnActionsInit, "lifecycle", false, 0},
     {"equipment_conversion", Tier::Engine, &EquipmentConversionInit, "lifecycle", false, 0},
     {"attention_area", Tier::Engine, &AttentionAreaInit, "lifecycle", false, 0},
 };

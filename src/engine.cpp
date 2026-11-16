@@ -261,6 +261,7 @@ using SyncedRandom_t = uint32_t(__fastcall*)(const char* file, int line);
 using ScopeCtor_t = void*(__fastcall*)(void* scope, int seed);
 using ScopeDtor_t = void(__fastcall*)(void* scope);
 using ScopeSetCountry_t = void(__fastcall*)(void* scope, const int* tag, bool);
+using ScopeSetState_t = void(__fastcall*)(void* scope, int stateId, bool);
 using OnActionFind_t = void*(__fastcall*)(void* db, const EngineString* name);
 using OnActionFire_t = void(__fastcall*)(void* db, void* list, void* scope, bool ignoreGameRunningCheck);
 using SessionGetter_t = uint8_t*(__fastcall*)(void* idler);
@@ -269,6 +270,7 @@ SyncedRandom_t g_syncedRandom = nullptr;
 ScopeCtor_t g_scopeCtor = nullptr;
 ScopeDtor_t g_scopeDtor = nullptr;
 ScopeSetCountry_t g_scopeSetCountry = nullptr;
+ScopeSetState_t g_scopeSetState = nullptr;
 OnActionFind_t g_onActionFind = nullptr;
 OnActionFire_t g_onActionFire = nullptr;
 void** g_ppOnActionDb = nullptr;      // address of the COnActionDataBase* global
@@ -301,6 +303,12 @@ void ResolveOnActions() {
             g_syncedRandom = (SyncedRandom_t)SigFollowRel32(p + kSigOnStartupSeedRandomCall);
         else
             Log("ERROR: on_startup_seed: event scope constructor differs from player_scope's");
+    }
+    if ((p = SigFindUnique("event_scope_state", kSigEventScopeState)) != nullptr) {
+        if ((void*)SigFollowRel32(p + kSigEventScopeSetCountryCall) == (void*)g_scopeSetCountry)
+            g_scopeSetState = (ScopeSetState_t)SigFollowRel32(p + kSigEventScopeSetStateCall);
+        else
+            Log("ERROR: event_scope_state: its SetCountry differs from player_scope's; no state scopes for on_actions");
     }
     if ((p = SigFindUnique("on_startup_fire", kSigOnStartupFire)) != nullptr) {
         // movsd xmm0,[rip+x] loads the first 8 bytes of "on_startup": opcode at NameRel-4, length 8.
@@ -495,6 +503,7 @@ bool Resolve() {
     ResolveProvinceData();  // after ResolveRailways: the province controller offset
     ResolveAttention();
     ResolveTerrain();  // HaveTerrain needs ResolveProvinceData, ResolveData and ResolveRailways
+    ResolveEngineEvents();  // after ResolveOnActions and ResolveData (unit owner)
 
     Log("Engine: gamestate %s, flags +0x%x, regions +0x%x/+0x%x", g_ppGameState ? SigDescribe(g_ppGameState).c_str() : "-",
         g_flagsOffset, g_regionArrayOffset, g_regionCountOffset);
@@ -760,6 +769,87 @@ bool OnActionDefined(const char* name) {
 bool WithCountryScope(int tag, bool (*fn)(const void* scope, void* ctx), void* ctx, bool* result) {
     if (!g_scopeCtor || !g_scopeDtor || !g_scopeSetCountry || tag <= 0 || !fn || !result) return false;
     return WithCountryScopeRaw(tag, fn, ctx, result);
+}
+
+namespace {
+// CEventScope's FROM link (NOTES C1; vanilla's on_state_control_changed sets it the same way, Q6).
+const size_t kScopeFromLink = 0x20;
+
+bool FindListRaw(void* db, const EngineString* name, void** list, bool* defined) {
+    __try {
+        EngineString none;
+        memset(&none, 0, sizeof none);
+        size_t n = strlen(kNoSuchOnAction);
+        memcpy(none.buf, kNoSuchOnAction, n);
+        none.size = n;
+        none.cap = 15;
+        void* nul = g_onActionFind(db, &none);
+        *list = g_onActionFind(db, name);
+        *defined = *list != nul;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// ROOT = the country; FROM = a country (fromTag > 0) or a state (fromState > 0), linked as vanilla
+// links them. No C++ objects, so SEH contains a fault.
+bool FireListRaw(void* db, void* list, int rootTag, int fromTag, int fromState, DWORD* code) {
+    alignas(16) uint8_t root[kEventScopeBuffer];
+    alignas(16) uint8_t from[kEventScopeBuffer];
+    __try {
+        uint32_t seed = g_syncedRandom("hoi4_loader engine on_action", 1);
+        g_scopeCtor(root, (int)(seed & 0x7fffffff));
+        g_scopeCtor(from, (int)(seed & 0x7fffffff));
+        if (rootTag > 0) g_scopeSetCountry(root, &rootTag, true);
+        bool haveFrom = false;
+        if (fromTag > 0) {
+            g_scopeSetCountry(from, &fromTag, true);
+            haveFrom = true;
+        } else if (fromState > 0 && g_scopeSetState) {
+            g_scopeSetState(from, fromState, true);
+            haveFrom = true;
+        }
+        if (haveFrom) *(void**)(root + kScopeFromLink) = from;
+        g_onActionFire(db, list, root, false);
+        g_scopeDtor(from);
+        g_scopeDtor(root);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        *code = GetExceptionCode();
+        return false;
+    }
+}
+}  // namespace
+
+bool HaveStateScopes() { return g_scopeSetState != nullptr; }
+
+void* OnActionListByName(const char* name) {
+    void* db = g_ppOnActionDb ? *g_ppOnActionDb : nullptr;
+    if (!HaveOnActions() || !db || !name || !*name) return nullptr;
+    // A heap string the engine's allocator owns (names longer than 15 characters); kept, as the
+    // lookup is done once per name.
+    EngineString* s = new EngineString;
+    memset(s, 0, sizeof *s);
+    ConstructEngineString(s, name, strlen(name));
+    void* list = nullptr;
+    bool defined = false;
+    if (!FindListRaw(db, s, &list, &defined)) {
+        Log("ERROR: looking up on_action %s crashed", name);
+        return nullptr;
+    }
+    return defined ? list : nullptr;
+}
+
+bool FireOnActionList(void* list, int rootTag, int fromTag, int fromState) {
+    void* db = g_ppOnActionDb ? *g_ppOnActionDb : nullptr;
+    if (!HaveOnActions() || !db || !list) return false;
+    DWORD code = 0;
+    if (!FireListRaw(db, list, rootTag, fromTag, fromState, &code)) {
+        Log("ERROR: firing an on_action crashed (exception 0x%08lX)", code);
+        return false;
+    }
+    return true;
 }
 
 bool FireOnAction(const char* name, int countryTag) {
