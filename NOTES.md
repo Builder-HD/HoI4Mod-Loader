@@ -7507,3 +7507,19 @@ Map connections are a separate feature and PR (Part R).
 - **Province controller:** `FUN_140ef1860`, called by `set_province_controller` (`0x14037c930`),
   occupation (`0x140bbd450`, 4x), `0x140e4d500`, `0x14071ba50`, peace and more.
 Parameters and fields to confirm in game (diagnostic dump), then signatures.
+
+**Q8 implementation and test so far (2026-11-16):**
+- **A crash, fixed:** the first build logged the decision's "name" through `TokenName(decision+8)`;
+  that field is no token, and the engine's token lookup has no range check: an access violation in
+  the loader (outside its fault guards) right after a decision. No `TokenName` on unverified data
+  any more; names are read as std::strings under SEH (`ReadName`: 1..63 identifier characters).
+- **Decision name:** `decision+0x120` (std::string), from the game's `<name>_desc` key builder
+  (`0x140774ae0`, `kSigEvDecisionName`, the literal checked). In game: the player's decision and AI
+  decisions (`seize_some_trains_woo`, `GRE_put_the_king_under_house_arrest`) with the right names.
+- **Province captured:** in game ITA FROM ETH (and back) with the province ids.
+- **Focus: dropped from this round.** `FUN_14072c6d0` is not the focus completion: a dump showed
+  `{int, empty std::string, pointer}` whose object names events (`SEA_japan.1`) and countries: it
+  adds an entry to a country's history log, focuses being one kind. The real completion is still to
+  find; `on_focus_completed` comes later.
+- **Naval battles and ships sunk:** built, not seen yet (no naval war in the test runs). Naval
+  battles have no `battle_province` (the side does not carry the province).
