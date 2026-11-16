@@ -7402,4 +7402,28 @@ point (after the hourly tick).
   add to the province. Fire after one returns. `0x14147e6b0` re-adds battles after a load (no
   event). Battle: sides at `+0x28` / `+0x30` (each with its units at `+0x20`, count `+0x2c`),
   province `+0x38`, terrain `+0x48`.
-- **Still to trace:** the battle's end (and who won), a division deployed, a division destroyed.
+- **Battle ended:** `CLandCombat` (and `CLandBorderWarCombat`) slot 24 (`0x1413491a0`) =
+  `OnBattleEnd(battle, loserSide, winnerSide)`: for each side's leader (side vtable `+0xe8`) it calls
+  `FUN_140c748c0(leader, won, side)`, which fires vanilla's `on_army_leader_won_combat` (db `+0x60`,
+  `won` = 1) / `lost_combat` (db `+0x68`; navy leaders `+0x70` / `+0x78`), then sets the winner's
+  flag (`side+0x4b8 |= 2`). Found through the on_action database's cache (`COnActionDataBase`
+  slot 2 stores the lists at `db+0x60/+0x68`) and the one fire site that reads them
+  (`0x140c74a58`). Naval battles end elsewhere (to trace if wanted).
+- **Division destroyed:** the engine's "destroy unit" is `FUN_1401ecbe0(gamestate, unit, flag)`
+  (queues it in the game state's list `+0x578`; 29 callers). In battle: `CCombatant` slot 33
+  (`0x14147d4a0`). The others: player commands (`CDeleteUnitCommand`, merges, ship commands),
+  effects (`destroy_unit`, `delete_unit(s)`, `create_unit`), transfers (volunteers, exiles),
+  `CCountry` slot 4, `CFleet` slot 4, and some country functions (`0x140730aa0`, `0x14072a990`,
+  `0x140729270`, ...: to check for encirclement / surrender). The event: destroyed in battle
+  (`CCombatant` slot 33), recorded there; the battle update is a marked loop.
+- **Division trained:** `FUN_140d48ad0(line)` deploys one: allocates the unit (`0x688`), template,
+  equipment, experience, places it, then `CCountry::AddUnit(country, unit, 1)` (`0x14071a7f0`).
+  Callers `0x140d489f0`, `0x140d490d0`, `0x140d4b700` (the deployment's updates: the loop over the
+  lines is a marked loop). The unit's scope: CEventScope `+0x70` (mask 0x100); its setter to find
+  (FROM = the division would let mods use division triggers and effects).
+- **Battle sides -> countries:** each side's units (`+0x20`, count `+0x2c`) and their owner tag
+  (`unit+0x1d8`, NOTES E/military_counts).
+
+**Data commands (names without prefix, Q5):** `constructed_building = arms_factory` (token
+trigger), `constructed_province` / `constructed_level` (values, also game variables),
+`researched_technology = basic_train`, `battle_province`. Elsewhere they are false / 0.
