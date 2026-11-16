@@ -7491,3 +7491,19 @@ the game uses itself is left to it). New on_actions:
 
 Not included: equipment produced (every line delivers every day: thousands of firings a day).
 Map connections are a separate feature and PR (Part R).
+
+**Q8 findings (1.19.5):**
+- **Naval battle end:** `CNavalCombat` has no slot-24 result (base `0x140154030`); its end calls
+  `FUN_1416b9b10` (from `CNavalCombat`'s `0x141660ce0`), which reports both sides' leaders through
+  `FUN_140c748c0` (navy lists `db+0x70/+0x78`), the naval twin of `CLandCombat` slot 24.
+- **Ship sunk:** `FUN_140dde4a0(ship, ?, ?, const int* sinkerTag, ?, reason)`, the general handler
+  (it fires vanilla's `on_pride_of_the_fleet_sunk`, found by its name string at `0x140ddea11`);
+  owner tag at `ship+0x1d8` (`+0x3b*8`, as divisions); callers: the `destroy_ships` effect
+  (`0x14035b100`), `0x140f1e0a0`, `0x1410415f0`, `0x141a07e50` (combat, raids, ...).
+- **Focus completed:** `FUN_14072c6d0`, called by `complete_national_focus` (`0x140368830`) and by
+  `0x140e649d0` (the daily focus progress).
+- **Decision taken:** `FUN_14077d990`, called by `CSelectDecisionCommand` (slot 10, `0x1411e4b80`;
+  players and the AI) and the `activate_decision` effect (`0x140360280`).
+- **Province controller:** `FUN_140ef1860`, called by `set_province_controller` (`0x14037c930`),
+  occupation (`0x140bbd450`, 4x), `0x140e4d500`, `0x14071ba50`, peace and more.
+Parameters and fields to confirm in game (diagnostic dump), then signatures.
