@@ -7475,3 +7475,19 @@ vanilla does), `SetState` from `kSigEventScopeState`.
 
 **Offline:** both checkers on 1.19.5 and 1.19.4.2 (172 signatures), smoke `2/172` passed, unit
 tests unchanged.
+
+## Q8: second round (owner's decisions, 2026-11-16; branch `feature/engine-on-actions-2`)
+
+Same rules as Q5 (vanilla behaviour, no prefix, at the moment or at the end of the pass, a name
+the game uses itself is left to it). New on_actions:
+
+| On_action | When | ROOT | FROM | Data |
+|---|---|---|---|---|
+| `on_naval_battle_won` / `on_naval_battle_lost` | a naval battle ends | each country of that side | the other side's first country | `battle_province` (the sea zone) |
+| `on_ship_sunk` | a ship is sunk | the owner | who sank it | `sunk_ship_type = <type>` (trigger) |
+| `on_focus_completed` | a national focus completes | the country | | `completed_focus = <id>` (trigger) |
+| `on_decision_taken` | a decision is taken | the country | | `taken_decision = <id>` (trigger) |
+| `on_province_captured` | a province changes controller | the new controller | the old controller | `captured_province` (value) |
+
+Not included: equipment produced (every line delivers every day: thousands of firings a day).
+Map connections are a separate feature and PR (Part R).
