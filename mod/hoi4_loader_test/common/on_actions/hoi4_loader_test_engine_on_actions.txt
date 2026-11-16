@@ -1,0 +1,77 @@
+# hoi4_loader test: engine_on_actions (MODDING.md "Engine on_actions", NOTES.md Part Q).
+# Each on_action writes a line to game.log (vanilla's log effect), for the player's country and
+# Italy (the AI builds, researches and trains), and Ethiopia in battles (the war runs from the start). Look for "hoi4_loader_test ev".
+on_actions = {
+	on_construction_finished = {
+		effect = {
+			if = {
+				limit = { OR = { is_ai = no tag = ITA } }
+				set_temp_variable = { p = constructed_province }
+				log = "hoi4_loader_test ev on_construction_finished: ROOT [ROOT.GetTag] FROM [FROM.GetName] province [?p]"
+				if = {
+					limit = { constructed_building = infrastructure }
+					log = "hoi4_loader_test ev   it is infrastructure"
+				}
+				if = {
+					limit = { constructed_building = arms_factory }
+					log = "hoi4_loader_test ev   it is a military factory"
+				}
+			}
+		}
+	}
+	on_technology_researched = {
+		effect = {
+			if = {
+				limit = { OR = { is_ai = no tag = ITA } }
+				log = "hoi4_loader_test ev on_technology_researched: ROOT [ROOT.GetTag]"
+				if = {
+					limit = { researched_technology = basic_train }
+					log = "hoi4_loader_test ev   it is basic_train"
+				}
+			}
+		}
+	}
+	on_battle_started = {
+		effect = {
+			if = {
+				limit = { OR = { is_ai = no tag = ITA tag = ETH } }
+				set_temp_variable = { p = battle_province }
+				log = "hoi4_loader_test ev on_battle_started: ROOT [ROOT.GetTag] FROM [FROM.GetTag] province [?p]"
+			}
+		}
+	}
+	on_battle_won = {
+		effect = {
+			if = {
+				limit = { OR = { is_ai = no tag = ITA tag = ETH } }
+				set_temp_variable = { p = battle_province }
+				log = "hoi4_loader_test ev on_battle_won: ROOT [ROOT.GetTag] FROM [FROM.GetTag] province [?p]"
+			}
+		}
+	}
+	on_battle_lost = {
+		effect = {
+			if = {
+				limit = { OR = { is_ai = no tag = ITA tag = ETH } }
+				set_temp_variable = { p = battle_province }
+				log = "hoi4_loader_test ev on_battle_lost: ROOT [ROOT.GetTag] FROM [FROM.GetTag] province [?p]"
+			}
+		}
+	}
+	on_division_trained = {
+		effect = {
+			if = {
+				limit = { OR = { is_ai = no tag = ITA } }
+				log = "hoi4_loader_test ev on_division_trained: ROOT [ROOT.GetTag]"
+			}
+		}
+	}
+	on_division_destroyed = {
+		effect = {
+			if = {
+				limit = { OR = { is_ai = no tag = ITA tag = ETH } }
+				log = "hoi4_loader_test ev on_division_destroyed: ROOT [ROOT.GetTag]"
+			}
+		}
+	}
+}
