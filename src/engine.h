@@ -790,6 +790,40 @@ bool SetGlobalFlagValue(int token, short value, short days);
 // and effect. countryTag > 0: ROOT = that country; 0: no scope. name: at most 15 characters.
 // Returns false (and logs) on failure; an exception inside is contained.
 bool FireOnAction(const char* name, int countryTag);
+// An on_action's list by name (any length; looked up once, keep it), null if no script defines it.
+void* OnActionListByName(const char* name);
+bool HaveStateScopes();  // FROM can be a state
+// Fires a list as the engine does: ROOT = rootTag's country; FROM = fromTag's country, else the
+// state fromState, else none. Main thread, serial code. False (logged) on failure.
+bool FireOnActionList(void* list, int rootTag, int fromTag, int fromState);
+
+// --- Engine events (engine_on_actions; engine_events.cpp, NOTES.md Part Q) ---------------------
+enum class EngineEventKind : int {
+    Construction,       // a construction level finished: tag, state, province (province buildings), token = type
+    Technology,         // a technology researched (level rose): tag, token = technology, level
+    BattleStarted,      // per country in a new battle: tag, fromTag = the other side's first country, province
+    BattleWon,          // per country of the winning side when a land battle ends: tag, fromTag, province
+    BattleLost,         // per country of the losing side
+    DivisionTrained,    // a trained division deployed: tag
+    DivisionDestroyed,  // a division destroyed in battle: tag
+    Count
+};
+struct EngineEvent {
+    EngineEventKind kind = EngineEventKind::Count;
+    int tag = 0;       // ROOT
+    int fromTag = 0;   // FROM country (0: none)
+    int state = 0;     // FROM state when fromTag is 0 (0: none)
+    int province = 0;  // 0: none
+    int token = 0;     // building type / technology name token
+    int level = 0;
+};
+void ResolveEngineEvents();  // after ResolveData (unit owner) and ResolveOnActions
+bool HaveEngineEvent(EngineEventKind kind);
+// Called on the main thread when an event is to fire (the plugin fires the on_action there).
+using EngineEventSink_t = void (*)(const EngineEvent& ev);
+// Queues the hooks of the resolved events. Recording starts with SetEngineEventsRunning(true).
+bool HookEngineEvents(EngineEventSink_t sink);
+void SetEngineEventsRunning(bool running);  // true while a game runs (after its entry)
 // Calls fn with a CEventScope whose ROOT and THIS are the country (constructed with seed 0, not
 // through the synced RNG: for UI conditions only, nothing that changes the game). False if the scope
 // functions are unresolved or a fault was contained (then *result is unset).

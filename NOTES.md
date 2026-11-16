@@ -7241,3 +7241,237 @@ native_script_test 237 (the repeated Token), all unit tests.
 
 **Not tested:** multiplayer; the supply network's values after a change (the province is notified
 as for railways); the AI's behaviour; 1.19.4.2 in game.
+
+# Part Q: on_actions for engine events (`engine_on_actions`, investigation)
+
+Owner's choice (2026-11-15): on_actions for moments vanilla fires none for, so mods stop polling
+with daily checks. Branch `feature/engine-on-actions`.
+
+## Q1: what vanilla has
+
+Vanilla's on_action files use: on_startup, on_daily/weekly/monthly, war and peace, factions,
+puppets, annexation, capitulation, civil wars, coups, elections, government changes, state control
+(`on_state_control_changed`), unit leaders (created, promoted, level up, won/lost combat), aces,
+operatives, MIOs (`on_mio_tech_research_completed` is the MIO's research, not the country's),
+nukes, paradrops, naval invasions, border wars, peace conferences, special projects.
+**Nothing for:** a construction finishing, a technology researched, a division finishing training
+or destroyed, a battle starting or ending for the countries in it, equipment produced. On_action
+keys are dynamic (NOTES D1): a mod's `on_xyz = { ... }` is parsed with or without the loader, so
+firing is all the loader has to do.
+
+## Q2: engine findings (1.19.5, Ghidra on the copy)
+
+**Firing (already there, Part D):** `Engine::FireOnAction(name, tag)`: a CEventScope seeded from
+the synced RNG, ROOT = the country, then the list's events, random events and effect. Limits: the
+name at most 15 characters (short string), only a country scope.
+
+**Where to fire: after the hourly tick.** `CHourlyTickCommand::Execute` calls `CGameState::Update`
+(`FUN_1401dd370`: hourly, daily, weekly, monthly parts). It is a command, so it runs at the same
+point on every machine, on the main thread, serial. Some events happen inside loops a mod's effect
+could change (the construction loop walks the line list; `add_building_construction` appends to
+it), and some may happen in parallel sections. So: **collect** each event where it happens (a
+locked queue of plain data: kind, tags, ids, tokens) and **fire** them after `CGameState::Update`
+returns, sorted into a fixed order (kind, then the ids), the same on every machine whatever thread
+recorded them.
+
+**Data for the script.** A scope carries a country, state, character, unit, ... but not a province,
+a building type or a technology. Temp variables are thread-local (`set_temp_variable` writes the
+table at TLS+0x30, `FUN_1405969d0`); when the engine clears them was not traced. Cleaner: while the
+loader fires an event it keeps the event's data, and native commands read it: numeric values that
+are also game variables (`hoi4_loader_event_province`, `..._level`) and token triggers
+(`hoi4_loader_event_building = { type = infrastructure }`). Elsewhere they read 0 / false.
+
+**Hook points found:**
+- **Construction finished (one level):** `CBuildingProductionLine` (vtable `0x1429f8268`) slot 24,
+  the daily step (`0x140feec60`, from `production.daily_serial` `0x140ed8390`); per level done:
+  `vtable[0x98](line, 1)`, `CBuilding::SetLevel(building, level + 1, notify)` (`0x141163f20`), then
+  `FUN_140edba60(construction, building)`, the per-level completion (country `construction+0x2a8
+  -> +8`, building type `building+0x1e0`). Its other caller `0x140ed0520` is probably instant
+  construction (to check). Railways are their own line class (Part H).
+- **Technology researched:** `FUN_140f5ffe0(status, level)` sets a technology's researched level
+  (`+0x174`; status `+0x160` the template, `+0x158` the owner). Every way to get one goes there:
+  research, `set_technology` (`0x1403382a0`), inheriting, the history setup at game start; so the
+  event is recorded only while a game runs and when the level rises. Whether research completes
+  in a parallel section is to check (the queue covers it either way).
+- **Battle started:** `CCombat::SetLocation` (slot 17, `0x14147faa0`, Part P) runs when a battle is
+  set up; its creation in `CCombatManager` (vtable `0x1429cd318`) to trace.
+- **Still to trace** (after the owner picks): battle ended (vanilla fires
+  `on_army_leader_won_combat` there; `COnActionDataBase` slot 2 `0x140ac87e0` caches that list, the
+  firing code reads the cached offset), division training finished (`CMilitaryDeployment`, vtable
+  `0x1429da928`), division destroyed, equipment produced (the production line's daily step: daily
+  per line, so frequent).
+
+## Q3: what is hard-coded and what isn't
+
+- Hard-coded: which moments fire on_actions. The loader adds moments.
+- Not loader material: what happens then (the mod's on_action) and which events a mod listens to
+  (an on_action nobody defines is not fired, `OnActionDefined`).
+
+## Q4: proposal (for the owner's decisions)
+
+```
+# common/on_actions/my_mod.txt: ordinary on_actions, nothing to register
+on_actions = {
+    on_hoi4_loader_construction_finished = {
+        effect = {
+            # ROOT = the country, FROM = the state
+            if = {
+                limit = { hoi4_loader_event_building = { type = arms_factory } }
+                ...
+            }
+        }
+    }
+    on_hoi4_loader_technology_researched = {
+        effect = { if = { limit = { hoi4_loader_event_technology = { technology = basic_train } } ... } }
+    }
+}
+```
+
+| On_action | ROOT | FROM | Data |
+|---|---|---|---|
+| `on_hoi4_loader_construction_finished` | the country | the state | building type, level, province (province buildings) |
+| `on_hoi4_loader_technology_researched` | the country | | technology, level |
+| `on_hoi4_loader_battle_started` | each attacking country | the defender | province, state |
+| `on_hoi4_loader_battle_ended` | each country in it | the other side | province, won / lost |
+| `on_hoi4_loader_division_trained` | the country | | the division, template |
+| `on_hoi4_loader_division_destroyed` | the country | who destroyed it | province |
+
+- Fired after the tick in which it happened; only if some file defines the on_action; a cap per
+  tick against runaway loops (logged); only after the game is entered (nothing from the history
+  setup or from loading a save).
+- **Multiplayer:** recorded from the simulation and fired after the tick in a fixed order, so every
+  machine fires the same events in the same order (no setup to test with).
+- Fail safe: an event whose hook point is not found on a build is not available (logged).
+
+**Open decisions for the owner:**
+1. Which events (the table, or others); a first round could be construction, technology and
+   battles, then divisions.
+2. The data readers as native commands (`hoi4_loader_event_*`), or per-type on_actions
+   (`on_hoi4_loader_construction_finished_arms_factory`, ...) as well or instead.
+3. Fired after the tick (recommended: safe and deterministic) rather than at the exact moment.
+
+## Q5: design (owner's decisions, 2026-11-16)
+
+1. **All the events** of the Q4 table.
+2. **No `hoi4_loader` prefix** in the names (on_actions and the data commands): it is a loader for
+   mods; the prefix is for files only. E.g. `on_construction_finished`.
+3. **They behave like vanilla's on_actions in every way:** fired **at the moment** the thing
+   happens (right after the engine function that does it, as vanilla fires e.g.
+   `on_state_control_changed` inside the control change), only while a game runs (none from the
+   history setup or while a save loads; vanilla fires only `on_startup` at the start), with the
+   list's `events`, `random_events` and `effect`, and scopes like the closest vanilla on_action.
+   Only where firing at that point could break the engine's loop (a mod's effect changing the list
+   being walked) the event waits for the end of that loop, still in the same tick; each such case
+   is noted.
+- **A name vanilla takes later:** at start the loader checks that the game's executable does not
+  name the on_action itself; if it does, the loader leaves it to the game (logged), so nothing
+  fires twice.
+
+## Q6: how vanilla fires with scopes, and where each event can fire (1.19.5)
+
+**Vanilla's firing with FROM** (`on_state_control_changed`, `FUN_140a29290`; its twin
+`FUN_140a28770`): three CEventScopes from `CEventScope(seed)` (`0x14057bdb0`), ROOT =
+`SetCountry(scope, &tag, 1)` (`0x140581970`), FROM.FROM = `SetState(scope, state->[+0x58], 1)`
+(`0x1405829a0`); the FROM chain is the `+0x20` pointer of each scope (ROOT's FROM = scope 2, its
+FROM = scope 3); then `OnAction_Fire(db, list, &rootScope, 0)` (`0x140acaf60`, 85 callers).
+`kSigEventScopeState` (at `0x140a2972c`): the second SetCountry call (E8 at `+0x11`) and SetState
+(E8 at `+0x20`, the state id disp8 at `+0x1b`), unique on 1.19.5 and 1.19.4.2.
+Long names: `FireOnAction` builds a short string (15 characters); the lists can be looked up once
+per game with an engine-owned string (`ConstructEngineString`) and kept.
+
+**One rule for "at the moment":** an event fires right after the engine function that causes it
+returns, unless that happens inside an engine loop a mod's effect could break; such loops are
+marked (a depth counter in their hooks) and the events recorded inside wait for the end of the
+outermost marked loop, same tick. Not on the main thread (unexpected): kept until the next safe
+point (after the hourly tick).
+
+- **Construction:** recorded in `FUN_140edba60(construction, building)`. It runs inside the line's
+  daily step inside `production.daily_serial` (`0x140ed8390`, per country; the loop re-reads the
+  line array, bound = the count at its start). An effect that changes ownership could make the
+  game cancel the line being stepped (used after its free), so `0x140ed8390` is a marked loop: the
+  country's finished levels fire when its construction pass ends.
+- **Technology:** recorded in `FUN_140f5ffe0(status, level)` when the level rises. The daily
+  research runs serially on the main thread: `gamestate.daily` (`FUN_1401eae60`), after the
+  parallel sections, loops over the countries calling `FUN_14072f220` (research update,
+  -> `0x140f56740` -> `0x140f5dd50` -> `FUN_140f5ffe0`); the slot loop could be changed by an effect
+  (`add_research_slot`), so `FUN_14072f220` is a marked loop. Other callers (`set_technology`,
+  `0x14033d1f0`, the steal-tech effect `0x140338540`, ...) fire at once.
+- **Battle started:** `CCombatManager` creates battles in 5 functions (callers of
+  `province->AddCombat` `0x140eeaeb0`: `0x140c0a6a0`, `0x140c0b1e0`, `0x140c0b360`, `0x140c0b8d0`,
+  `0x140c0d4c0`): allocate (`0xf8`), init with the sides (`0x141487890`), `SetLocation` (slot 17),
+  add to the province. Fire after one returns. `0x14147e6b0` re-adds battles after a load (no
+  event). Battle: sides at `+0x28` / `+0x30` (each with its units at `+0x20`, count `+0x2c`),
+  province `+0x38`, terrain `+0x48`.
+- **Battle ended:** `CLandCombat` (and `CLandBorderWarCombat`) slot 24 (`0x1413491a0`) =
+  `OnBattleEnd(battle, loserSide, winnerSide)`: for each side's leader (side vtable `+0xe8`) it calls
+  `FUN_140c748c0(leader, won, side)`, which fires vanilla's `on_army_leader_won_combat` (db `+0x60`,
+  `won` = 1) / `lost_combat` (db `+0x68`; navy leaders `+0x70` / `+0x78`), then sets the winner's
+  flag (`side+0x4b8 |= 2`). Found through the on_action database's cache (`COnActionDataBase`
+  slot 2 stores the lists at `db+0x60/+0x68`) and the one fire site that reads them
+  (`0x140c74a58`). Naval battles end elsewhere (to trace if wanted).
+- **Division destroyed:** the engine's "destroy unit" is `FUN_1401ecbe0(gamestate, unit, flag)`
+  (queues it in the game state's list `+0x578`; 29 callers). In battle: `CCombatant` slot 33
+  (`0x14147d4a0`). The others: player commands (`CDeleteUnitCommand`, merges, ship commands),
+  effects (`destroy_unit`, `delete_unit(s)`, `create_unit`), transfers (volunteers, exiles),
+  `CCountry` slot 4, `CFleet` slot 4, and some country functions (`0x140730aa0`, `0x14072a990`,
+  `0x140729270`, ...: to check for encirclement / surrender). The event: destroyed in battle
+  (`CCombatant` slot 33), recorded there; the battle update is a marked loop.
+- **Division trained:** `FUN_140d48ad0(line)` deploys one: allocates the unit (`0x688`), template,
+  equipment, experience, places it, then `CCountry::AddUnit(country, unit, 1)` (`0x14071a7f0`).
+  Callers `0x140d489f0`, `0x140d490d0`, `0x140d4b700` (the deployment's updates: the loop over the
+  lines is a marked loop). The unit's scope: CEventScope `+0x70` (mask 0x100); its setter to find
+  (FROM = the division would let mods use division triggers and effects).
+- **Battle sides -> countries:** each side's units (`+0x20`, count `+0x2c`) and their owner tag
+  (`unit+0x1d8`, NOTES E/military_counts).
+
+**Data commands (names without prefix, Q5):** `constructed_building = arms_factory` (token
+trigger), `constructed_province` / `constructed_level` (values, also game variables),
+`researched_technology = basic_train`, `battle_province`. Elsewhere they are false / 0.
+
+## Q7: implementation and in-game test (2026-11-16)
+
+**Implementation:** `engine_events.cpp` (12 signatures, offsets cross-checked; 1.19.5 = 1.19.4.2),
+`plugin_engine_on_actions.cpp`. Engine: `OnActionListByName` (an engine-owned string, so any name
+length; looked up once per session at the first game entry), `FireOnActionList(list, rootTag,
+fromTag, fromState)` (two CEventScopes seeded from the synced RNG, FROM linked at `+0x20` as
+vanilla does), `SetState` from `kSigEventScopeState`.
+- Marked passes: the hourly tick command (`CHourlyTickCommand` slot 10 by RTTI), the
+  construction pass, the research update. A depth counter (main thread); every pass end flushes
+  the queue (sorted by kind, tag, province, state, token, level, FROM), and events recorded at depth
+  0 on the main thread flush at once. A cap of 20000 per flush against runaway chains.
+- Battle sides from `kSigEvBattleSides` (side `+0x28`, the other `+0x30`, units `+0x20` count `+0x2c`;
+  province `+0x38` must be side + 0x10). Only `CLandCombat` / `CLandBorderWarCombat` (RTTI): naval
+  and air battles' sides hold other objects. Owner tags only if `CountryByTag` knows them. A
+  battle's countries are kept from its start: at its end a side may hold no division any more
+  (retreated, destroyed), and FROM still names it (the first test run showed FROM = ROOT in 11 of
+  27 ends before this).
+- `constructed_level` was left out (the level field would need another code source; vanilla
+  state triggers give a building's level).
+- Instant builds (`add_building_construction` with `instant_build`) do not pass through the
+  per-level completion: no event (documented).
+
+**In-game test** (1.19.5, Germany 1936, test mod logging to game.log):
+1. Start: every signature found; on the first run the battle sides were off by one byte in two
+   constants (`kSigEvSideUnitsDisp`, `kSigEvSideBaseDisp`): the resolver's cross-check refused the
+   layout and the battle events were unavailable (fail safe). Fixed and verified against the bytes.
+2. No line during the game's setup; `defined by scripts: on_construction_finished, ...`.
+3. Decision "Unlock the test small arms" (`set_technology`): `on_technology_researched: ROOT GER`
+   at once (outside the tick).
+4. Months at speed 5: `on_technology_researched: ROOT ITA` (daily research), `on_division_trained:
+   ROOT ITA`, `on_construction_finished` for VEN, ENG, SOV, USA, FRA, JAP (a temporary log in the
+   hook: the building types read as `fuel_silo`, `industrial_complex`, states and tags right),
+   `on_battle_started` ITA/ETH with FROM the other side and the province, `on_battle_won` /
+   `on_battle_lost` in consistent pairs (ITA won FROM ETH, ETH lost FROM ITA).
+5. `on_division_destroyed`: **not seen.** A temporary hook on the engine's destroy-unit function
+   showed no call at all in about ten game months (no division anywhere was destroyed), so the
+   hook (`CCombatant` slot 33) is untested; it needs a war with an encirclement.
+
+6. After the land-battle filter (`271f753`): a new run, about four months: 138 battle starts per
+   side (ITA/ETH), 6 won/lost pairs, all consistent; no ERROR.
+7. `on_division_destroyed`, tested by the owner (2026-11-16): Germany at war with Poland, a Polish
+   division encircled in 11232: `on_battle_started` / `on_battle_won: ROOT GER FROM POL province
+   11232`, then `on_division_destroyed: ROOT POL`. So `CCombatant` slot 33 is the battle path; item
+   5 only lacked a destroyed division.
+
+**Offline:** both checkers on 1.19.5 and 1.19.4.2 (172 signatures), smoke `2/172` passed, unit
+tests unchanged.

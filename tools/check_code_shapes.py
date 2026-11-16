@@ -214,6 +214,7 @@ def check(path, codes):
     results += check_equipment_designers(img, codes, text_va, text)
     results += check_production_tabs(img, codes, text_va, text)
     results += check_province_terrain(img, codes, text_va, text)
+    results += check_engine_on_actions(img, codes, text_va, text)
     return results
 
 
@@ -910,6 +911,47 @@ def check_province_terrain(img, codes, text_va, text):
                                             u32(rb + k['kSigTerrainCountryStates']), u32(rb + k['kSigTerrainCountryStateCount']),
                                             u32(rb + k['kSigTerrainStateMask'])), ok, hex(he)))
     return results
+
+
+def check_engine_on_actions(img, codes, text_va, text):
+    """engine_on_actions (NOTES.md Part Q): the pieces engine_events.cpp resolves, with its cross-checks."""
+    hdr = pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h'
+    sigs, _ = cs.load_signatures(hdr)
+    sigs, k = dict(sigs), load_constants(hdr)
+    u8 = lambda va: img.d[img.va2off(va)]
+    u32 = lambda va: struct.unpack_from('<I', img.d, img.va2off(va))[0]
+
+    def one(name):
+        m = [text_va + x.start() for x in cs.compile_pattern(sigs[name]).finditer(text)]
+        return m[0] if len(m) == 1 else None
+
+    names = ['kSigEventScopeState', 'kSigEvConstructionDone', 'kSigEvBuildingLocation', 'kSigEvConstructionPass',
+             'kSigEvResearchUpdate', 'kSigEvTechLevel', 'kSigEvTechOwner', 'kSigEvBattleSides', 'kSigEvBattleEnd',
+             'kSigEvDivisionKilled', 'kSigEvDeploy', 'kSigEvAddUnit', 'kSigTerrainCombatLocation']
+    at = {n: one(n) for n in names}
+    missing = [n for n in names if not at[n]]
+    if missing:
+        return [('engine_on_actions signatures', False, 'missing ' + ', '.join(missing))]
+    r = []
+    p = at['kSigEvConstructionDone']
+    r.append(('kSigEvConstructionDone (country +0x%x, type +0x%x, tag +0x%x)' % (u32(p + k['kSigEvConsCountryDisp']),
+              u32(p + k['kSigEvConsTypeDisp']), u8(p + k['kSigEvConsTagImm'])), u8(p + k['kSigEvConsTagImm']) < 0x40, hex(p)))
+    p = at['kSigEvBuildingLocation']
+    r.append(('kSigEvBuildingLocation (location +0x%x)' % u32(p + k['kSigEvLocationDisp']),
+              u32(p + k['kSigEvLocationDisp']) == u32(p + k['kSigEvLocationDisp2']), hex(p)))
+    p = at['kSigEvTechLevel']
+    r.append(('kSigEvTechLevel (template +0x%x, level +0x%x)' % (u32(p + k['kSigEvTechTemplateDisp']), u32(p + k['kSigEvTechLevelDisp'])),
+              u32(p + k['kSigEvTechLevelDisp']) == u32(p + k['kSigEvTechLevelDisp2']), hex(p)))
+    p, loc = at['kSigEvBattleSides'], at['kSigTerrainCombatLocation']
+    adjust = -struct.unpack('<b', bytes([u8(p + k['kSigEvSideBaseDisp'])]))[0]
+    side = u8(p + k['kSigEvSideDisp']) + adjust
+    prov = u8(loc + k['kSigTerrainCombatProvince'])
+    r.append(('kSigEvBattleSides (sides +0x%x/+0x%x, units +0x%x/+0x%x, province +0x%x)' % (side, side + 8, u8(p + k['kSigEvSideUnitsDisp']),
+              u8(p + k['kSigEvSideCountDisp']), prov), adjust > 0 and prov == side + 0x10, hex(p)))
+    p = at['kSigEventScopeState']
+    r.append(('kSigEventScopeState (state id +0x%x)' % u8(p + k['kSigEventScopeStateIdDisp']),
+              u8(p + k['kSigEventScopeSetCountryCall']) == 0xE8 and u8(p + k['kSigEventScopeSetStateCall']) == 0xE8, hex(p)))
+    return r
 
 
 def check_trigger_registry(img, codes, text_va, text):

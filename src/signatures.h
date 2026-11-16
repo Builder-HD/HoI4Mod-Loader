@@ -1341,6 +1341,47 @@ SIG(kSigTerrainCountryRebuild, "80 BB ?? ?? ?? ?? 00 74 ?? 33 D2 89 93 ?? ?? ?? 
 static const size_t kSigTerrainCountryDirty = 2, kSigTerrainCountryMask2 = 0xd, kSigTerrainCountryStates = 0x14,
                     kSigTerrainCountryStateCount = 0x1b, kSigTerrainStateMask = 0x2f;
 
+// --- Engine on_actions (engine_on_actions, NOTES.md Part Q; addresses 1.19.5, same on 1.19.4.2) ---
+// on_state_control_changed's scopes (0x140a2972c): SetCountry(scope, &tag, 1) (E8 at +0x11; the
+// one player_scope resolves) and SetState(scope, state->[disp8 +0x1b], 1) (E8 at +0x20).
+SIG(kSigEventScopeState, "41 B0 01 48 8D 95 ?? ?? ?? ?? 48 8D 8D ?? ?? ?? ?? E8 ?? ?? ?? ?? 41 B0 01 8B 57 ?? 48 8D 4D ?? E8 ?? ?? ?? ?? 80 3D ?? ?? ?? ?? 00 74 ?? 80 3D ?? ?? ?? ?? 00 75 ?? 48 8D 45 ?? 48 39 45")
+static const size_t kSigEventScopeSetCountryCall = 0x11, kSigEventScopeStateIdDisp = 0x1b, kSigEventScopeSetStateCall = 0x20;
+// A finished construction level, FUN_140edba60(construction, building) (start): country =
+// construction->[disp32 +0x49], tag at country + imm8 +0x57; the building's type [disp32 +0x50].
+SIG(kSigEvConstructionDone, "40 53 48 83 EC 40 C7 44 24 38 00 00 00 00 48 8D 05 ?? ?? ?? ?? 48 89 44 24 30 48 8B D9 0F 28 44 24 30 4C 8B C2 48 89 6C 24 58 48 83 C1 38 48 8B EA 66 0F 7F 44 24 30 48 8D 54 24 30 48 89 7C 24 68 E8 ?? ?? ?? ?? 48 8B 9B ?? ?? ?? ?? 48 8B BD ?? ?? ?? ?? 48 83 C3 08")
+static const size_t kSigEvConsCountryDisp = 0x49, kSigEvConsTypeDisp = 0x50, kSigEvConsTagImm = 0x57;
+// A building's province (null for state buildings) and state: two getters through its location
+// object (disp32 +3 and +0x13), at +0 and +0x10. (0x141163280)
+SIG(kSigEvBuildingLocation, "48 8B 89 ?? ?? ?? ?? E9 ?? ?? ?? ?? CC CC CC CC 48 8B 89 ?? ?? ?? ?? E9 ?? ?? ?? ?? CC CC CC CC 48 8B 81 ?? ?? ?? ?? 8B 40 6C C3")
+static const size_t kSigEvLocationDisp = 3, kSigEvLocationDisp2 = 0x13, kSigEvStateGetter = 0x10;
+// production.daily_serial (a country's construction pass, 0x140ed8390): matched 0x19 into it.
+SIG(kSigEvConstructionPass, "48 8B D9 41 B9 02 00 00 00 4C 8D 05 ?? ?? ?? ?? 33 D2 48 8D 4D E7 E8")
+static const size_t kSigEvConstructionPassStart = 0x19;
+// A country's research update (0x14072f220, serial in gamestate.daily): matched 0x18 into it.
+SIG(kSigEvResearchUpdate, "48 81 EC F0 01 00 00 48 8B F9 45 33 E4 44 89 A5 ?? ?? ?? ?? 41 B9 01 00")
+static const size_t kSigEvResearchUpdateStart = 0x18;
+// A technology's researched level, FUN_140f5ffe0(status, level) (start): template status->[disp32
+// +9], level [disp32 +0x1f] (written again at +0x25).
+SIG(kSigEvTechLevel, "40 53 48 83 EC 30 48 8B 81 ?? ?? ?? ?? 48 8B D9 48 89 74 24 40 44 8B 80 ?? ?? ?? ?? 44 39 81 ?? ?? ?? ?? 89 91 ?? ?? ?? ??")
+static const size_t kSigEvTechTemplateDisp = 9, kSigEvTechLevelDisp = 0x1f, kSigEvTechLevelDisp2 = 0x25;
+// Its owner (0x140f520b0): status->[disp32 +3]->[disp32 +0x13] = the country.
+SIG(kSigEvTechOwner, "49 8B 86 ?? ?? ?? ?? 44 8B 05 ?? ?? ?? ?? 8B 13 48 8B 88 ?? ?? ?? ?? 48 8B 89 ?? ?? ?? ?? E8")
+static const size_t kSigEvTechOwnerDisp = 3, kSigEvTechCountryDisp = 0x13;
+// A battle's sides (0x14147e6e3, re-adding battles after a load; rsi = battle + 0x10, the lea's
+// disp8 +0x24 = -0x10): side (rsi)->[disp8 +3], its units [disp8 +0x20], count [disp8 +0x14].
+SIG(kSigEvBattleSides, "4C 8B 7E ?? 33 ED 66 C7 46 ?? 01 00 48 89 5C 24 40 4D 63 67 ?? 4D 85 E4 7E ?? 8B FD 90 49 8B 47 ?? 48 8D 56 ?? 48 8B 1C F8 48 8B CB E8")
+static const size_t kSigEvSideDisp = 3, kSigEvSideCountDisp = 0x14, kSigEvSideUnitsDisp = 0x20, kSigEvSideBaseDisp = 0x24;
+// CLandCombat slot 24, OnBattleEnd(battle, loser side, winner side) (0x1413491a0, start): each
+// side's leader through its vtable [disp32 +0x18].
+SIG(kSigEvBattleEnd, "48 89 5C 24 08 57 48 83 EC 20 48 8B 02 48 8B CA 49 8B D8 48 8B FA FF 90 ?? ?? ?? ?? 48 85 C0 74 0D 4C 8B C7 33 D2 48 8B C8 E8")
+// CCombatant slot 33 (0x14147d4a0, start): a division of the side destroyed in battle (side, unit).
+SIG(kSigEvDivisionKilled, "40 53 41 57 48 83 EC 58 48 8B 02 4C 8B FA 48 89 7C 24 40 48 8B F9 48 8B CA 4C 89 74 24 30 FF 50 38 4C 8B F0 48 85 C0 0F 84")
+// Deploying a trained division (0x140d48ad0): matched 0x15 into it.
+SIG(kSigEvDeploy, "48 81 EC 80 01 00 00 4C 8B F1 33 D2 E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ?? 49 8B")
+static const size_t kSigEvDeployStart = 0x15;
+// CCountry::AddUnit(country, unit, flag) (0x14071a7f0): a thunk (xor r9d; jmp).
+SIG(kSigEvAddUnit, "45 33 C9 E9 ?? ?? ?? ?? CC CC CC CC CC CC CC CC 40 55 41 57 48 83 EC 48 80 3D")
+
 #undef CODE
 #undef SIG
 #undef ANCHOR

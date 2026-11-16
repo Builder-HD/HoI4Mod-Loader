@@ -69,6 +69,16 @@ A–F; NOTES.md has the findings and test results behind each.
   without the loader saves stay vanilla. Changes the simulation: in multiplayer every player needs
   the loader. 5 new signatures (smoke `2/160`). Checked on 1.19.4.2 and 1.19.5; tested in game on
   1.19.5 (2026-11-15). The test mod changes Brandenburg, a single province and Ethiopia.
+- **New feature `engine_on_actions`** (engine tier; guard `hoi4_loader_feature_engine_on_actions`;
+  NOTES.md Part Q, MODDING.md "Engine on_actions"). On_actions vanilla never fires:
+  `on_construction_finished` (ROOT country, FROM state), `on_technology_researched`,
+  `on_battle_started`, `on_battle_won` / `on_battle_lost` (land battles; FROM = the other side),
+  `on_division_trained`, `on_division_destroyed` (in battle). They behave like vanilla's (events,
+  random events, effect; at the moment, or at the end of the update pass they happened in; only
+  while a game runs). Data commands `constructed_building`, `researched_technology`,
+  `constructed_province`, `battle_province`. A name a later game version fires itself is left to
+  the game. 12 new signatures (smoke `2/172`). Checked on 1.19.4.2 and 1.19.5; tested in game on
+  1.19.5 (2026-11-16), `on_division_destroyed` with an encircled division.
 - **Native script API:** a Token parameter may be repeated (`repeat = true`, as Int and Block);
   `Args::at` gives the tokens in script order.
 - **Shared code:** `Engine::ProvinceById`, `MapProvinceById`, `StateObjectOwner`,

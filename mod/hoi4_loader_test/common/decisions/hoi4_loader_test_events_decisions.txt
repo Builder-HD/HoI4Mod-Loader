@@ -1,0 +1,14 @@
+# Test decisions for hoi4_loader's engine_on_actions (MODDING.md "Engine on_actions", NOTES.md Part Q).
+# "Events: instant infrastructure in Brandenburg": a construction finished at once (instant_build),
+# so on_construction_finished fires right away (game.log: "hoi4_loader_test ev").
+hoi4_loader_test_category = {
+	hoi4_loader_events_instant_infrastructure = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_engine_on_actions = yes }
+		complete_effect = {
+			64 = { add_building_construction = { type = infrastructure level = 1 instant_build = yes } }
+		}
+		ai_will_do = { base = 0 }
+	}
+}

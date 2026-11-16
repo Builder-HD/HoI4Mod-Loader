@@ -76,6 +76,8 @@ add_library(hoi4_loader SHARED
     src/plugin_production_tabs.cpp
     src/engine_terrain.cpp
     src/plugin_province_terrain.cpp
+    src/engine_events.cpp
+    src/plugin_engine_on_actions.cpp
     src/plugin_attention_area.cpp
     src/engine_attention.cpp
     src/engine_province_data.cpp
