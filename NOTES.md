@@ -7349,3 +7349,20 @@ on_actions = {
 2. The data readers as native commands (`hoi4_loader_event_*`), or per-type on_actions
    (`on_hoi4_loader_construction_finished_arms_factory`, ...) as well or instead.
 3. Fired after the tick (recommended: safe and deterministic) rather than at the exact moment.
+
+## Q5: design (owner's decisions, 2026-11-16)
+
+1. **All the events** of the Q4 table.
+2. **No `hoi4_loader` prefix** in the names (on_actions and the data commands): it is a loader for
+   mods; the prefix is for files only. E.g. `on_construction_finished`.
+3. **They behave like vanilla's on_actions in every way:** fired **at the moment** the thing
+   happens (right after the engine function that does it, as vanilla fires e.g.
+   `on_state_control_changed` inside the control change), only while a game runs (none from the
+   history setup or while a save loads; vanilla fires only `on_startup` at the start), with the
+   list's `events`, `random_events` and `effect`, and scopes like the closest vanilla on_action.
+   Only where firing at that point could break the engine's loop (a mod's effect changing the list
+   being walked) the event waits for the end of that loop, still in the same tick; each such case
+   is noted.
+- **A name vanilla takes later:** at start the loader checks that the game's executable does not
+  name the on_action itself; if it does, the loader leaves it to the game (logged), so nothing
+  fires twice.
