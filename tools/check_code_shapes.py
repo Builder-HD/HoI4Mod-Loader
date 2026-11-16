@@ -927,7 +927,8 @@ def check_engine_on_actions(img, codes, text_va, text):
 
     names = ['kSigEventScopeState', 'kSigEvConstructionDone', 'kSigEvBuildingLocation', 'kSigEvConstructionPass',
              'kSigEvResearchUpdate', 'kSigEvTechLevel', 'kSigEvTechOwner', 'kSigEvBattleSides', 'kSigEvBattleEnd',
-             'kSigEvDivisionKilled', 'kSigEvDeploy', 'kSigEvAddUnit', 'kSigTerrainCombatLocation']
+             'kSigEvDivisionKilled', 'kSigEvDeploy', 'kSigEvAddUnit', 'kSigTerrainCombatLocation', 'kSigEvDecisionTaken',
+             'kSigEvDecisionName', 'kSigEvControllerSet', 'kSigEvNavalSideResult', 'kSigEvLeaderCountry', 'kSigEvShipSunk']
     at = {n: one(n) for n in names}
     missing = [n for n in names if not at[n]]
     if missing:
@@ -948,6 +949,15 @@ def check_engine_on_actions(img, codes, text_va, text):
     prov = u8(loc + k['kSigTerrainCombatProvince'])
     r.append(('kSigEvBattleSides (sides +0x%x/+0x%x, units +0x%x/+0x%x, province +0x%x)' % (side, side + 8, u8(p + k['kSigEvSideUnitsDisp']),
               u8(p + k['kSigEvSideCountDisp']), prov), adjust > 0 and prov == side + 0x10, hex(p)))
+    p = at['kSigEvDecisionName']
+    lit = p + k['kSigEvDecisionDescRel'] + 4 + i32(img, p + k['kSigEvDecisionDescRel'])
+    o = img.va2off(lit)
+    r.append(('kSigEvDecisionName (name +0x%x, "_desc" literal)' % u32(p + k['kSigEvDecisionNameDisp']),
+              img.d[o:o + 5] == b'_desc' and img.d[o + 5] == 0, hex(p)))
+    p = at['kSigEvNavalSideResult']
+    r.append(('kSigEvNavalSideResult / LeaderCountry (leaders +0x%x/+0x%x, leader tag +0x%x)' % (u32(p + k['kSigEvNavalLeadersDisp']),
+              u32(p + k['kSigEvNavalLeaderCountDisp']), u32(at['kSigEvLeaderCountry'] + k['kSigEvLeaderTagDisp'])),
+              u32(p + k['kSigEvNavalLeaderCountDisp']) == u32(p + k['kSigEvNavalLeadersDisp']) + 0xc, hex(p)))
     p = at['kSigEventScopeState']
     r.append(('kSigEventScopeState (state id +0x%x)' % u8(p + k['kSigEventScopeStateIdDisp']),
               u8(p + k['kSigEventScopeSetCountryCall']) == 0xE8 and u8(p + k['kSigEventScopeSetStateCall']) == 0xE8, hex(p)))

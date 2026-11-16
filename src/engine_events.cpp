@@ -46,6 +46,8 @@ uint8_t* g_divisionKilled = nullptr;
 uint8_t* g_deploy = nullptr;
 uint8_t* g_addUnit = nullptr;
 uint8_t* g_hourlyTick = nullptr;
+uint8_t *g_decision = nullptr, *g_controller = nullptr, *g_navalSide = nullptr, *g_shipSunk = nullptr;
+uint32_t g_decisionName = 0, g_decisionCountry = 0, g_navalLeaders = 0, g_navalLeaderCount = 0, g_leaderTag = 0;
 uint32_t g_stateIdDisp = 0;
 void** g_vtLandCombat = nullptr;
 void** g_vtBorderWarCombat = nullptr;
@@ -62,7 +64,8 @@ std::vector<EngineEvent> g_queue;
 
 Generic4_t g_origConsDone = nullptr, g_origConsPass = nullptr, g_origResearch = nullptr, g_origTech = nullptr,
            g_origAddCombat = nullptr, g_origBattleEnd = nullptr, g_origKilled = nullptr, g_origDeploy = nullptr,
-           g_origAddUnit = nullptr, g_origHourly = nullptr;
+           g_origAddUnit = nullptr, g_origHourly = nullptr, g_origDecision = nullptr,
+           g_origController = nullptr, g_origNavalSide = nullptr, g_origShipSunk = nullptr;
 
 void Fault(const char* where) {
     if (InterlockedExchange(&g_faulted, 1) == 0)
@@ -283,12 +286,15 @@ void* __fastcall ConsDoneDetour(void* construction, void* building, void* c, voi
     return r;
 }
 
+void FlushPendingNaval();
+
 void Enter() {
     if (IsMainThread()) ++g_passDepth;
 }
 void Leave() {
     if (!IsMainThread()) return;
     if (g_passDepth > 0) --g_passDepth;
+    FlushPendingNaval();  // an unpaired naval side: no FROM
     Flush();  // the end of a pass: no engine loop of it is running any more
 }
 
@@ -371,6 +377,158 @@ void* __fastcall AddUnitDetour(void* country, void* unit, void* c, void* d) {
     return r;
 }
 
+// --- Second round (NOTES.md Q8) -----------------------------------------------------------------
+
+int ReadIntAt(const void* p, uint32_t off) {
+    __try {
+        return p ? Rd<int>(p, off) : 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+void* ReadPtrAt(const void* p, uint32_t off) {
+    __try {
+        return p ? Rd<void*>(p, off) : nullptr;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return nullptr;
+    }
+}
+
+// Copies an engine std::string at p+off (an identifier, 1..63 characters) into out. False if it
+// does not look like one.
+bool ReadName(const void* p, uint32_t off, char* out) {
+    __try {
+        const EngineString* s = (const EngineString*)((const uint8_t*)p + off);
+        if (!p || s->size == 0 || s->size > 63 || s->cap < s->size) return false;
+        const char* c = s->c_str();
+        for (size_t i = 0; i < s->size; ++i) {
+            char ch = c[i];
+            if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '.' || ch == '-'))
+                return false;
+            out[i] = ch;
+        }
+        out[s->size] = 0;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+void* __fastcall DecisionDetour(void* decisions, void* decision, void* c, void* d) {
+    EngineEvent ev;
+    ev.kind = EngineEventKind::DecisionTaken;
+    if (Active()) {
+        void* country = ReadPtrAt(decisions, g_decisionCountry);
+        ev.tag = country && CountryByTag(ReadIntAt(country, g_tagOffset)) ? ReadIntAt(country, g_tagOffset) : 0;
+        if (ev.tag > 0 && !ReadName(decision, g_decisionName, ev.name)) ev.tag = 0;
+    }
+    void* r = g_origDecision(decisions, decision, c, d);
+    if (ev.tag > 0) Record(ev);
+    return r;
+}
+
+void* __fastcall ControllerDetour(void* province, void* tagPtr, void* c, void* d) {
+    int id = 0, before = 0;
+    if (Active() && province) {
+        id = ProvinceIdOf(province);
+        before = id ? ProvinceController(id) : 0;
+    }
+    void* r = g_origController(province, tagPtr, c, d);
+    if (id > 0) {
+        int after = ProvinceController(id);
+        if (after > 0 && after != before) {
+            EngineEvent ev;
+            ev.kind = EngineEventKind::ProvinceCaptured;
+            ev.tag = after;
+            ev.fromTag = before > 0 && CountryByTag(before) ? before : 0;
+            ev.province = id;
+            Record(ev);
+        }
+    }
+    return r;
+}
+
+// A naval battle's end reports its two sides one after the other: the first waits for the second,
+// so each gets the other's first country as FROM.
+struct NavalSide {
+    int tags[16];
+    int n = 0;
+    bool won = false;
+};
+NavalSide g_pendingSide;
+bool g_havePending = false;
+
+int NavalSideTags(const void* side, int* tags, int max) {
+    __try {
+        void* const* leaders = Rd<void* const*>(side, g_navalLeaders);
+        int count = Rd<int>(side, g_navalLeaderCount);
+        int n = 0;
+        if (!leaders || count < 0 || count > 1000) return 0;
+        for (int i = 0; i < count && n < max; ++i) {
+            int t = leaders[i] ? Rd<int>(leaders[i], g_leaderTag) : 0;
+            if (t <= 0 || !CountryByTag(t)) continue;
+            bool seen = false;
+            for (int k = 0; k < n; ++k) seen = seen || tags[k] == t;
+            if (!seen) tags[n++] = t;
+        }
+        return n;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        Fault("a naval battle side");
+        return 0;
+    }
+}
+
+void RecordNaval(const NavalSide& s, int fromTag) {
+    for (int i = 0; i < s.n; ++i) {
+        EngineEvent ev;
+        ev.kind = s.won ? EngineEventKind::NavalBattleWon : EngineEventKind::NavalBattleLost;
+        ev.tag = s.tags[i];
+        ev.fromTag = fromTag;
+        Record(ev);
+    }
+}
+
+void FlushPendingNaval() {
+    if (!g_havePending) return;
+    g_havePending = false;
+    RecordNaval(g_pendingSide, 0);
+}
+
+void* __fastcall NavalSideDetour(void* side, void* won, void* c, void* d) {
+    NavalSide s;
+    if (Active() && side) {
+        s.n = NavalSideTags(side, s.tags, 16);
+        s.won = ((uintptr_t)won & 0xff) != 0;
+    }
+    void* r = g_origNavalSide(side, won, c, d);
+    if (s.n > 0) {
+        if (g_havePending && g_pendingSide.won != s.won) {
+            g_havePending = false;
+            RecordNaval(g_pendingSide, s.tags[0]);
+            RecordNaval(s, g_pendingSide.tags[0]);
+        } else {
+            FlushPendingNaval();
+            g_pendingSide = s;
+            g_havePending = true;
+        }
+    }
+    return r;
+}
+
+// Before the original: the ship is about to go.
+void* __fastcall ShipSunkDetour(void* ship, void* b, void* c, void* sinker) {
+    EngineEvent ev;
+    ev.kind = EngineEventKind::ShipSunk;
+    if (Active() && ship) {
+        ev.tag = UnitOwnerTag(ship);
+        int s = ReadIntAt(sinker, 0);
+        ev.fromTag = s > 0 && CountryByTag(s) ? s : 0;
+    }
+    void* r = g_origShipSunk(ship, b, c, sinker);
+    if (ev.tag > 0 && CountryByTag(ev.tag)) Record(ev);
+    return r;
+}
+
 }  // namespace
 
 void ResolveEngineEvents() {
@@ -418,6 +576,25 @@ void ResolveEngineEvents() {
     g_divisionKilled = SigFindUnique("ev_division_killed", kSigEvDivisionKilled);
     if ((p = SigFindUnique("ev_deploy", kSigEvDeploy)) != nullptr) g_deploy = p - kSigEvDeployStart;
     g_addUnit = SigFindUnique("ev_add_unit", kSigEvAddUnit);
+    if ((p = SigFindUnique("ev_decision_taken", kSigEvDecisionTaken)) != nullptr) {
+        g_decision = p;
+        g_decisionCountry = Rd<uint8_t>(p, kSigEvDecisionCountryDisp);
+    }
+    if ((p = SigFindUnique("ev_decision_name", kSigEvDecisionName)) != nullptr) {
+        const char* lit = (const char*)SigRipTarget(p + kSigEvDecisionDescRel, 0, 4);
+        if (lit && memcmp(lit, "_desc", 6) == 0)
+            g_decisionName = Rd<uint32_t>(p, kSigEvDecisionNameDisp);
+        else
+            Log("ERROR: engine_on_actions: the decision name code looks different; on_decision_taken off");
+    }
+    g_controller = SigFindUnique("ev_controller_set", kSigEvControllerSet);
+    if ((p = SigFindUnique("ev_naval_side_result", kSigEvNavalSideResult)) != nullptr) {
+        g_navalSide = p;
+        g_navalLeaders = Rd<uint32_t>(p, kSigEvNavalLeadersDisp);
+        g_navalLeaderCount = Rd<uint32_t>(p, kSigEvNavalLeaderCountDisp);
+    }
+    if ((p = SigFindUnique("ev_leader_country", kSigEvLeaderCountry)) != nullptr) g_leaderTag = Rd<uint32_t>(p, kSigEvLeaderTagDisp);
+    g_shipSunk = SigFindUnique("ev_ship_sunk", kSigEvShipSunk);
     g_vtLandCombat = FindVtableByRtti(".?AVCLandCombat@@", nullptr);
     g_vtBorderWarCombat = FindVtableByRtti(".?AVCLandBorderWarCombat@@", nullptr);
     size_t slots = 0;
@@ -445,6 +622,15 @@ bool HaveEngineEvent(EngineEventKind kind) {
             return g_battleEnd && g_sideA && g_vtLandCombat && HaveMilitaryCounts() && HaveProvinceIds();
         case EngineEventKind::DivisionTrained:
             return g_deploy && g_addUnit;
+        case EngineEventKind::NavalBattleWon:
+        case EngineEventKind::NavalBattleLost:
+            return g_navalSide && g_navalLeaders && g_navalLeaderCount && g_leaderTag && HaveCountries();
+        case EngineEventKind::ShipSunk:
+            return g_shipSunk && HaveMilitaryCounts();
+        case EngineEventKind::DecisionTaken:
+            return g_decision && g_decisionCountry && g_decisionName;
+        case EngineEventKind::ProvinceCaptured:
+            return g_controller && HaveProvinceData();
         case EngineEventKind::DivisionDestroyed:
             return g_divisionKilled && HaveMilitaryCounts();
         default:
@@ -469,6 +655,10 @@ bool HookEngineEvents(EngineEventSink_t sink) {
     hook(EngineEventKind::BattleStarted, g_addCombat, (void*)&AddCombatDetour, (void**)&g_origAddCombat, "ev_add_combat");
     hook(EngineEventKind::BattleWon, g_battleEnd, (void*)&BattleEndDetour, (void**)&g_origBattleEnd, "ev_battle_end");
     hook(EngineEventKind::DivisionDestroyed, g_divisionKilled, (void*)&KilledDetour, (void**)&g_origKilled, "ev_division_killed");
+    hook(EngineEventKind::DecisionTaken, g_decision, (void*)&DecisionDetour, (void**)&g_origDecision, "ev_decision_taken");
+    hook(EngineEventKind::ProvinceCaptured, g_controller, (void*)&ControllerDetour, (void**)&g_origController, "ev_controller_set");
+    hook(EngineEventKind::NavalBattleWon, g_navalSide, (void*)&NavalSideDetour, (void**)&g_origNavalSide, "ev_naval_side_result");
+    hook(EngineEventKind::ShipSunk, g_shipSunk, (void*)&ShipSunkDetour, (void**)&g_origShipSunk, "ev_ship_sunk");
     if (HaveEngineEvent(EngineEventKind::DivisionTrained)) {
         hook(EngineEventKind::DivisionTrained, g_deploy, (void*)&DeployDetour, (void**)&g_origDeploy, "ev_deploy");
         hook(EngineEventKind::DivisionTrained, g_addUnit, (void*)&AddUnitDetour, (void**)&g_origAddUnit, "ev_add_unit");
@@ -482,6 +672,7 @@ void SetEngineEventsRunning(bool running) {
         std::lock_guard<std::mutex> guard(g_lock);
         g_queue.clear();
         g_battles.clear();
+        g_havePending = false;
         g_passDepth = 0;
         g_deployDepth = 0;
     }

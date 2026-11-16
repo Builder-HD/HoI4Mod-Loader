@@ -1381,6 +1381,25 @@ SIG(kSigEvDeploy, "48 81 EC 80 01 00 00 4C 8B F1 33 D2 E8 ?? ?? ?? ?? 84 C0 0F 8
 static const size_t kSigEvDeployStart = 0x15;
 // CCountry::AddUnit(country, unit, flag) (0x14071a7f0): a thunk (xor r9d; jmp).
 SIG(kSigEvAddUnit, "45 33 C9 E9 ?? ?? ?? ?? CC CC CC CC CC CC CC CC 40 55 41 57 48 83 EC 48 80 3D")
+// Second round (NOTES.md Q8). A decision taken, FUN_14077d990(decisions, decision) (start): country = decisions->[disp8 +0x15].
+SIG(kSigEvDecisionTaken, "48 89 54 24 10 53 56 57 48 83 EC 20 48 8B F2 48 8B F9 48 8B 51 08 48 8B CE E8 ?? ?? ?? ?? 48 8D 4F 40 48 8D 54 24 48 E8")
+static const size_t kSigEvDecisionCountryDisp = 0x15;
+// A decision's "<name>_desc" key (0x140774ae0, start): its name std::string decision->[disp32 +0x22];
+// the "_desc" literal through rip+[disp32 +0x29].
+SIG(kSigEvDecisionName, "48 89 5C 24 08 57 48 83 EC 70 48 8B FA C7 44 24 20 00 00 00 00 48 83 B9 ?? ?? ?? ?? 00 75 20 48 8D 91 ?? ?? ?? ?? 4C 8D 05 ?? ?? ?? ?? 48 8D 4C 24 48 E8")
+static const size_t kSigEvDecisionNameDisp = 0x22, kSigEvDecisionDescRel = 0x29;
+// A province's controller set, FUN_140ef1860(province, const int* tag, char, char) (start).
+SIG(kSigEvControllerSet, "44 88 4C 24 20 44 88 44 24 18 48 89 54 24 10 55 53 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 E1 48 81 EC 88 00 00 00 45 0F B6 F1 48 8B FA 4C 8B")
+// A naval battle side's result, FUN_1416b9b10(side, won) (start): its leaders side->[disp32 +0x17],
+// count [disp32 +0x21].
+SIG(kSigEvNavalSideResult, "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B 99 ?? ?? ?? ?? 0F B6 EA 48 63 81 ?? ?? ?? ?? 48 8B F1 48 8D 3C C3 48 3B DF 74")
+static const size_t kSigEvNavalLeadersDisp = 0x17, kSigEvNavalLeaderCountDisp = 0x21;
+// A unit leader's country tag (0x140c748f0, in the leader's battle result): leader + [disp32 +0x1d].
+SIG(kSigEvLeaderCountry, "41 B0 01 48 8B D3 48 8D 4D ?? E8 ?? ?? ?? ?? 48 8D 4C 24 30 E8 ?? ?? ?? ?? 90 48 8D 93 ?? ?? ?? ?? 41 B0 01 48 8D 4C 24 30 E8")
+static const size_t kSigEvLeaderTagDisp = 0x1d;
+// A ship sunk, FUN_140dde4a0(ship, ?, ?, const int* sinkerTag, ?, reason) (start); fires vanilla's
+// on_pride_of_the_fleet_sunk.
+SIG(kSigEvShipSunk, "48 89 5C 24 20 4C 89 44 24 18 48 89 54 24 10 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 20 FF FF FF 48 81 EC E0 01 00 00 4D 8B F1 4D 8B E0 48")
 
 #undef CODE
 #undef SIG

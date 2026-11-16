@@ -29,8 +29,10 @@ namespace {
 const char* const kFeature = "engine_on_actions";
 using Kind = Engine::EngineEventKind;
 const int kKinds = (int)Kind::Count;
-const char* const kNames[kKinds] = {"on_construction_finished", "on_technology_researched", "on_battle_started", "on_battle_won",
-                                    "on_battle_lost",           "on_division_trained",      "on_division_destroyed"};
+const char* const kNames[kKinds] = {"on_construction_finished", "on_technology_researched", "on_battle_started",
+                                    "on_battle_won",            "on_battle_lost",           "on_division_trained",
+                                    "on_division_destroyed",    "on_naval_battle_won",      "on_naval_battle_lost",
+                                    "on_ship_sunk",             "on_decision_taken",        "on_province_captured"};
 
 bool g_vanillaOwns[kKinds] = {};
 void* g_lists[kKinds] = {};
@@ -102,6 +104,19 @@ bool ValueBattleProvince(const Args&, const Scope&, int64_t* out) {
     return true;
 }
 
+bool EvalDecision(const Args& a, const Scope&) {
+    const Engine::EngineEvent* ev = Current(Kind::DecisionTaken);
+    return ev && strcmp(ev->name, a.key(0)) == 0;
+}
+bool ValueCapturedProvince(const Args&, const Scope&, int64_t* out) {
+    const Engine::EngineEvent* ev = Current(Kind::ProvinceCaptured);
+    *out = ev ? ev->province : 0;
+    return true;
+}
+void TooltipDecision(const Args& a, const Scope&, bool negated, TooltipText& out) {
+    out.add(negated ? "The decision taken is NOT " : "The decision taken is ").add(native_localize_key(a.key(0)).c_str());
+}
+
 void TooltipBuilding(const Args& a, const Scope&, bool negated, TooltipText& out) {
     out.add(negated ? "The finished building is NOT " : "The finished building is ").add(native_localize_key(a.key(0)).c_str());
 }
@@ -159,6 +174,15 @@ bool EngineOnActionsInit() {
                                      "elsewhere). Also a game variable.",
                                      NumericKind::Count, {}, ScopeMask::Country | ScopeMask::State, "value",
                                      &ValueBattleProvince, nullptr},
+                                    kFeature);
+    register_native_trigger({"taken_decision",
+                             "In on_decision_taken: true if the decision taken is this one. False elsewhere.", Form::Value,
+                             {{"decision", ParamType::Key, true}}, ScopeMask::Any, &EvalDecision, &TooltipDecision},
+                            kFeature);
+    register_native_numeric_trigger({"captured_province",
+                                     "In on_province_captured: the province (0 elsewhere). Also a game variable.",
+                                     NumericKind::Count, {}, ScopeMask::Country | ScopeMask::State, "value",
+                                     &ValueCapturedProvince, nullptr},
                                     kFeature);
     for (int k = 0; k < kKinds; ++k)
         if (!g_vanillaOwns[k] && Engine::HaveEngineEvent((Kind)k))
