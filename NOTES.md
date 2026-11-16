@@ -7366,3 +7366,40 @@ on_actions = {
 - **A name vanilla takes later:** at start the loader checks that the game's executable does not
   name the on_action itself; if it does, the loader leaves it to the game (logged), so nothing
   fires twice.
+
+## Q6: how vanilla fires with scopes, and where each event can fire (1.19.5)
+
+**Vanilla's firing with FROM** (`on_state_control_changed`, `FUN_140a29290`; its twin
+`FUN_140a28770`): three CEventScopes from `CEventScope(seed)` (`0x14057bdb0`), ROOT =
+`SetCountry(scope, &tag, 1)` (`0x140581970`), FROM.FROM = `SetState(scope, state->[+0x58], 1)`
+(`0x1405829a0`); the FROM chain is the `+0x20` pointer of each scope (ROOT's FROM = scope 2, its
+FROM = scope 3); then `OnAction_Fire(db, list, &rootScope, 0)` (`0x140acaf60`, 85 callers).
+`kSigEventScopeState` (at `0x140a2972c`): the second SetCountry call (E8 at `+0x11`) and SetState
+(E8 at `+0x20`, the state id disp8 at `+0x1b`), unique on 1.19.5 and 1.19.4.2.
+Long names: `FireOnAction` builds a short string (15 characters); the lists can be looked up once
+per game with an engine-owned string (`ConstructEngineString`) and kept.
+
+**One rule for "at the moment":** an event fires right after the engine function that causes it
+returns, unless that happens inside an engine loop a mod's effect could break; such loops are
+marked (a depth counter in their hooks) and the events recorded inside wait for the end of the
+outermost marked loop, same tick. Not on the main thread (unexpected): kept until the next safe
+point (after the hourly tick).
+
+- **Construction:** recorded in `FUN_140edba60(construction, building)`. It runs inside the line's
+  daily step inside `production.daily_serial` (`0x140ed8390`, per country; the loop re-reads the
+  line array, bound = the count at its start). An effect that changes ownership could make the
+  game cancel the line being stepped (used after its free), so `0x140ed8390` is a marked loop: the
+  country's finished levels fire when its construction pass ends.
+- **Technology:** recorded in `FUN_140f5ffe0(status, level)` when the level rises. The daily
+  research runs serially on the main thread: `gamestate.daily` (`FUN_1401eae60`), after the
+  parallel sections, loops over the countries calling `FUN_14072f220` (research update,
+  -> `0x140f56740` -> `0x140f5dd50` -> `FUN_140f5ffe0`); the slot loop could be changed by an effect
+  (`add_research_slot`), so `FUN_14072f220` is a marked loop. Other callers (`set_technology`,
+  `0x14033d1f0`, the steal-tech effect `0x140338540`, ...) fire at once.
+- **Battle started:** `CCombatManager` creates battles in 5 functions (callers of
+  `province->AddCombat` `0x140eeaeb0`: `0x140c0a6a0`, `0x140c0b1e0`, `0x140c0b360`, `0x140c0b8d0`,
+  `0x140c0d4c0`): allocate (`0xf8`), init with the sides (`0x141487890`), `SetLocation` (slot 17),
+  add to the province. Fire after one returns. `0x14147e6b0` re-adds battles after a load (no
+  event). Battle: sides at `+0x28` / `+0x30` (each with its units at `+0x20`, count `+0x2c`),
+  province `+0x38`, terrain `+0x48`.
+- **Still to trace:** the battle's end (and who won), a division deployed, a division destroyed.
