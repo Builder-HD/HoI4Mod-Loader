@@ -7468,6 +7468,10 @@ vanilla does), `SetState` from `kSigEventScopeState`.
 
 6. After the land-battle filter (`271f753`): a new run, about four months: 138 battle starts per
    side (ITA/ETH), 6 won/lost pairs, all consistent; no ERROR.
+7. `on_division_destroyed`, tested by the owner (2026-11-16): Germany at war with Poland, a Polish
+   division encircled in 11232: `on_battle_started` / `on_battle_won: ROOT GER FROM POL province
+   11232`, then `on_division_destroyed: ROOT POL`. So `CCombatant` slot 33 is the battle path; item
+   5 only lacked a destroyed division.
 
 **Offline:** both checkers on 1.19.5 and 1.19.4.2 (172 signatures), smoke `2/172` passed, unit
 tests unchanged.

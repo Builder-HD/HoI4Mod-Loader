@@ -78,7 +78,7 @@ A–F; NOTES.md has the findings and test results behind each.
   while a game runs). Data commands `constructed_building`, `researched_technology`,
   `constructed_province`, `battle_province`. A name a later game version fires itself is left to
   the game. 12 new signatures (smoke `2/172`). Checked on 1.19.4.2 and 1.19.5; tested in game on
-  1.19.5 (2026-11-16) except `on_division_destroyed` (no division was destroyed in the test runs).
+  1.19.5 (2026-11-16), `on_division_destroyed` with an encircled division.
 - **Native script API:** a Token parameter may be repeated (`repeat = true`, as Int and Block);
   `Args::at` gives the tokens in script order.
 - **Shared code:** `Engine::ProvinceById`, `MapProvinceById`, `StateObjectOwner`,
