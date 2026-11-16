@@ -7466,5 +7466,8 @@ vanilla does), `SetState` from `kSigEventScopeState`.
    showed no call at all in about ten game months (no division anywhere was destroyed), so the
    hook (`CCombatant` slot 33) is untested; it needs a war with an encirclement.
 
+6. After the land-battle filter (`271f753`): a new run, about four months: 138 battle starts per
+   side (ITA/ETH), 6 won/lost pairs, all consistent; no ERROR.
+
 **Offline:** both checkers on 1.19.5 and 1.19.4.2 (172 signatures), smoke `2/172` passed, unit
 tests unchanged.
