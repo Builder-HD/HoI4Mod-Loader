@@ -72,4 +72,32 @@ on_actions = {
 			log = "hoi4_loader_test ev on_division_destroyed: ROOT [ROOT.GetTag]"
 		}
 	}
+	# Second round (NOTES.md Q8)
+	on_naval_battle_won = {
+		effect = { log = "hoi4_loader_test ev on_naval_battle_won: ROOT [ROOT.GetTag] FROM [FROM.GetTag]" }
+	}
+	on_naval_battle_lost = {
+		effect = { log = "hoi4_loader_test ev on_naval_battle_lost: ROOT [ROOT.GetTag] FROM [FROM.GetTag]" }
+	}
+	on_ship_sunk = {
+		effect = { log = "hoi4_loader_test ev on_ship_sunk: ROOT [ROOT.GetTag] FROM [FROM.GetTag]" }
+	}
+	on_decision_taken = {
+		effect = {
+			if = {
+				limit = { is_ai = no }
+				log = "hoi4_loader_test ev on_decision_taken: ROOT [ROOT.GetTag]"
+				if = { limit = { taken_decision = hoi4_loader_terrain_brandenburg_marsh } log = "hoi4_loader_test ev   it is Brandenburg's plains become marsh" }
+			}
+		}
+	}
+	on_province_captured = {
+		effect = {
+			if = {
+				limit = { OR = { is_ai = no tag = ITA tag = ETH } }
+				set_temp_variable = { p = captured_province }
+				log = "hoi4_loader_test ev on_province_captured: ROOT [ROOT.GetTag] FROM [FROM.GetTag] province [?p]"
+			}
+		}
+	}
 }
