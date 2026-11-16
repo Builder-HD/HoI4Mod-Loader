@@ -47,6 +47,8 @@ uint8_t* g_deploy = nullptr;
 uint8_t* g_addUnit = nullptr;
 uint8_t* g_hourlyTick = nullptr;
 uint32_t g_stateIdDisp = 0;
+void** g_vtLandCombat = nullptr;
+void** g_vtBorderWarCombat = nullptr;
 
 // Hook state.
 EngineEventSink_t g_sink = nullptr;
@@ -169,7 +171,7 @@ int SideTags(const void* side, int* tags, int max) {
     if (!units || count < 0 || count > 100000) return 0;
     for (int i = 0; i < count && n < max; ++i) {
         int t = UnitOwnerTag(units[i]);
-        if (t <= 0) continue;
+        if (t <= 0 || !CountryByTag(t)) continue;
         bool seen = false;
         for (int k = 0; k < n; ++k) seen = seen || tags[k] == t;
         if (!seen) tags[n++] = t;
@@ -191,6 +193,15 @@ bool ReadBattle(const void* combat, const void* sideA, const void* sideB, Battle
         return r->na > 0 || r->nb > 0;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         Fault("a battle");
+        return false;
+    }
+}
+
+bool IsLandBattle(const void* combat) {
+    __try {
+        void** vt = *(void***)combat;
+        return vt && (vt == g_vtLandCombat || vt == g_vtBorderWarCombat);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
 }
@@ -312,7 +323,7 @@ void* __fastcall AddCombatDetour(void* province, void* combat, void* c, void* d)
     void* r = g_origAddCombat(province, combat, c, d);
     const void *a = nullptr, *b = nullptr;
     BattleRead br;
-    if (Active() && combat && ReadSides(combat, &a, &b) && ReadBattle(combat, a, b, &br)) {
+    if (Active() && combat && IsLandBattle(combat) && ReadSides(combat, &a, &b) && ReadBattle(combat, a, b, &br)) {
         RememberBattle(combat, a, b, br);
         RecordBattle(EngineEventKind::BattleStarted, EngineEventKind::BattleStarted, br);
     }
@@ -322,7 +333,7 @@ void* __fastcall AddCombatDetour(void* province, void* combat, void* c, void* d)
 // Before the original: the sides are read while the battle still holds them.
 void* __fastcall BattleEndDetour(void* combat, void* loser, void* winner, void* d) {
     BattleRead br;
-    bool ok = Active() && combat;
+    bool ok = Active() && combat && IsLandBattle(combat);
     if (ok) {
         if (!ReadBattle(combat, winner, loser, &br)) br = BattleRead();
         CompleteFromStart(combat, winner, loser, &br);
@@ -407,6 +418,8 @@ void ResolveEngineEvents() {
     g_divisionKilled = SigFindUnique("ev_division_killed", kSigEvDivisionKilled);
     if ((p = SigFindUnique("ev_deploy", kSigEvDeploy)) != nullptr) g_deploy = p - kSigEvDeployStart;
     g_addUnit = SigFindUnique("ev_add_unit", kSigEvAddUnit);
+    g_vtLandCombat = FindVtableByRtti(".?AVCLandCombat@@", nullptr);
+    g_vtBorderWarCombat = FindVtableByRtti(".?AVCLandBorderWarCombat@@", nullptr);
     size_t slots = 0;
     void** vt = FindVtableByRtti(".?AVCHourlyTickCommand@@", &slots);
     if (vt && slots > 10) g_hourlyTick = (uint8_t*)vt[10];
@@ -426,10 +439,10 @@ bool HaveEngineEvent(EngineEventKind kind) {
         case EngineEventKind::Technology:
             return g_techLevel && g_researchUpdate && g_techOwner && g_techCountry;
         case EngineEventKind::BattleStarted:
-            return g_addCombat && g_sideA && HaveMilitaryCounts() && HaveProvinceIds();
+            return g_addCombat && g_sideA && g_vtLandCombat && HaveMilitaryCounts() && HaveProvinceIds();
         case EngineEventKind::BattleWon:
         case EngineEventKind::BattleLost:
-            return g_battleEnd && g_sideA && HaveMilitaryCounts() && HaveProvinceIds();
+            return g_battleEnd && g_sideA && g_vtLandCombat && HaveMilitaryCounts() && HaveProvinceIds();
         case EngineEventKind::DivisionTrained:
             return g_deploy && g_addUnit;
         case EngineEventKind::DivisionDestroyed:
