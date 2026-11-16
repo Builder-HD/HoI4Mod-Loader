@@ -7427,3 +7427,44 @@ point (after the hourly tick).
 **Data commands (names without prefix, Q5):** `constructed_building = arms_factory` (token
 trigger), `constructed_province` / `constructed_level` (values, also game variables),
 `researched_technology = basic_train`, `battle_province`. Elsewhere they are false / 0.
+
+## Q7: implementation and in-game test (2026-11-16)
+
+**Implementation:** `engine_events.cpp` (12 signatures, offsets cross-checked; 1.19.5 = 1.19.4.2),
+`plugin_engine_on_actions.cpp`. Engine: `OnActionListByName` (an engine-owned string, so any name
+length; looked up once per session at the first game entry), `FireOnActionList(list, rootTag,
+fromTag, fromState)` (two CEventScopes seeded from the synced RNG, FROM linked at `+0x20` as
+vanilla does), `SetState` from `kSigEventScopeState`.
+- Marked passes: the hourly tick command (`CHourlyTickCommand` slot 10 by RTTI), the
+  construction pass, the research update. A depth counter (main thread); every pass end flushes
+  the queue (sorted by kind, tag, province, state, token, level, FROM), and events recorded at depth
+  0 on the main thread flush at once. A cap of 20000 per flush against runaway chains.
+- Battle sides from `kSigEvBattleSides` (side `+0x28`, the other `+0x30`, units `+0x20` count `+0x2c`;
+  province `+0x38` must be side + 0x10). Only `CLandCombat` / `CLandBorderWarCombat` (RTTI): naval
+  and air battles' sides hold other objects. Owner tags only if `CountryByTag` knows them. A
+  battle's countries are kept from its start: at its end a side may hold no division any more
+  (retreated, destroyed), and FROM still names it (the first test run showed FROM = ROOT in 11 of
+  27 ends before this).
+- `constructed_level` was left out (the level field would need another code source; vanilla
+  state triggers give a building's level).
+- Instant builds (`add_building_construction` with `instant_build`) do not pass through the
+  per-level completion: no event (documented).
+
+**In-game test** (1.19.5, Germany 1936, test mod logging to game.log):
+1. Start: every signature found; on the first run the battle sides were off by one byte in two
+   constants (`kSigEvSideUnitsDisp`, `kSigEvSideBaseDisp`): the resolver's cross-check refused the
+   layout and the battle events were unavailable (fail safe). Fixed and verified against the bytes.
+2. No line during the game's setup; `defined by scripts: on_construction_finished, ...`.
+3. Decision "Unlock the test small arms" (`set_technology`): `on_technology_researched: ROOT GER`
+   at once (outside the tick).
+4. Months at speed 5: `on_technology_researched: ROOT ITA` (daily research), `on_division_trained:
+   ROOT ITA`, `on_construction_finished` for VEN, ENG, SOV, USA, FRA, JAP (a temporary log in the
+   hook: the building types read as `fuel_silo`, `industrial_complex`, states and tags right),
+   `on_battle_started` ITA/ETH with FROM the other side and the province, `on_battle_won` /
+   `on_battle_lost` in consistent pairs (ITA won FROM ETH, ETH lost FROM ITA).
+5. `on_division_destroyed`: **not seen.** A temporary hook on the engine's destroy-unit function
+   showed no call at all in about ten game months (no division anywhere was destroyed), so the
+   hook (`CCombatant` slot 33) is untested; it needs a war with an encirclement.
+
+**Offline:** both checkers on 1.19.5 and 1.19.4.2 (172 signatures), smoke `2/172` passed, unit
+tests unchanged.

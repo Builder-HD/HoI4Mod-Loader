@@ -48,6 +48,7 @@ Current features:
 | `equipment_designers` | engine | `hoi4_loader_plugin_equipment_designers` | designer windows for equipment the game gives none (e.g. `type = infantry`, `air_transport`, `convoy`): the tank, plane or ship designer window with the mod's title, slots, stats, experience and hidden elements, defined in `common/hoi4_loader_equipment_designers/`; no script commands, see below |
 | `production_tabs` | engine | `hoi4_loader_plugin_production_tabs` | which archetypes the production screen's "add production line" tabs list (`add` / `remove` per tab), and new tabs with the mod's own buttons, defined in `common/hoi4_loader_production_tabs/`; no script commands, see below |
 | `province_terrain` | engine (needs `lifecycle`) | `hoi4_loader_plugin_province_terrain` | `set_province_terrain`, `reset_province_terrain`, `province_has_terrain`, `state_has_terrain`: change provinces' terrain category at runtime (movement, combat, supply, attrition; not the map's look), saved, see below |
+| `engine_on_actions` | engine (needs `lifecycle`) | `hoi4_loader_plugin_engine_on_actions` | on_actions vanilla never fires: `on_construction_finished`, `on_technology_researched`, `on_battle_started`, `on_battle_won`, `on_battle_lost`, `on_division_trained`, `on_division_destroyed`, and the data commands `constructed_building`, `researched_technology`, `constructed_province`, `battle_province`, see below |
 | `attention_area` | engine (needs `lifecycle`) | `hoi4_loader_plugin_attention_area` | `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area`: mark any set of provinces on the map (a line and a fill shader each, built-in or a mod's own) and move the camera to it; display only, not saved, see below |
 
 On an unknown build the file tier stays on, the engine tier is off, and `loader.log` lists the
@@ -159,6 +160,7 @@ when the loader is missing or a feature is off. Without them, using a loader tri
 | `equipment_designers` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_equipment_designers.txt` |
 | `production_tabs` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_production_tabs.txt` |
 | `set_province_terrain`, `reset_province_terrain`, `province_has_terrain`, `state_has_terrain` | `scripted_triggers/hoi4_loader_feature_province_terrain.txt` |
+| the engine on_actions, `constructed_building`, `researched_technology`, `constructed_province`, `battle_province` | `scripted_triggers/hoi4_loader_feature_engine_on_actions.txt` |
 | `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area` | `scripted_triggers/hoi4_loader_feature_attention_area.txt` |
 
 - **Combinations:** a block that combines features needs each feature's stub and guard, e.g.
@@ -1884,6 +1886,66 @@ saved flags, so all machines agree. Not tested in multiplayer yet.
 provinces); "province 6487 becomes jungle" (then `has_terrain = jungle` is true); "Ethiopia becomes
 marsh" (with the Italian-Ethiopian war's battles); "reset every state"; "invalid uses (see
 loader.log)".
+
+## Engine on_actions (`engine_on_actions`)
+
+On_actions for moments vanilla never fires one for. Write them like any vanilla on_action, in
+`common/on_actions/*.txt`; nothing to register. An on_action no file defines costs nothing.
+
+```
+on_actions = {
+    on_construction_finished = {          # ROOT = the country, FROM = the state
+        effect = {
+            if = {
+                limit = { constructed_building = arms_factory }
+                ...
+            }
+        }
+    }
+    on_technology_researched = {          # ROOT = the country
+        effect = { if = { limit = { researched_technology = basic_train } ... } }
+    }
+    on_battle_started = { ... }           # land battles: ROOT = each country in it, FROM = the other side's first
+    on_battle_won = { ... }               # land battles: ROOT = each country of the winning side, FROM = the loser's first
+    on_battle_lost = { ... }              # ROOT = each country of the losing side, FROM = the winner's first
+    on_division_trained = { ... }         # ROOT = the country (a trained division deployed)
+    on_division_destroyed = { ... }       # ROOT = the country (a division destroyed in battle)
+}
+```
+
+| On_action | When | ROOT | FROM | Data |
+|---|---|---|---|---|
+| `on_construction_finished` | a level of a building finishes in the construction queue | the country | the state | `constructed_building = <type>`, `constructed_province` (province buildings; 0 for state buildings) |
+| `on_technology_researched` | a technology is researched (research, `set_technology`, ...) | the country | | `researched_technology = <technology>` |
+| `on_battle_started` | a land battle starts | each country in it | the other side's first country | `battle_province` |
+| `on_battle_won` / `on_battle_lost` | a land battle ends | each country of that side | the other side's first country | `battle_province` |
+| `on_division_trained` | a trained division is deployed | the country | | |
+| `on_division_destroyed` | a division is destroyed in battle | the country | | |
+
+- **Like vanilla's on_actions:** `events`, `random_events` and `effect` as usual; fired when the
+  thing happens, only while a game runs (nothing from the game's setup or while a save loads).
+  Where it happens inside one of the game's update passes that a mod's effect could disturb (a
+  country's construction pass, its research update, the hourly update), the on_action runs when
+  that pass ends, still in the same hour. A technology from `set_technology` in a decision fires at
+  once.
+- **Data commands** (only inside the matching on_action; elsewhere false / 0):
+  `constructed_building = infrastructure` and `researched_technology = basic_train` are triggers;
+  `constructed_province` and `battle_province` are values, also usable as game variables:
+  `set_temp_variable = { p = battle_province }`.
+- **Not counted:** `instant_build` constructions (nothing finishes in the queue), naval and air
+  battles, divisions deleted, merged or disbanded by the player.
+- **A name the game takes later:** if a future game version fires one of these on_actions itself,
+  the loader leaves it to the game (logged at start), so nothing fires twice.
+- **Multiplayer:** recorded from the game's own updates and fired in a fixed order, so every
+  machine fires the same on_actions (not tested in multiplayer).
+
+**Checks and messages** (`loader.log`): `Engine events: construction yes (...)` (the resolved
+layout), `engine_on_actions: defined by scripts: on_construction_finished, ...` at the first game,
+`... unavailable on this build` per event whose engine functions were not found.
+
+**Test mod** (`common/on_actions/hoi4_loader_test_engine_on_actions.txt`): every on_action writes
+a line to `game.log` (`hoi4_loader_test ev ...`) for the player and Italy, and for Ethiopia in
+battles (the Italian-Ethiopian war runs from the start).
 
 ## Attention areas (`attention_area`)
 
