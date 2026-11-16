@@ -68,10 +68,8 @@ on_actions = {
 	}
 	on_division_destroyed = {
 		effect = {
-			if = {
-				limit = { OR = { is_ai = no tag = ITA tag = ETH } }
-				log = "hoi4_loader_test ev on_division_destroyed: ROOT [ROOT.GetTag]"
-			}
+			# every country (rare): ROOT = the country whose division was destroyed
+			log = "hoi4_loader_test ev on_division_destroyed: ROOT [ROOT.GetTag]"
 		}
 	}
 }
