@@ -29,6 +29,8 @@ T Rd(const void* base, size_t offset) {
 }
 
 using Generic4_t = void*(__fastcall*)(void*, void*, void*, void*);
+// Six arguments (two on the stack): a detour must pass them all on.
+using Generic6_t = void*(__fastcall*)(void*, void*, void*, void*, void*, void*);
 using Getter_t = void*(__fastcall*)(const void*);
 
 // Resolved.
@@ -65,7 +67,8 @@ std::vector<EngineEvent> g_queue;
 Generic4_t g_origConsDone = nullptr, g_origConsPass = nullptr, g_origResearch = nullptr, g_origTech = nullptr,
            g_origAddCombat = nullptr, g_origBattleEnd = nullptr, g_origKilled = nullptr, g_origDeploy = nullptr,
            g_origAddUnit = nullptr, g_origHourly = nullptr, g_origDecision = nullptr,
-           g_origController = nullptr, g_origNavalSide = nullptr, g_origShipSunk = nullptr;
+           g_origController = nullptr, g_origNavalSide = nullptr;
+Generic6_t g_origShipSunk = nullptr;  // FUN_140dde4a0 has six parameters
 
 void Fault(const char* where) {
     if (InterlockedExchange(&g_faulted, 1) == 0)
@@ -516,7 +519,7 @@ void* __fastcall NavalSideDetour(void* side, void* won, void* c, void* d) {
 }
 
 // Before the original: the ship is about to go.
-void* __fastcall ShipSunkDetour(void* ship, void* b, void* c, void* sinker) {
+void* __fastcall ShipSunkDetour(void* ship, void* b, void* c, void* sinker, void* e, void* f) {
     EngineEvent ev;
     ev.kind = EngineEventKind::ShipSunk;
     if (Active() && ship) {
@@ -524,7 +527,7 @@ void* __fastcall ShipSunkDetour(void* ship, void* b, void* c, void* sinker) {
         int s = ReadIntAt(sinker, 0);
         ev.fromTag = s > 0 && CountryByTag(s) ? s : 0;
     }
-    void* r = g_origShipSunk(ship, b, c, sinker);
+    void* r = g_origShipSunk(ship, b, c, sinker, e, f);
     if (ev.tag > 0 && CountryByTag(ev.tag)) Record(ev);
     return r;
 }
