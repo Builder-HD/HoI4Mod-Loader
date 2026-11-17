@@ -7,12 +7,16 @@
 //       on_battle_won = { ... }   on_battle_lost = { ... } # land battles, per country of each side
 //       on_division_trained = { ... }                     # ROOT = the country
 //       on_division_destroyed = { ... }                   # ROOT = the country (destroyed in battle)
+//       on_naval_battle_won = { ... }  on_naval_battle_lost = { ... }  # per country, FROM = the other side's first
+//       on_ship_sunk = { ... }                            # ROOT = the ship's country, FROM = the sinker
+//       on_decision_taken = { ... }                       # ROOT = the country
+//       on_province_captured = { ... }                    # ROOT = the new controller, FROM = the old one
 //   }
 //
 // They behave like vanilla's on_actions (events, random_events, effect; fired at the moment, only
 // while a game runs). Data the scopes can't carry: constructed_building = <type>,
-// researched_technology = <technology> (triggers), constructed_province and battle_province
-// (values, also game variables). A name the game's executable uses itself is left to the game.
+// researched_technology = <technology>, taken_decision = <decision> (triggers), constructed_province,
+// battle_province and captured_province (values, also game variables). A name the game's executable uses itself is left to the game.
 #include <windows.h>
 
 #include <string.h>
