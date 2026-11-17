@@ -806,11 +806,12 @@ enum class EngineEventKind : int {
     BattleLost,         // per country of the losing side
     DivisionTrained,    // a trained division deployed: tag
     DivisionDestroyed,  // a division destroyed in battle: tag
-    NavalBattleWon,     // per leader country of the winning side when a naval battle ends: tag, fromTag
+    NavalBattleWon,     // per country of the winning side when a naval battle ends (admirals, else units): tag, fromTag
     NavalBattleLost,    // per leader country of the losing side
-    ShipSunk,           // a ship sunk: tag = owner, fromTag = who sank it, token = its type
-    DecisionTaken,      // a decision taken: tag, token = the decision
+    ShipSunk,           // a ship sunk: tag = owner, fromTag = who sank it
+    DecisionTaken,      // a decision taken: tag, name = the decision
     ProvinceCaptured,   // a province changed controller: tag = new, fromTag = old, province
+    FocusCompleted,     // a national focus completed: tag, name = the focus id
     Count
 };
 struct EngineEvent {

@@ -1400,6 +1400,16 @@ static const size_t kSigEvLeaderTagDisp = 0x1d;
 // A ship sunk, FUN_140dde4a0(ship, ?, ?, const int* sinkerTag, ?, reason) (start); fires vanilla's
 // on_pride_of_the_fleet_sunk.
 SIG(kSigEvShipSunk, "48 89 5C 24 20 4C 89 44 24 18 48 89 54 24 10 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 20 FF FF FF 48 81 EC E0 01 00 00 4D 8B F1 4D 8B E0 48")
+// A national focus completed: the focus progress's complete, FUN_1402e7d00(progress, focus, const int*
+// tag, info) (start). The daily progress (0x1402e8bd0) and complete_national_focus (through
+// 0x14072c6d0) both end here; it marks the focus done, runs its reward (focus vtable slot 10) and
+// shows the popup. The progress's country: [disp8 +0x38] (its tag read at country+8 right after).
+SIG(kSigEvFocusComplete, "4C 89 4C 24 20 53 55 56 57 41 54 41 55 41 56 41 57 48 83 EC 78 49 8B F1 4D 8B F8 48 8B FA 48 8B D9 4C 8B 61 ?? E8 ?? ?? ?? ?? 48 8B D7 48 8B CB E8 ?? ?? ?? ?? 48 8B 53 ?? 48 8D 4A 08 44 8B 01 41 8B 07 44 3B C0")
+static const size_t kSigEvFocusCountryDisp = 0x38;
+// A focus's id (std::string): focus + [disp8 +6], in CNationalFocus slot 10 (0x1402e82e6, the
+// reward), which passes the id on with its length and capacity checks.
+SIG(kSigEvFocusName, "83 CE 03 49 8D 56 ?? 0F 57 C0 0F 11 44 24 50 66 0F 6F 15")
+static const size_t kSigEvFocusNameDisp = 6;
 
 #undef CODE
 #undef SIG

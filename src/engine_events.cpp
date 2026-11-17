@@ -49,6 +49,9 @@ uint8_t* g_deploy = nullptr;
 uint8_t* g_addUnit = nullptr;
 uint8_t* g_hourlyTick = nullptr;
 uint8_t *g_decision = nullptr, *g_controller = nullptr, *g_navalSide = nullptr, *g_shipSunk = nullptr;
+uint8_t* g_focusComplete = nullptr;
+uint32_t g_focusCountry = 0, g_focusName = 0;
+Generic4_t g_origFocus = nullptr;
 uint32_t g_decisionName = 0, g_decisionCountry = 0, g_navalLeaders = 0, g_navalLeaderCount = 0, g_leaderTag = 0;
 uint32_t g_stateIdDisp = 0;
 void** g_vtLandCombat = nullptr;
@@ -430,6 +433,22 @@ void* __fastcall DecisionDetour(void* decisions, void* decision, void* c, void* 
     return r;
 }
 
+// After the original: the focus is done and its reward has run (as on_decision_taken after the
+// decision's effects).
+void* __fastcall FocusDetour(void* progress, void* focus, void* tagPtr, void* info) {
+    EngineEvent ev;
+    ev.kind = EngineEventKind::FocusCompleted;
+    if (Active() && progress && focus) {
+        void* country = ReadPtrAt(progress, g_focusCountry);
+        int tag = country ? ReadIntAt(country, g_tagOffset) : 0;
+        ev.tag = tag > 0 && CountryByTag(tag) ? tag : 0;
+        if (ev.tag > 0 && !ReadName(focus, g_focusName, ev.name)) ev.tag = 0;
+    }
+    void* r = g_origFocus(progress, focus, tagPtr, info);
+    if (ev.tag > 0) Record(ev);
+    return r;
+}
+
 void* __fastcall ControllerDetour(void* province, void* tagPtr, void* c, void* d) {
     int id = 0, before = 0;
     if (Active() && province) {
@@ -603,6 +622,14 @@ void ResolveEngineEvents() {
             Log("ERROR: engine_on_actions: the decision name code looks different; on_decision_taken off");
     }
     g_controller = SigFindUnique("ev_controller_set", kSigEvControllerSet);
+    if ((p = SigFindUnique("ev_focus_complete", kSigEvFocusComplete)) != nullptr) {
+        uint8_t* name = SigFindUnique("ev_focus_name", kSigEvFocusName);
+        if (name) {
+            g_focusComplete = p;
+            g_focusCountry = Rd<uint8_t>(p, kSigEvFocusCountryDisp);
+            g_focusName = Rd<uint8_t>(name, kSigEvFocusNameDisp);
+        }
+    }
     if ((p = SigFindUnique("ev_naval_side_result", kSigEvNavalSideResult)) != nullptr) {
         g_navalSide = p;
         g_navalLeaders = Rd<uint32_t>(p, kSigEvNavalLeadersDisp);
@@ -646,6 +673,8 @@ bool HaveEngineEvent(EngineEventKind kind) {
             return g_decision && g_decisionCountry && g_decisionName;
         case EngineEventKind::ProvinceCaptured:
             return g_controller && HaveProvinceData();
+        case EngineEventKind::FocusCompleted:
+            return g_focusComplete && g_focusCountry && g_focusName && HaveCountries();
         case EngineEventKind::DivisionDestroyed:
             return g_divisionKilled && HaveMilitaryCounts();
         default:
@@ -671,6 +700,7 @@ bool HookEngineEvents(EngineEventSink_t sink) {
     hook(EngineEventKind::BattleWon, g_battleEnd, (void*)&BattleEndDetour, (void**)&g_origBattleEnd, "ev_battle_end");
     hook(EngineEventKind::DivisionDestroyed, g_divisionKilled, (void*)&KilledDetour, (void**)&g_origKilled, "ev_division_killed");
     hook(EngineEventKind::DecisionTaken, g_decision, (void*)&DecisionDetour, (void**)&g_origDecision, "ev_decision_taken");
+    hook(EngineEventKind::FocusCompleted, g_focusComplete, (void*)&FocusDetour, (void**)&g_origFocus, "ev_focus_complete");
     hook(EngineEventKind::ProvinceCaptured, g_controller, (void*)&ControllerDetour, (void**)&g_origController, "ev_controller_set");
     hook(EngineEventKind::NavalBattleWon, g_navalSide, (void*)&NavalSideDetour, (void**)&g_origNavalSide, "ev_naval_side_result");
     hook(EngineEventKind::ShipSunk, g_shipSunk, (void*)&ShipSunkDetour, (void**)&g_origShipSunk, "ev_ship_sunk");

@@ -11,11 +11,12 @@
 //       on_ship_sunk = { ... }                            # ROOT = the ship's country, FROM = the sinker
 //       on_decision_taken = { ... }                       # ROOT = the country
 //       on_province_captured = { ... }                    # ROOT = the new controller, FROM = the old one
+//       on_focus_completed = { ... }                      # ROOT = the country
 //   }
 //
 // They behave like vanilla's on_actions (events, random_events, effect; fired at the moment, only
 // while a game runs). Data the scopes can't carry: constructed_building = <type>,
-// researched_technology = <technology>, taken_decision = <decision> (triggers), constructed_province,
+// researched_technology = <technology>, taken_decision = <decision>, completed_focus = <focus> (triggers), constructed_province,
 // battle_province and captured_province (values, also game variables). A name the game's executable uses itself is left to the game.
 #include <windows.h>
 
@@ -36,7 +37,8 @@ const int kKinds = (int)Kind::Count;
 const char* const kNames[kKinds] = {"on_construction_finished", "on_technology_researched", "on_battle_started",
                                     "on_battle_won",            "on_battle_lost",           "on_division_trained",
                                     "on_division_destroyed",    "on_naval_battle_won",      "on_naval_battle_lost",
-                                    "on_ship_sunk",             "on_decision_taken",        "on_province_captured"};
+                                    "on_ship_sunk",             "on_decision_taken",        "on_province_captured",
+                                    "on_focus_completed"};
 
 bool g_vanillaOwns[kKinds] = {};
 void* g_lists[kKinds] = {};
@@ -112,6 +114,13 @@ bool EvalDecision(const Args& a, const Scope&) {
     const Engine::EngineEvent* ev = Current(Kind::DecisionTaken);
     return ev && strcmp(ev->name, a.key(0)) == 0;
 }
+bool EvalFocus(const Args& a, const Scope&) {
+    const Engine::EngineEvent* ev = Current(Kind::FocusCompleted);
+    return ev && strcmp(ev->name, a.key(0)) == 0;
+}
+void TooltipFocus(const Args& a, const Scope&, bool negated, TooltipText& out) {
+    out.add(negated ? "The completed focus is NOT " : "The completed focus is ").add(native_localize_key(a.key(0)).c_str());
+}
 bool ValueCapturedProvince(const Args&, const Scope&, int64_t* out) {
     const Engine::EngineEvent* ev = Current(Kind::ProvinceCaptured);
     *out = ev ? ev->province : 0;
@@ -182,6 +191,10 @@ bool EngineOnActionsInit() {
     register_native_trigger({"taken_decision",
                              "In on_decision_taken: true if the decision taken is this one. False elsewhere.", Form::Value,
                              {{"decision", ParamType::Key, true}}, ScopeMask::Any, &EvalDecision, &TooltipDecision},
+                            kFeature);
+    register_native_trigger({"completed_focus",
+                             "In on_focus_completed: true if the completed focus is this one (its id). False elsewhere.",
+                             Form::Value, {{"focus", ParamType::Key, true}}, ScopeMask::Any, &EvalFocus, &TooltipFocus},
                             kFeature);
     register_native_numeric_trigger({"captured_province",
                                      "In on_province_captured: the province (0 elsewhere). Also a game variable.",
