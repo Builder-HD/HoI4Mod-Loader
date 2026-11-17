@@ -7648,3 +7648,56 @@ impassable = yes                                                        # vanill
   type-4 compares), an attack order across one (the attack check reads the same byte), a second game
   in the same session (keys do not reach the game's menu from the test tools; the restore is the
   same pattern as province_terrain's, tested there).
+
+## R6: owner's test, map lines and resistance (2026-11-17)
+
+Owner's test of #30: supply across a closed border is blocked as it should be. Two gaps:
+- **No red lines.** Vanilla draws the impassable border texture (`map/terrain/border_impassable_*.dds`)
+  along the csv's impassable borders and around impassable states. A closed border, a state made
+  impassable, or a vanilla impassable state made passable keeps its old lines.
+- **Resistance.** Impassable states have none (good). Brandenburg made impassable: resistance
+  gone, passable again: back. A vanilla impassable state made passable: resistance stays gone.
+
+**Lines (1.19.5):**
+- Border segments: an array at `borders+0x49b8` (stride 0x14: province index a `+0`, b `+2`, a flag
+  `+0x12`), a cached type byte per segment at `borders+0x5ca8`. The type function `0x14130b200(a, b,
+  flag)` (game provinces) reads everything live: land to land, neighbour entry type 4 -> 3
+  (impassable), exactly one side in an impassable state (`0x140ef0160` -> the state getter) -> 3;
+  else 2 country (controllers differ), 1 state, 0 province; sea cases 4/5. Texture order (`0x1412ed350`):
+  province, state, country, impassable, sea, sea_region.
+- The cache is refreshed per segment (`0x14130eb90`) from a dirty set: the tracker
+  (`0x141a6c8e0(tracker, province)` adds a province's segments, `0x141a6ca80` recomputes them once per
+  frame, called from the map update `0x140ab8b40`).
+- The game's own path when a province changes controller (`0x140ef1860`, at `0x140ef213c`): `call
+  0x140ab7ea0` (returns the map updater global) then `call 0x140ab8890(updater, province)` (thunk:
+  `mov rcx,[rcx+8]; jmp 0x140e847d0`), which marks the province's segments dirty and its map-mode
+  colour for an update. **Fix:** the loader makes the same call for both provinces of a changed
+  border and for every province of a changed state. The game then recomputes those segments with its
+  own rules, so the lines follow vanilla's: closed borders and impassable states get them, opened ones
+  lose them.
+
+**Resistance (1.19.5):**
+- Vanilla starts resistance by script: `should_initiate_resistance` (`common/scripted_triggers/
+  00_resistance_initiate_triggers.txt`) begins with `impassable = no`. The state's resistance object
+  is `state+0x268`; its "active" byte `+0x208` is set from the trigger (`0x141020a40`: force enable /
+  disable lists, then the trigger) when the controller changes (`0x14101f5e0`) or when the occupied
+  country changes (the periodic `0x14101f3f0`, which only restarts if the current occupied country
+  is invalid). So a state impassable when it was taken stays inactive after it opens; Brandenburg
+  comes back because its byte was set before and the display reads the trigger live.
+- `0x141020d90(resistance)`: `+0x50` (the occupied country) <= 0 -> inactive; else `+0x208` = the
+  validity check (the trigger). Called by the game after a restart. **Fix:** after a state's flag
+  changes (and after the save's flags are applied), the loader calls it for that state: the trigger
+  decides as vanilla would at capture. The resistance value itself is the game's (set at capture).
+- Not done: `start_resistance`'s full restart (it resets resistance and compliance to the capture
+  values); the refresh keeps them, as Brandenburg's case shows the owner expects.
+
+**Signatures** (unique in 1.19.4.2 and 1.19.5):
+- `kSigAdjMapRefresh` at the controller change: the getter call `+0x1b` (checked: `48 8B 05 rel32
+  C3` -> the updater global), the thunk call `+0x2a` (checked: `48 8B 49 08 E9`).
+- `kSigAdjResistRefresh` in `0x14101f3f0`: the refresh call `+0x1b` (checked: `40 53 48 83 EC 20 83
+  79`).
+- `kSigAdjStateResistance` in the controller change: `lea rcx, [rdi+0x268]`, disp `+3`.
+- Without them the feature keeps working without the lines or the resistance refresh (logged).
+
+**When:** after each change; in OnGameEntered for the save's flags and for whatever OnGameEntering
+restored (the map graphics and their cached types may outlive a game).
