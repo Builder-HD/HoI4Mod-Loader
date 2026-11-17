@@ -806,6 +806,12 @@ enum class EngineEventKind : int {
     BattleLost,         // per country of the losing side
     DivisionTrained,    // a trained division deployed: tag
     DivisionDestroyed,  // a division destroyed in battle: tag
+    NavalBattleWon,     // per country of the winning side when a naval battle ends (admirals, else units): tag, fromTag
+    NavalBattleLost,    // per leader country of the losing side
+    ShipSunk,           // a ship sunk: tag = owner, fromTag = who sank it
+    DecisionTaken,      // a decision taken: tag, name = the decision
+    ProvinceCaptured,   // a province changed controller: tag = new, fromTag = old, province
+    FocusCompleted,     // a national focus completed: tag, name = the focus id
     Count
 };
 struct EngineEvent {
@@ -816,6 +822,7 @@ struct EngineEvent {
     int province = 0;  // 0: none
     int token = 0;     // building type / technology name token
     int level = 0;
+    char name[64] = {};  // decision name
 };
 void ResolveEngineEvents();  // after ResolveData (unit owner) and ResolveOnActions
 bool HaveEngineEvent(EngineEventKind kind);

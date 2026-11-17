@@ -7475,3 +7475,88 @@ vanilla does), `SetState` from `kSigEventScopeState`.
 
 **Offline:** both checkers on 1.19.5 and 1.19.4.2 (172 signatures), smoke `2/172` passed, unit
 tests unchanged.
+
+## Q8: second round (owner's decisions, 2026-11-16; branch `feature/engine-on-actions-2`)
+
+Same rules as Q5 (vanilla behaviour, no prefix, at the moment or at the end of the pass, a name
+the game uses itself is left to it). New on_actions:
+
+| On_action | When | ROOT | FROM | Data |
+|---|---|---|---|---|
+| `on_naval_battle_won` / `on_naval_battle_lost` | a naval battle ends | each country of that side | the other side's first country | `battle_province` (the sea zone) |
+| `on_ship_sunk` | a ship is sunk | the owner | who sank it | `sunk_ship_type = <type>` (trigger) |
+| `on_focus_completed` | a national focus completes | the country | | `completed_focus = <id>` (trigger) |
+| `on_decision_taken` | a decision is taken | the country | | `taken_decision = <id>` (trigger) |
+| `on_province_captured` | a province changes controller | the new controller | the old controller | `captured_province` (value) |
+
+Not included: equipment produced (every line delivers every day: thousands of firings a day).
+Map connections are a separate feature and PR (Part R).
+
+**Q8 findings (1.19.5):**
+- **Naval battle end:** `CNavalCombat` has no slot-24 result (base `0x140154030`); its end calls
+  `FUN_1416b9b10` (from `CNavalCombat`'s `0x141660ce0`), which reports both sides' leaders through
+  `FUN_140c748c0` (navy lists `db+0x70/+0x78`), the naval twin of `CLandCombat` slot 24.
+- **Ship sunk:** `FUN_140dde4a0(ship, ?, ?, const int* sinkerTag, ?, reason)`, the general handler
+  (it fires vanilla's `on_pride_of_the_fleet_sunk`, found by its name string at `0x140ddea11`);
+  owner tag at `ship+0x1d8` (`+0x3b*8`, as divisions); callers: the `destroy_ships` effect
+  (`0x14035b100`), `0x140f1e0a0`, `0x1410415f0`, `0x141a07e50` (combat, raids, ...).
+- **Focus completed:** `FUN_14072c6d0`, called by `complete_national_focus` (`0x140368830`) and by
+  `0x140e649d0` (the daily focus progress).
+- **Decision taken:** `FUN_14077d990`, called by `CSelectDecisionCommand` (slot 10, `0x1411e4b80`;
+  players and the AI) and the `activate_decision` effect (`0x140360280`).
+- **Province controller:** `FUN_140ef1860`, called by `set_province_controller` (`0x14037c930`),
+  occupation (`0x140bbd450`, 4x), `0x140e4d500`, `0x14071ba50`, peace and more.
+Parameters and fields to confirm in game (diagnostic dump), then signatures.
+
+**Q8 implementation and test so far (2026-11-16):**
+- **A crash, fixed:** the first build logged the decision's "name" through `TokenName(decision+8)`;
+  that field is no token, and the engine's token lookup has no range check: an access violation in
+  the loader (outside its fault guards) right after a decision. No `TokenName` on unverified data
+  any more; names are read as std::strings under SEH (`ReadName`: 1..63 identifier characters).
+- **Decision name:** `decision+0x120` (std::string), from the game's `<name>_desc` key builder
+  (`0x140774ae0`, `kSigEvDecisionName`, the literal checked). In game: the player's decision and AI
+  decisions (`seize_some_trains_woo`, `GRE_put_the_king_under_house_arrest`) with the right names.
+- **Province captured:** in game ITA FROM ETH (and back) with the province ids.
+- **Focus: first hook point wrong, then found (2026-11-17).** The hook on `FUN_14072c6d0` fired for
+  events too (a dump named `SEA_japan.1`). Its code is only `forward to country+0x1380`, so most
+  likely several methods with identical code were folded into one address. The real completion
+  sits one level down:
+  - `FUN_1402e7d00(progress, focus, const int* tag, info)`, the focus progress's complete
+    (`progress+8` = the country). It marks the focus done (`FUN_1402e6760`), runs the reward
+    through the focus's vtable slot 10 (`CNationalFocus` `0x1402e80c0`: `completion_reward` at
+    `focus+0x408`; `CJointNationalFocus` `0x140e62f20` also runs it for the faction members through
+    a lambda, `0x140e649d0`, which calls `0x14072c6d0` per member), shows the popup, and clears the
+    current focus.
+  - Callers: the daily progress (`0x1402e8bd0`) and `0x14072c6d0` (`complete_national_focus`,
+    `CCompleteNationalFocusEffect` slot 13 = `0x140368830`; joint members).
+  - Focus id: `focus+0x18` (std::string), read from slot 10's code (`kSigEvFocusName`).
+  - Detour after the original (as decisions: the reward has run), `kSigEvFocusComplete`.
+  - **In game:** the test decision's `complete_national_focus` (GER, `completed_focus` right) and
+    the AI's daily progress: 42 completions in the first 40 days, ITA's
+    `ITA_ethiopian_war_logistics_bba` recognised; one country twice (two focuses). Joint focuses
+    fire once per member (by the code, not tested).
+- **Naval battles and ships sunk (2026-11-17):**
+  - **Crash, fixed:** `FUN_140dde4a0` has six parameters; the first detour passed four on, so the
+    game read two from the wrong stack slots (access violation at `0x140ddeadc`, inside the
+    original, right after the first ship sank). The detour now takes and passes all six.
+  - **No admiral, no countries:** the side's leaders (`+0x118`, count `+0x124`, tag `leader+0x120`)
+    are empty for fleets without an admiral. Fallback: the side's units read like a land side's
+    (`+0x20`, count `+0x2c`; `CNavalCombatant` and `CLandCombatant` share the `CCombatant` base),
+    under its own SEH so a surprise only drops the fallback. Gave GER/POL right in the owner's test.
+  - **A wrong guess, removed:** the list at side `+0xe8` (count `+0xf4`, the side score
+    `FUN_1416b7fd0` sums it) is not ships with an owner at the unit offset: reading it as such
+    faulted, and the fail-safe turned the whole feature off for that session.
+  - **When the game reports a result:** `0x141660ce0` calls `FUN_1416b9b10` only if neither
+    withdrawal flag (`combat+0x10c`/`+0x10d`) is set and the side scores (`FUN_1416b7fd0(side,
+    0x20)`) differ; otherwise no won/lost for anyone (vanilla's admiral on_actions neither).
+  - **Vanilla overlap:** `FUN_140c748c0` fires `on_navy_leader_won_combat` / `_lost_combat` (or the
+    army ones, by `leader+0xe7c`): ROOT the leader, FROM its country, FROMFROM the combatant. Ours
+    add the country scope, the enemy as FROM and admiral-less fleets.
+  - **In game:** France vs Italy (test decision): 11 battles, each FRA won FROM ITA and ITA lost
+    FROM FRA; 80 ships sunk with the right owner and sinker; no faults. Earlier: GER/POL ships sunk
+    both ways. Naval battles have no `battle_province` (the side does not carry the province).
+- **Impassable borders, seen in passing (for Part R):** a map province's neighbour entries
+  (`+0x70`, stride 0x30, count `+0x7c`; neighbour id at `+8`) have bit `0x04` in the byte at `+0x10`
+  exactly for the `impassable` pairs of `adjacencies.csv` (10825-1991, 10825-8029, 12730-2098,
+  12730-5018), with `-1` at `+0xc` and `+0x28`/`+0x2c` (entries from the csv). Bit `0x02` seen on
+  10825-1898 (not in the csv; meaning unknown).

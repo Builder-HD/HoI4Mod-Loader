@@ -1910,6 +1910,16 @@ on_actions = {
     on_battle_lost = { ... }              # ROOT = each country of the losing side, FROM = the winner's first
     on_division_trained = { ... }         # ROOT = the country (a trained division deployed)
     on_division_destroyed = { ... }       # ROOT = the country (a division destroyed in battle)
+    on_naval_battle_won = { ... }         # ROOT = each country of the winning side, FROM = the loser's first
+    on_naval_battle_lost = { ... }        # ROOT = each country of the losing side, FROM = the winner's first
+    on_ship_sunk = { ... }                # ROOT = the ship's country, FROM = the country that sank it
+    on_decision_taken = {                 # ROOT = the country
+        effect = { if = { limit = { taken_decision = my_decision } ... } }
+    }
+    on_province_captured = { ... }        # ROOT = the new controller, FROM = the old one
+    on_focus_completed = {                # ROOT = the country
+        effect = { if = { limit = { completed_focus = GER_rhineland } ... } }
+    }
 }
 ```
 
@@ -1921,6 +1931,11 @@ on_actions = {
 | `on_battle_won` / `on_battle_lost` | a land battle ends | each country of that side | the other side's first country | `battle_province` |
 | `on_division_trained` | a trained division is deployed | the country | | |
 | `on_division_destroyed` | a division is destroyed in battle | the country | | |
+| `on_naval_battle_won` / `on_naval_battle_lost` | a naval battle ends with a result | each country of that side | the other side's first country | |
+| `on_ship_sunk` | a ship is sunk | the ship's country | the country that sank it | |
+| `on_decision_taken` | a decision is taken (player or AI; also missions and targeted decisions) | the country | | `taken_decision = <decision>` |
+| `on_province_captured` | a province's controller changes (occupation, liberation) | the new controller | the old controller | `captured_province` |
+| `on_focus_completed` | a national focus completes (daily progress, `complete_national_focus`; a joint focus per member) | the country | | `completed_focus = <focus id>` |
 
 - **Like vanilla's on_actions:** `events`, `random_events` and `effect` as usual; fired when the
   thing happens, only while a game runs (nothing from the game's setup or while a save loads).
@@ -1930,10 +1945,16 @@ on_actions = {
   once.
 - **Data commands** (only inside the matching on_action; elsewhere false / 0):
   `constructed_building = infrastructure` and `researched_technology = basic_train` are triggers;
-  `constructed_province` and `battle_province` are values, also usable as game variables:
+  `taken_decision = my_decision` and `completed_focus = GER_rhineland` too; `constructed_province`, `battle_province` and
+  `captured_province` are values, also usable as game variables:
   `set_temp_variable = { p = battle_province }`.
-- **Not counted:** `instant_build` constructions (nothing finishes in the queue), naval and air
-  battles, divisions deleted, merged or disbanded by the player.
+- **Naval battles:** the countries come from the side's admirals, or from its fleets when it has
+  none. A battle the game ends without a result (a side withdrew, equal score) fires neither.
+  Vanilla's `on_navy_leader_won_combat` / `on_navy_leader_lost_combat` fire at the same moment,
+  per admiral (ROOT = the admiral); these add the country scope, the enemy as FROM and fleets
+  without an admiral. Likewise vanilla's `on_army_leader_won_combat` / `..._lost_combat` per general.
+- **Not counted:** `instant_build` constructions (nothing finishes in the queue), air battles,
+  divisions deleted, merged or disbanded by the player.
 - **A name the game takes later:** if a future game version fires one of these on_actions itself,
   the loader leaves it to the game (logged at start), so nothing fires twice.
 - **Multiplayer:** recorded from the game's own updates and fired in a fixed order, so every
@@ -1945,7 +1966,10 @@ layout), `engine_on_actions: defined by scripts: on_construction_finished, ...` 
 
 **Test mod** (`common/on_actions/hoi4_loader_test_engine_on_actions.txt`): every on_action writes
 a line to `game.log` (`hoi4_loader_test ev ...`) for the player and Italy, and for Ethiopia in
-battles (the Italian-Ethiopian war runs from the start).
+battles (the Italian-Ethiopian war runs from the start); naval battles and ships sunk for every
+country, focuses for every country. The decision "Events: France declares war on Italy" starts an
+AI-only naval war; "Events: complete Germany's first economy focus" (Germany only) completes a
+focus through `complete_national_focus`.
 
 ## Attention areas (`attention_area`)
 

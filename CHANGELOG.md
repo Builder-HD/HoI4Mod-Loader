@@ -79,6 +79,13 @@ A–F; NOTES.md has the findings and test results behind each.
   `constructed_province`, `battle_province`. A name a later game version fires itself is left to
   the game. 12 new signatures (smoke `2/172`). Checked on 1.19.4.2 and 1.19.5; tested in game on
   1.19.5 (2026-11-16), `on_division_destroyed` with an encircled division.
+  Second round: `on_naval_battle_won` / `on_naval_battle_lost` (FROM = the other side; admirals'
+  or fleets' countries), `on_ship_sunk` (FROM = the country that sank it), `on_decision_taken`
+  (data trigger `taken_decision`), `on_province_captured` (ROOT new controller, FROM old one; data
+  value `captured_province`), `on_focus_completed` (data trigger `completed_focus`). 8 more
+  signatures (smoke `2/180`). Checked on 1.19.4.2 and 1.19.5; tested in game on 1.19.5
+  (2026-11-17): decisions (player and AI), Italy vs Ethiopia captures, 11 France-Italy naval
+  battles and 80 ships sunk, focuses from `complete_national_focus` and the AI's daily progress.
 - **Native script API:** a Token parameter may be repeated (`repeat = true`, as Int and Block);
   `Args::at` gives the tokens in script order.
 - **Shared code:** `Engine::ProvinceById`, `MapProvinceById`, `StateObjectOwner`,
