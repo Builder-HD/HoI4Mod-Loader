@@ -7517,10 +7517,24 @@ Parameters and fields to confirm in game (diagnostic dump), then signatures.
   (`0x140774ae0`, `kSigEvDecisionName`, the literal checked). In game: the player's decision and AI
   decisions (`seize_some_trains_woo`, `GRE_put_the_king_under_house_arrest`) with the right names.
 - **Province captured:** in game ITA FROM ETH (and back) with the province ids.
-- **Focus: dropped from this round.** `FUN_14072c6d0` is not the focus completion: a dump showed
-  `{int, empty std::string, pointer}` whose object names events (`SEA_japan.1`) and countries: it
-  adds an entry to a country's history log, focuses being one kind. The real completion is still to
-  find; `on_focus_completed` comes later.
+- **Focus: first hook point wrong, then found (2026-11-17).** The hook on `FUN_14072c6d0` fired for
+  events too (a dump named `SEA_japan.1`). Its code is only `forward to country+0x1380`, so most
+  likely several methods with identical code were folded into one address. The real completion
+  sits one level down:
+  - `FUN_1402e7d00(progress, focus, const int* tag, info)`, the focus progress's complete
+    (`progress+8` = the country). It marks the focus done (`FUN_1402e6760`), runs the reward
+    through the focus's vtable slot 10 (`CNationalFocus` `0x1402e80c0`: `completion_reward` at
+    `focus+0x408`; `CJointNationalFocus` `0x140e62f20` also runs it for the faction members through
+    a lambda, `0x140e649d0`, which calls `0x14072c6d0` per member), shows the popup, and clears the
+    current focus.
+  - Callers: the daily progress (`0x1402e8bd0`) and `0x14072c6d0` (`complete_national_focus`,
+    `CCompleteNationalFocusEffect` slot 13 = `0x140368830`; joint members).
+  - Focus id: `focus+0x18` (std::string), read from slot 10's code (`kSigEvFocusName`).
+  - Detour after the original (as decisions: the reward has run), `kSigEvFocusComplete`.
+  - **In game:** the test decision's `complete_national_focus` (GER, `completed_focus` right) and
+    the AI's daily progress: 42 completions in the first 40 days, ITA's
+    `ITA_ethiopian_war_logistics_bba` recognised; one country twice (two focuses). Joint focuses
+    fire once per member (by the code, not tested).
 - **Naval battles and ships sunk (2026-11-17):**
   - **Crash, fixed:** `FUN_140dde4a0` has six parameters; the first detour passed four on, so the
     game read two from the wrong stack slots (access violation at `0x140ddeadc`, inside the
