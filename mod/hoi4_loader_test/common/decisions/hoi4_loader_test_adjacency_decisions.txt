@@ -1,0 +1,109 @@
+# Test decisions for hoi4_loader's map_adjacency (MODDING.md "Map connections", NOTES.md Part R).
+# Berlin (6521) borders 375 (plains), 3499, 9428, 11444, 11505 (forest). Central Alps: 3641-658 is
+# impassable in map/adjacencies.csv. State 64 Brandenburg, 514 North Africa (impassable in history).
+# 1. "Adjacency: close Berlin's borders": no division can leave or enter Berlin (move orders fail,
+#    paths go around); province_adjacency_passable 6521-375 turns false.
+# 2. "Adjacency: open the central Alps 3641-658": the trigger turns true, units can cross.
+# 3. "Adjacency: Brandenburg impassable": the vanilla impassable trigger turns true for state 64;
+#    what happens to the divisions inside is what the game does with units in impassable states.
+# 4. "Adjacency: North Africa passable": state 514 opens.
+# 5. "Adjacency: reset all": everything back to the map's and history's.
+# 6. "Adjacency: status (see game.log)": logs the four answers ("hoi4_loader_test adj").
+# 7. "Adjacency: invalid uses (see loader.log)": provinces that are no neighbours, a missing state.
+# Save, load: the changes come back (flags hoi4_adj_<low>_<high>_<0|1>, hoi4_imp_<state>_<0|1>).
+hoi4_loader_test_category = {
+	hoi4_loader_adj_close_berlin = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_map_adjacency = yes }
+		complete_effect = {
+			set_province_adjacency = { province = 6521 neighbour = 375 passable = no }
+			set_province_adjacency = { province = 6521 neighbour = 3499 passable = no }
+			set_province_adjacency = { province = 6521 neighbour = 9428 passable = no }
+			set_province_adjacency = { province = 6521 neighbour = 11444 passable = no }
+			set_province_adjacency = { province = 6521 neighbour = 11505 passable = no }
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_adj_open_alps = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_map_adjacency = yes }
+		complete_effect = {
+			set_province_adjacency = { province = 3641 neighbour = 658 passable = yes }
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_adj_brandenburg_impassable = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_map_adjacency = yes }
+		complete_effect = {
+			64 = { set_state_impassable = { impassable = yes } }
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_adj_north_africa_passable = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_map_adjacency = yes }
+		complete_effect = {
+			set_state_impassable = { state = 514 impassable = no }
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_adj_reset = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_map_adjacency = yes }
+		complete_effect = {
+			reset_province_adjacency = { province = 6521 neighbour = 375 }
+			reset_province_adjacency = { province = 6521 neighbour = 3499 }
+			reset_province_adjacency = { province = 6521 neighbour = 9428 }
+			reset_province_adjacency = { province = 6521 neighbour = 11444 }
+			reset_province_adjacency = { province = 6521 neighbour = 11505 }
+			reset_province_adjacency = { province = 3641 neighbour = 658 }
+			reset_state_impassable = { state = 64 }
+			514 = { reset_state_impassable = { } }
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_adj_status = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_map_adjacency = yes }
+		complete_effect = {
+			if = {
+				limit = { province_adjacency_passable = { province = 6521 neighbour = 375 } }
+				log = "hoi4_loader_test adj Berlin-375 passable"
+			}
+			else = { log = "hoi4_loader_test adj Berlin-375 CLOSED" }
+			if = {
+				limit = { province_adjacency_passable = { province = 3641 neighbour = 658 } }
+				log = "hoi4_loader_test adj Alps 3641-658 passable"
+			}
+			else = { log = "hoi4_loader_test adj Alps 3641-658 CLOSED" }
+			if = {
+				limit = { 64 = { impassable = yes } }
+				log = "hoi4_loader_test adj Brandenburg IMPASSABLE"
+			}
+			else = { log = "hoi4_loader_test adj Brandenburg passable" }
+			if = {
+				limit = { 514 = { impassable = yes } }
+				log = "hoi4_loader_test adj North Africa IMPASSABLE"
+			}
+			else = { log = "hoi4_loader_test adj North Africa passable" }
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_adj_invalid = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_map_adjacency = yes }
+		complete_effect = {
+			set_province_adjacency = { province = 6521 neighbour = 658 passable = no }
+			set_state_impassable = { state = 99999 impassable = yes }
+		}
+		ai_will_do = { base = 0 }
+	}
+}
