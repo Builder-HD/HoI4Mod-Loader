@@ -9,7 +9,8 @@
 //
 // A border is closed as the game's own impassable borders (map/adjacencies.csv), in both
 // directions; a state as the game's own impassable states (history/states). The game reads both
-// live, so movement, attacks, supply and the AI follow at once. Storage: global flags
+// live, so movement, attacks, supply and the AI follow at once; the map's border lines and the
+// state's resistance are refreshed through the game's own calls (NOTES.md R6). Storage: global flags
 // hoi4_adj_<low>_<high>_<0|1> and hoi4_imp_<state>_<0|1> (1 = passable / impassable). The bytes live
 // in the static map and state data, which outlives a game: before every game entry the originals
 // come back, after it the save's flags are applied. Without the loader the flags are inert.
@@ -19,6 +20,7 @@
 #include <string.h>
 
 #include <map>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -38,6 +40,7 @@ const char kImpPrefix[] = "hoi4_imp_";
 std::map<std::pair<int, int>, int> g_origBorder;  // (a, b) -> a's entry type for b at the first change
 std::map<int, bool> g_origState;                  // state -> its impassable flag at the first change
 volatile bool g_ready = false;                    // this game's self-check passed (the trigger reads it)
+std::set<int> g_restoredProvinces, g_restoredStates;  // restored before a game entry: refreshed after it
 
 enum { kProvince, kNeighbour, kPassable };
 enum { kState, kImpassable };
@@ -89,6 +92,18 @@ void SetFlag(const std::string& name) { Engine::SetGlobalFlag(Engine::Intern(nam
 
 // --- Changes ----------------------------------------------------------------------------------
 
+// The game's follow-ups (NOTES.md R6): the border lines of the provinces get their type again, a
+// state's resistance its active flag (vanilla's should_initiate_resistance decides).
+void RefreshBorder(int a, int b) {
+    Engine::RefreshProvinceBorders(a);
+    Engine::RefreshProvinceBorders(b);
+}
+
+void RefreshState(int state) {
+    Engine::RefreshStateBorders(state);
+    Engine::RefreshStateResistance(state);
+}
+
 bool Impassable(int type) { return type == Engine::ImpassableBorderType(); }
 
 // Both entries' types now; false if a and b are not neighbours both ways.
@@ -128,13 +143,27 @@ void ApplyState(int state, bool impassable) {
     if ((cur == 1) != impassable) Engine::SetStateImpassable(state, impassable);
 }
 
-void RestoreAll() {
+// inGame: refresh at once (the feature switches off during a game); else after the next entry.
+void RestoreAll(bool inGame) {
     for (const auto& o : g_origBorder)
-        if (Engine::BorderType(o.first.first, o.first.second) != o.second) Engine::SetBorderType(o.first.first, o.first.second, o.second);
+        if (Engine::BorderType(o.first.first, o.first.second) != o.second) {
+            Engine::SetBorderType(o.first.first, o.first.second, o.second);
+            g_restoredProvinces.insert(o.first.first);
+            g_restoredProvinces.insert(o.first.second);
+        }
     for (const auto& o : g_origState)
-        if ((Engine::StateImpassable(o.first) == 1) != o.second) Engine::SetStateImpassable(o.first, o.second);
+        if ((Engine::StateImpassable(o.first) == 1) != o.second) {
+            Engine::SetStateImpassable(o.first, o.second);
+            g_restoredStates.insert(o.first);
+        }
     g_origBorder.clear();
     g_origState.clear();
+    if (inGame) {
+        for (int p : g_restoredProvinces) Engine::RefreshProvinceBorders(p);
+        for (int st : g_restoredStates) RefreshState(st);
+        g_restoredProvinces.clear();
+        g_restoredStates.clear();
+    }
 }
 
 bool Ready(const char* command) {
@@ -166,6 +195,7 @@ void ExecSetBorder(const Args& a, const Scope&) {
     bool passable = a.b(kPassable);
     if (Passable(p, q) == passable) return;
     ApplyBorder(p, q, passable);
+    RefreshBorder(p, q);
     std::pair<int, int> k = Pair(p, q);
     ClearFlags(kAdjPrefix, 2, k.first, k.second);
     bool origPassable = !Impassable(OriginalType(p, q)) && !Impassable(OriginalType(q, p));
@@ -189,7 +219,10 @@ void ExecResetBorder(const Args& a, const Scope&) {
     }
     std::pair<int, int> k = Pair(p, q);
     ClearFlags(kAdjPrefix, 2, k.first, k.second);
-    if (changed) Log("%s: the border %d-%d is back to the map's", cmd, p, q);
+    if (changed) {
+        RefreshBorder(p, q);
+        Log("%s: the border %d-%d is back to the map's", cmd, p, q);
+    }
 }
 
 int StateOf(const Args& a, const Scope& s) { return a.has(kState) ? a.i(kState) : s.stateId(); }
@@ -206,6 +239,7 @@ void ExecSetState(const Args& a, const Scope& s) {
     bool to = a.b(kImpassable);
     if ((cur == 1) == to) return;
     ApplyState(state, to);
+    RefreshState(state);
     ClearFlags(kImpPrefix, 1, state, 0);
     if (to != g_origState[state]) SetFlag(kImpPrefix + std::to_string(state) + (to ? "_1" : "_0"));
     Log("%s: state %d is %s", cmd, state, to ? "impassable" : "passable");
@@ -222,6 +256,7 @@ void ExecResetState(const Args& a, const Scope& s) {
     auto it = g_origState.find(state);
     if (it != g_origState.end() && (Engine::StateImpassable(state) == 1) != it->second) {
         Engine::SetStateImpassable(state, it->second);
+        RefreshState(state);
         Log("%s: state %d is back to history/states' (%s)", cmd, state, it->second ? "impassable" : "passable");
     }
     ClearFlags(kImpPrefix, 1, state, 0);
@@ -268,13 +303,13 @@ void TooltipPassable(const Args& a, const Scope&, bool negated, TooltipText& out
 
 void SwitchOff(const char* why) {
     g_ready = false;
-    RestoreAll();
+    RestoreAll(true);
     FeatureDeactivate(kFeature, why);
 }
 
 void OnEntering() {
     g_ready = false;
-    RestoreAll();  // the map and state data outlive the previous game
+    RestoreAll(false);  // the map and state data outlive the previous game
 }
 
 // After the entry: the save's flags (the latest per border / state).
@@ -311,6 +346,8 @@ void OnEntered(bool loaded) {
             continue;
         }
         ApplyBorder(b.first.first, b.first.second, b.second.second);
+        g_restoredProvinces.insert(b.first.first);
+        g_restoredProvinces.insert(b.first.second);
         ++borders;
     }
     for (const auto& s : latest.states) {
@@ -319,8 +356,14 @@ void OnEntered(bool loaded) {
             continue;
         }
         ApplyState(s.first, s.second.second);
+        g_restoredStates.insert(s.first);
         ++states;
     }
+    // The lines and resistance of everything restored before the entry or set by the flags.
+    for (int p : g_restoredProvinces) Engine::RefreshProvinceBorders(p);
+    for (int st : g_restoredStates) RefreshState(st);
+    g_restoredProvinces.clear();
+    g_restoredStates.clear();
     Log("map_adjacency: %s: %d border(s) and %d state(s) changed by saved flags", loaded ? "save loaded" : "new game", borders, states);
 }
 

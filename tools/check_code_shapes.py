@@ -905,6 +905,20 @@ def check_map_adjacency(img, codes, text_va, text):
     o = img.va2off(g)
     ok = img.d[o:o + 3] == bytes([0x48, 0x8B, 0x41]) and img.d[o + 4:o + 7] == bytes([0x0F, 0xB6, 0x80]) and img.d[o + 0xb] == 0xC3
     r.append(('kSigAdjStateImpassable (state +0x%x -> flag +0x%x)' % (u8(g + 3), u32(g + 7)), ok, hex(st)))
+    # R6: the map lines (updater getter, province refresh thunk) and the resistance refresh.
+    mr, rr, sr = one('kSigAdjMapRefresh'), one('kSigAdjResistRefresh'), one('kSigAdjStateResistance')
+    if not (mr and rr and sr):
+        r.append(('map_adjacency R6 signatures', False, 'missing'))
+        return r
+    get = img.va2off(rel32(img, mr + k['kSigAdjMapGetterCall']))
+    th = img.va2off(rel32(img, mr + k['kSigAdjMapRefreshCall']))
+    ok = img.d[get:get + 3] == bytes([0x48, 0x8B, 0x05]) and img.d[get + 7] == 0xC3 and img.d[th:th + 5] == bytes([0x48, 0x8B, 0x49, 0x08, 0xE9])
+    r.append(('kSigAdjMapRefresh (getter, refresh thunk)', ok, hex(mr)))
+    fn = img.va2off(rel32(img, rr + k['kSigAdjResistRefreshCall']))
+    ok = img.d[fn:fn + 8] == bytes([0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x83, 0x79])
+    r.append(('kSigAdjResistRefresh (occupied +0x%x)' % img.d[fn + 8], ok, hex(rr)))
+    off = u32(sr + k['kSigAdjStateResistanceDisp'])
+    r.append(('kSigAdjStateResistance (state +0x%x)' % off, 0 < off < 0x4000, hex(sr)))
     return r
 
 

@@ -639,6 +639,13 @@ int StateImpassable(int stateId);                // 1, 0, or -1 if no such state
 bool SetStateImpassable(int stateId, bool impassable);
 // Once per game: the states' definition objects are distinct (the flag is per state).
 bool AdjacencySelfCheck(std::string* problem);
+// The game's follow-ups after a change (NOTES.md R6), each optional (false: unresolved, no such
+// province/state, or turned off after a fault). Main thread, in a running game.
+bool HaveAdjacencyMapLines();
+bool HaveAdjacencyResistance();
+bool RefreshProvinceBorders(int provinceId);  // its border lines get their type again (next frame)
+bool RefreshStateBorders(int stateId);        // the same for every province of the state
+bool RefreshStateResistance(int stateId);     // resistance active again from should_initiate_resistance
 
 // --- Province terrain (province_terrain; engine_terrain.cpp, NOTES.md Part P) --------------------
 // A province's terrain category (CTerrainType, common/terrain) is the pointer in its static map
