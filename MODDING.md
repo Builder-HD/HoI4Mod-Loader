@@ -48,7 +48,8 @@ Current features:
 | `equipment_designers` | engine | `hoi4_loader_plugin_equipment_designers` | designer windows for equipment the game gives none (e.g. `type = infantry`, `air_transport`, `convoy`): the tank, plane or ship designer window with the mod's title, slots, stats, experience and hidden elements, defined in `common/hoi4_loader_equipment_designers/`; no script commands, see below |
 | `production_tabs` | engine | `hoi4_loader_plugin_production_tabs` | which archetypes the production screen's "add production line" tabs list (`add` / `remove` per tab), and new tabs with the mod's own buttons, defined in `common/hoi4_loader_production_tabs/`; no script commands, see below |
 | `province_terrain` | engine (needs `lifecycle`) | `hoi4_loader_plugin_province_terrain` | `set_province_terrain`, `reset_province_terrain`, `province_has_terrain`, `state_has_terrain`: change provinces' terrain category at runtime (movement, combat, supply, attrition; not the map's look), saved, see below |
-| `engine_on_actions` | engine (needs `lifecycle`) | `hoi4_loader_plugin_engine_on_actions` | on_actions vanilla never fires: `on_construction_finished`, `on_technology_researched`, `on_battle_started`, `on_battle_won`, `on_battle_lost`, `on_division_trained`, `on_division_destroyed`, and the data commands `constructed_building`, `researched_technology`, `constructed_province`, `battle_province`, see below |
+| `engine_on_actions` | engine (needs `lifecycle`) | `hoi4_loader_plugin_engine_on_actions` | on_actions vanilla never fires: `on_construction_finished`, `on_technology_researched`, `on_battle_started`, `on_battle_won`, `on_battle_lost`, `on_division_trained`, `on_division_destroyed`, `on_naval_battle_won`, `on_naval_battle_lost`, `on_ship_sunk`, `on_decision_taken`, `on_province_captured`, `on_focus_completed`, and the data commands `constructed_building`, `researched_technology`, `taken_decision`, `completed_focus`, `constructed_province`, `battle_province`, `captured_province`, see below |
+| `map_adjacency` | engine (needs `lifecycle`) | `hoi4_loader_plugin_map_adjacency` | `set_province_adjacency`, `reset_province_adjacency`, `province_adjacency_passable`, `set_state_impassable`, `reset_state_impassable`: close and open borders between provinces and whole states at runtime (as `map/adjacencies.csv`'s and `history/states`' impassable), saved, see below |
 | `attention_area` | engine (needs `lifecycle`) | `hoi4_loader_plugin_attention_area` | `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area`: mark any set of provinces on the map (a line and a fill shader each, built-in or a mod's own) and move the camera to it; display only, not saved, see below |
 
 On an unknown build the file tier stays on, the engine tier is off, and `loader.log` lists the
@@ -160,7 +161,8 @@ when the loader is missing or a feature is off. Without them, using a loader tri
 | `equipment_designers` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_equipment_designers.txt` |
 | `production_tabs` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_production_tabs.txt` |
 | `set_province_terrain`, `reset_province_terrain`, `province_has_terrain`, `state_has_terrain` | `scripted_triggers/hoi4_loader_feature_province_terrain.txt` |
-| the engine on_actions, `constructed_building`, `researched_technology`, `constructed_province`, `battle_province` | `scripted_triggers/hoi4_loader_feature_engine_on_actions.txt` |
+| the engine on_actions, `constructed_building`, `researched_technology`, `taken_decision`, `completed_focus`, `constructed_province`, `battle_province`, `captured_province` | `scripted_triggers/hoi4_loader_feature_engine_on_actions.txt` |
+| `set_province_adjacency`, `reset_province_adjacency`, `province_adjacency_passable`, `set_state_impassable`, `reset_state_impassable` | `scripted_triggers/hoi4_loader_feature_map_adjacency.txt` |
 | `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area` | `scripted_triggers/hoi4_loader_feature_attention_area.txt` |
 
 - **Combinations:** a block that combines features needs each feature's stub and guard, e.g.
@@ -1970,6 +1972,71 @@ battles (the Italian-Ethiopian war runs from the start); naval battles and ships
 country, focuses for every country. The decision "Events: France declares war on Italy" starts an
 AI-only naval war; "Events: complete Germany's first economy focus" (Germany only) completes a
 focus through `complete_national_focus`.
+
+## Map connections (`map_adjacency`)
+
+Close and open map connections at runtime: a border between two provinces, as the impassable
+mountains of `map/adjacencies.csv` (the Alps, the Himalayas), and whole states, as the impassable
+states of `history/states` (the Sahara). Vanilla reads both only from the map files and has no
+effect to change them.
+
+```
+# a border between two neighbouring provinces (both directions)
+set_province_adjacency = { province = 6521 neighbour = 375 passable = no }   # closed
+set_province_adjacency = { province = 3641 neighbour = 658 passable = yes }  # open (also a csv impassable one)
+reset_province_adjacency = { province = 6521 neighbour = 375 }               # back to the map's
+
+# a state (state = N, or in a state scope)
+set_state_impassable = { state = 514 impassable = no }
+64 = { set_state_impassable = { impassable = yes } }
+reset_state_impassable = { state = 514 }                                     # back to history/states'
+
+# triggers (guard the loader's one, see "Native script commands")
+hoi4_loader_feature_map_adjacency = yes
+province_adjacency_passable = { province = 6521 neighbour = 375 }
+impassable = yes                                                             # vanilla's state trigger, follows the changes
+```
+
+- **A closed border** works like the csv's `impassable`: no land route across it (the move order
+  is refused: "There is no available land route to this province"; paths go around), no attack
+  across it. Opening a border the map made impassable makes it a plain border. The two provinces
+  must be neighbours on the map (`loader.log` says so otherwise; nothing changes).
+- **An impassable state** works like vanilla's: troops may not enter (the province tooltip says
+  "Impassable: Troops may not enter"). Divisions already inside stay and may leave, as in vanilla.
+- **What follows at once:** the game reads both live, so movement, attacks, the AI and the
+  vanilla `impassable` trigger follow inside the effect. Supply across a closed border: not
+  checked in game yet.
+- **Not the map's look:** the map draws no mountains along a closed border.
+- **Tooltips:** "The border between provinces 6521 and 375 becomes impassable.", "... becomes
+  passable.", "... is restored.", "Brandenburg becomes impassable.", "... becomes passable.", "...
+  gets its original passability back.", "The border between provinces 6521 and 375 is passable".
+  Translatable: `HOI4_LOADER_CLOSE_BORDER`, `HOI4_LOADER_OPEN_BORDER`, `HOI4_LOADER_RESET_BORDER`,
+  `HOI4_LOADER_STATE_IMPASSABLE`, `HOI4_LOADER_STATE_PASSABLE`, `HOI4_LOADER_STATE_IMPASSABLE_RESET`.
+
+**Storage: global flags**, `hoi4_adj_<low>_<high>_<0|1>` per changed border (the lower province id
+first; 1 = passable) and `hoi4_imp_<state>_<0|1>` per changed state (1 = impassable); the effects
+set and clear them, only while something differs from the map. Loading a save applies its flags
+(the most recently set one per border or state). Without the loader, or with the feature off, the
+flags do nothing and the map's borders and states stay: saves stay vanilla.
+
+**Multiplayer:** this changes the game itself (movement, attacks), so **every player needs the
+loader and the mods**. The change runs inside the effect, at the same tick on every machine, and a
+loaded save rebuilds it from the flags. Not tested in multiplayer yet.
+
+**Timing:** as `province_terrain`: after loading a save, the flags are applied when the game is
+entered, after `on_startup`.
+
+**Checks and messages** (`loader.log`):
+- At start: `Map adjacency: neighbours +0x70 (count +0x7c, stride 0x30, id +0x8, type +0x10,
+  impassable 4), state flag +0x30/+0x15c` (the resolved layout).
+- Each game: `map_adjacency: save loaded: 5 border(s) and 0 state(s) changed by saved flags`. If
+  the check that every state has its own flag fails, the feature switches itself off for the session.
+- Each change: `set_province_adjacency: the border 6521-375 is closed`, `set_state_impassable:
+  state 64 is impassable`. Errors: provinces that are no neighbours, a state that does not exist.
+
+**Test mod** (`common/decisions/hoi4_loader_test_adjacency_decisions.txt`, any country): "close
+Berlin's borders" (all five), "open the central Alps 3641-658", "Brandenburg impassable", "North
+Africa passable", "reset all", "status (see game.log)" and "invalid uses (see loader.log)".
 
 ## Attention areas (`attention_area`)
 

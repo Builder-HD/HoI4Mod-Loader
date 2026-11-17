@@ -86,6 +86,20 @@ A–F; NOTES.md has the findings and test results behind each.
   signatures (smoke `2/180`). Checked on 1.19.4.2 and 1.19.5; tested in game on 1.19.5
   (2026-11-17): decisions (player and AI), Italy vs Ethiopia captures, 11 France-Italy naval
   battles and 80 ships sunk, focuses from `complete_national_focus` and the AI's daily progress.
+- **New feature `map_adjacency`** (engine tier; guard `hoi4_loader_feature_map_adjacency`; NOTES.md
+  Part R, MODDING.md "Map connections"). `set_province_adjacency = { province = A neighbour = B
+  passable = no }` closes the border between two neighbouring provinces (both directions) as
+  `map/adjacencies.csv`'s impassable does, `passable = yes` opens it (also a csv impassable one);
+  `reset_province_adjacency` goes back to the map's; trigger `province_adjacency_passable`.
+  `set_state_impassable = { state = N impassable = yes }` (or in a state scope) closes or opens a
+  whole state as `history/states`' impassable; `reset_state_impassable`; vanilla's `impassable`
+  trigger follows. The game reads both live: move orders across a closed border are refused ("no
+  available land route"), troops may not enter a closed state (those inside may leave, as in
+  vanilla). Stored as global flags `hoi4_adj_<low>_<high>_<0|1>` and `hoi4_imp_<state>_<0|1>`,
+  applied when a save is loaded; without the loader saves stay vanilla. Changes the simulation: in
+  multiplayer every player needs the loader. 2 new signatures (smoke `2/182`). Checked on 1.19.4.2
+  and 1.19.5; tested in game on 1.19.5 (2026-11-17): Berlin's borders closed, Brandenburg and North
+  Africa switched, the Alps border opened, save and load.
 - **Native script API:** a Token parameter may be repeated (`repeat = true`, as Int and Block);
   `Args::at` gives the tokens in script order.
 - **Shared code:** `Engine::ProvinceById`, `MapProvinceById`, `StateObjectOwner`,
