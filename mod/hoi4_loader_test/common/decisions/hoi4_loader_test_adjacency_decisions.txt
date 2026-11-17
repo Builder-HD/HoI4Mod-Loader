@@ -8,7 +8,9 @@
 #    what happens to the divisions inside is what the game does with units in impassable states.
 # 4. "Adjacency: North Africa passable": state 514 opens.
 # 5. "Adjacency: reset all": everything back to the map's and history's.
-# 6. "Adjacency: status (see game.log)": logs the four answers ("hoi4_loader_test adj").
+# 6. "Adjacency: status (see game.log)": logs the four answers and whether Brandenburg and North
+#    Africa have active resistance ("hoi4_loader_test adj").
+# The map draws the red impassable lines along closed borders and around impassable states.
 # 7. "Adjacency: invalid uses (see loader.log)": provinces that are no neighbours, a missing state.
 # Save, load: the changes come back (flags hoi4_adj_<low>_<high>_<0|1>, hoi4_imp_<state>_<0|1>).
 hoi4_loader_test_category = {
@@ -93,6 +95,17 @@ hoi4_loader_test_category = {
 				log = "hoi4_loader_test adj North Africa IMPASSABLE"
 			}
 			else = { log = "hoi4_loader_test adj North Africa passable" }
+			# resistance (only in occupied states): vanilla's should_initiate_resistance decides
+			if = {
+				limit = { 64 = { has_active_resistance = yes } }
+				log = "hoi4_loader_test adj Brandenburg resistance ACTIVE"
+			}
+			else = { log = "hoi4_loader_test adj Brandenburg resistance inactive" }
+			if = {
+				limit = { 514 = { has_active_resistance = yes } }
+				log = "hoi4_loader_test adj North Africa resistance ACTIVE"
+			}
+			else = { log = "hoi4_loader_test adj North Africa resistance inactive" }
 		}
 		ai_will_do = { base = 0 }
 	}
