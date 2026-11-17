@@ -7521,5 +7521,28 @@ Parameters and fields to confirm in game (diagnostic dump), then signatures.
   `{int, empty std::string, pointer}` whose object names events (`SEA_japan.1`) and countries: it
   adds an entry to a country's history log, focuses being one kind. The real completion is still to
   find; `on_focus_completed` comes later.
-- **Naval battles and ships sunk:** built, not seen yet (no naval war in the test runs). Naval
-  battles have no `battle_province` (the side does not carry the province).
+- **Naval battles and ships sunk (2026-11-17):**
+  - **Crash, fixed:** `FUN_140dde4a0` has six parameters; the first detour passed four on, so the
+    game read two from the wrong stack slots (access violation at `0x140ddeadc`, inside the
+    original, right after the first ship sank). The detour now takes and passes all six.
+  - **No admiral, no countries:** the side's leaders (`+0x118`, count `+0x124`, tag `leader+0x120`)
+    are empty for fleets without an admiral. Fallback: the side's units read like a land side's
+    (`+0x20`, count `+0x2c`; `CNavalCombatant` and `CLandCombatant` share the `CCombatant` base),
+    under its own SEH so a surprise only drops the fallback. Gave GER/POL right in the owner's test.
+  - **A wrong guess, removed:** the list at side `+0xe8` (count `+0xf4`, the side score
+    `FUN_1416b7fd0` sums it) is not ships with an owner at the unit offset: reading it as such
+    faulted, and the fail-safe turned the whole feature off for that session.
+  - **When the game reports a result:** `0x141660ce0` calls `FUN_1416b9b10` only if neither
+    withdrawal flag (`combat+0x10c`/`+0x10d`) is set and the side scores (`FUN_1416b7fd0(side,
+    0x20)`) differ; otherwise no won/lost for anyone (vanilla's admiral on_actions neither).
+  - **Vanilla overlap:** `FUN_140c748c0` fires `on_navy_leader_won_combat` / `_lost_combat` (or the
+    army ones, by `leader+0xe7c`): ROOT the leader, FROM its country, FROMFROM the combatant. Ours
+    add the country scope, the enemy as FROM and admiral-less fleets.
+  - **In game:** France vs Italy (test decision): 11 battles, each FRA won FROM ITA and ITA lost
+    FROM FRA; 80 ships sunk with the right owner and sinker; no faults. Earlier: GER/POL ships sunk
+    both ways. Naval battles have no `battle_province` (the side does not carry the province).
+- **Impassable borders, seen in passing (for Part R):** a map province's neighbour entries
+  (`+0x70`, stride 0x30, count `+0x7c`; neighbour id at `+8`) have bit `0x04` in the byte at `+0x10`
+  exactly for the `impassable` pairs of `adjacencies.csv` (10825-1991, 10825-8029, 12730-2098,
+  12730-5018), with `-1` at `+0xc` and `+0x28`/`+0x2c` (entries from the csv). Bit `0x02` seen on
+  10825-1898 (not in the csv; meaning unknown).
