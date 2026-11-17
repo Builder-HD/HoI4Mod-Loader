@@ -11,4 +11,16 @@ hoi4_loader_test_category = {
 		}
 		ai_will_do = { base = 0 }
 	}
+	# "Events: France declares war on Italy": an AI-only naval war in the Mediterranean, for
+	# on_naval_battle_won / on_naval_battle_lost / on_ship_sunk (logged for every country).
+	hoi4_loader_events_naval_war = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_engine_on_actions = yes }
+		available = { FRA = { NOT = { has_war_with = ITA } } }
+		complete_effect = {
+			FRA = { declare_war_on = { target = ITA type = annex_everything } }
+		}
+		ai_will_do = { base = 0 }
+	}
 }
