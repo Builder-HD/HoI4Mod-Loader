@@ -7620,3 +7620,31 @@ impassable = yes                                                        # vanill
 - Tests in game: a closed border between two German provinces (movement, attack, supply), a
   vanilla impassable border opened, a closed state with divisions inside, a Sahara state opened,
   save and load, a second game in the session.
+
+## R5: implementation and test (2026-11-17)
+
+- **Resolve:** `kSigAdjAttackCheck` (the attack check, `0x141ad1d2c`): the finder's code gives the
+  list (`+0x70`, count `+0x7c`, id `+8`, stride 0x30), the compare the type byte (`+0x10`) and the
+  impassable value (4). `kSigAdjStateImpassable` (the `impassable` trigger's call): the getter gives
+  `state+0x30 -> +0x15c`. Both unique in 1.19.4.2 and 1.19.5.
+- **Self-check per game:** the first 64 states' definition objects are distinct (the flag is per
+  state). Passed.
+- **Borders:** both entries' type set; closed = 4, opened = the original if passable, else 0.
+  Originals recorded at the first change, restored before every game entry (as province_terrain).
+- **In game (Germany, 1936):**
+  - Berlin's five borders closed: a division in Hamburg gets "There is no available land route to
+    this province" for Berlin; a neighbouring Brandenburg province stays reachable (5 days 15 h).
+    So the game's pathfinding reads the type live (no cached graph).
+  - Brandenburg impassable: the province tooltip shows "Impassable: Troops may not enter" and "Unit
+    cannot enter province"; a division already inside left the state (to Breslau), as vanilla
+    lets units leave. Nothing breaks for units inside.
+  - The triggers: `province_adjacency_passable` and vanilla's `impassable` follow every change
+    (Berlin-375 closed, Alps 3641-658 opened, Brandenburg, North Africa 514 switched), the resets
+    bring back the map's and history's values.
+  - Invalid uses refused with a log line (6521-658 no neighbours, state 99999).
+  - Save and load: the autosave held the five `hoi4_adj_..._0` flags; after a restart and loading it,
+    `save loaded: 5 border(s)` and Berlin unreachable again.
+- **Not checked in game:** supply across a closed border (its reader not identified among the
+  type-4 compares), an attack order across one (the attack check reads the same byte), a second game
+  in the same session (keys do not reach the game's menu from the test tools; the restore is the
+  same pattern as province_terrain's, tested there).
