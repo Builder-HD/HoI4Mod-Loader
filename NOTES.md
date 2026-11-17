@@ -7560,3 +7560,63 @@ Parameters and fields to confirm in game (diagnostic dump), then signatures.
   exactly for the `impassable` pairs of `adjacencies.csv` (10825-1991, 10825-8029, 12730-2098,
   12730-5018), with `-1` at `+0xc` and `+0x28`/`+0x2c` (entries from the csv). Bit `0x02` seen on
   10825-1898 (not in the csv; meaning unknown).
+# Part R: map connections (`map_adjacency`, investigation)
+
+Owner's choice (2026-11-17): close and open map connections at runtime, "like the impassable
+mountains in Austria" and "impassable states like the Sahara desert". Rivers are left for a later
+PR together with loading a new map. Branch `feature/map-adjacency`, from main after #29.
+
+## R1: syntax (approved by the owner, 2026-11-17)
+
+```
+set_province_adjacency = { province = A neighbour = B passable = no }   # or yes: opens it again
+reset_province_adjacency = { province = A neighbour = B }               # back to the map's
+province_adjacency_passable = { province = A neighbour = B }            # trigger
+set_state_impassable = { state = 514 impassable = yes }                 # or a state scope; no opens it
+reset_state_impassable = { state = 514 }                                # back to history/states'
+impassable = yes                                                        # vanilla's state trigger reads it
+```
+
+- Both directions always (A to B and B to A); blocks movement, attacks and supply as the game's own
+  impassable borders and states do.
+- Stored as global flags, applied when a save loads; without the loader the save stays vanilla.
+- Divisions inside a state when it closes: whatever the game does with units in a vanilla
+  impassable state (to check in game); if that breaks, refuse and log.
+
+## R2: what vanilla has
+
+- **Borders:** `map/adjacencies.csv`, `From;To;Type;Through;...`, type `impassable` (93 lines in
+  1.19.5, e.g. the Alps, the Himalayas). Nothing changes them at runtime (no effect).
+- **States:** `impassable = yes` in `history/states/*.txt` (22 states: 514 North Africa, 515 Central
+  Africa, 552 Western Egypt, 273 Italian Africa, ...), the state trigger `impassable = yes/no`.
+  No effect sets it.
+
+## R3: the engine side (1.19.5)
+
+- **Neighbour entries:** a map province's neighbours `+0x70` (stride 0x30, count `+0x7c`); the
+  neighbour's id `+8`, through `+0xc` (-1: none), the **type byte `+0x10`**: the csv parser
+  (`0x140ab3660`) maps `sea` -> 1, a 5-letter type -> 2, an 11-letter one -> 3, `impassable` -> 4;
+  0 = a plain border. In game the four Himalayan csv pairs (10825-1991, 10825-8029, 12730-2098,
+  12730-5018) have type 4 in both provinces' entries. `0x1414a6240(mapProvince, id)` finds an
+  entry.
+- **Readers of type 4 (live, no cache seen yet):** the move check `0x140e98690` (type 4: the
+  "blocked" result), the attack check `0x141ad1ca0` (type 4 or a lake end: no attack across), and
+  about ten more `cmp byte [entry+0x10], 4` (to sort: supply, AI, map).
+- **State impassable:** `0x140a26120(state)` = `*(byte*)(*(state+0x30) + 0x15c)`, about 30
+  callers (the `impassable` trigger `0x1404836b0`, movement, supply, AI, ...): read live. Two
+  writers (`0x142290a99`, `0x1422b8c46`, the state file parser). To check: `state+0x30` is a
+  per-state object (not shared between states).
+- **Not it:** map province `+0xd2` bit 0x2 (the attack check refuses it too) is set at map load from
+  the province definition (`0x140ab5b10`; bit 0x1 = land): most likely lake.
+
+## R4: plan
+
+- `engine_adjacency.cpp`: neighbour entry by (province, neighbour) through the game's own finder,
+  read/write the type byte; the state flag's object and offset from the getter's code.
+- The type byte and the state flag live in the static map/state data, which outlives a game:
+  originals recorded at the first change, restored before every game entry, the save's flags
+  applied after it (as `province_terrain`).
+- Flags: `hoi4_adj_<A>_<B>_<0|1>` (A < B; 1 = passable), `hoi4_imp_<state>_<0|1>`.
+- Tests in game: a closed border between two German provinces (movement, attack, supply), a
+  vanilla impassable border opened, a closed state with divisions inside, a Sahara state opened,
+  save and load, a second game in the session.
