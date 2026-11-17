@@ -1318,6 +1318,18 @@ static const size_t kCodePtabScriptedTemplateDisp = 0xc, kCodePtabScriptedEvalSl
 SIG(kSigTerrainCombatLocation, "48 89 51 ?? 48 8B 82 ?? ?? ?? ?? 48 8B 90 ?? ?? ?? ?? 48 89 51 ?? C3")
 static const size_t kSigTerrainCombatProvince = 3, kSigTerrainCombatMap = 7, kSigTerrainCombatTerrain = 0xe,
                     kSigTerrainCombatCopy = 0x15;
+
+// --- map_adjacency (NOTES.md Part R) -----------------------------------------------------------
+// Can a unit attack across a border (0x141ad1ca0, at 0x141ad1d2c): the neighbour finder
+// 0x1414a6240(mapProvince, id) (call +0x10; its code gives the list: count [disp8 +3], array
+// [disp8 +0xe], id [disp8 +0x18], stride [imm8 +0x2d]), then the entry's type byte [disp8 +0x17]
+// compared with the impassable type [imm8 +0x18] (4, the csv's "impassable").
+SIG(kSigAdjAttackCheck, "48 8B BF ?? ?? ?? ?? 8B 93 ?? ?? ?? ?? 48 8B CF E8 ?? ?? ?? ?? 80 78 ?? 04 74 ?? F6 87 ?? ?? ?? ?? 02")
+static const size_t kSigAdjFindCall = 0x10, kSigAdjTypeDisp = 0x17;
+// The state trigger impassable (CIsImpassableTrigger slot 22, at 0x1404837e3): its getter (call +9)
+// is mov rax, [rcx+def]; movzx eax, byte [rax+flag]; ret (0x140a26120).
+SIG(kSigAdjStateImpassable, "48 8B 0C C8 48 85 C9 74 ?? E8 ?? ?? ?? ?? 3A 46 ?? 75 ?? B0 01")
+static const size_t kSigAdjStateGetterCall = 9;
 // A province's supply value (0x140eee51c): province->[disp32 +3] (map province)->[disp32 +0xa]
 // (terrain); later the province's state province->[disp32 +0x28] and its province count
 // state->[disp8 +0x3a].
