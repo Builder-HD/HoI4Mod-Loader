@@ -91,6 +91,14 @@ on_actions = {
 			}
 		}
 	}
+	on_focus_completed = {
+		effect = {
+			# every country (one focus every few weeks each)
+			log = "hoi4_loader_test ev on_focus_completed: ROOT [ROOT.GetTag]"
+			if = { limit = { completed_focus = GER_prioritize_economic_growth } log = "hoi4_loader_test ev   it is GER_prioritize_economic_growth" }
+			if = { limit = { completed_focus = ITA_ethiopian_war_logistics_bba } log = "hoi4_loader_test ev   it is ITA_ethiopian_war_logistics_bba" }
+		}
+	}
 	on_province_captured = {
 		effect = {
 			if = {

@@ -13,6 +13,16 @@ hoi4_loader_test_category = {
 	}
 	# "Events: France declares war on Italy": an AI-only naval war in the Mediterranean, for
 	# on_naval_battle_won / on_naval_battle_lost / on_ship_sunk (logged for every country).
+	# "Events: complete Germany's first economy focus": complete_national_focus, so
+	# on_focus_completed fires at once (the daily progress fires it for every country too).
+	hoi4_loader_events_complete_focus = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_engine_on_actions = yes tag = GER }
+		available = { NOT = { has_completed_focus = GER_prioritize_economic_growth } }
+		complete_effect = { complete_national_focus = GER_prioritize_economic_growth }
+		ai_will_do = { base = 0 }
+	}
 	hoi4_loader_events_naval_war = {
 		icon = generic_research
 		cost = 0
