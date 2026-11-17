@@ -7701,3 +7701,12 @@ Owner's test of #30: supply across a closed border is blocked as it should be. T
 
 **When:** after each change; in OnGameEntered for the save's flags and for whatever OnGameEntering
 restored (the map graphics and their cached types may outlive a game).
+
+**In game (1.19.5, the owner's France save with 6 borders and 2 states changed):** `map lines yes,
+resistance +0x268` resolved; after loading, Berlin's closed borders and Brandenburg's outline had
+the red lines. "Reset all" (paused): the lines went away in the next frame. "Close Berlin's
+borders": Berlin's ring came back; "Brandenburg impassable": the state's outline came back. Status:
+both states' resistance inactive (neither is occupied in that save, as expected). No faults. Not
+checked in game: resistance in an occupied state that opens or closes (needs a war; the owner's
+test). Seen on the way: between two impassable states (Libyan Desert and the French side) vanilla
+draws no red line, only the country border, as the type function says.

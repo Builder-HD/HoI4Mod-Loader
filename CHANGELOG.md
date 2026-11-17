@@ -95,11 +95,15 @@ A–F; NOTES.md has the findings and test results behind each.
   whole state as `history/states`' impassable; `reset_state_impassable`; vanilla's `impassable`
   trigger follows. The game reads both live: move orders across a closed border are refused ("no
   available land route"), troops may not enter a closed state (those inside may leave, as in
-  vanilla). Stored as global flags `hoi4_adj_<low>_<high>_<0|1>` and `hoi4_imp_<state>_<0|1>`,
-  applied when a save is loaded; without the loader saves stay vanilla. Changes the simulation: in
-  multiplayer every player needs the loader. 2 new signatures (smoke `2/182`). Checked on 1.19.4.2
-  and 1.19.5; tested in game on 1.19.5 (2026-11-17): Berlin's borders closed, Brandenburg and North
-  Africa switched, the Alps border opened, save and load.
+  vanilla), supply follows. The map's red impassable lines are redrawn at once (closed borders,
+  states made impassable; opened ones lose them), and a state's resistance is checked again through
+  vanilla's `should_initiate_resistance` after each change (an occupied state that opens gets
+  resistance, one that closes loses it). Stored as global flags `hoi4_adj_<low>_<high>_<0|1>` and
+  `hoi4_imp_<state>_<0|1>`, applied when a save is loaded; without the loader saves stay vanilla.
+  Changes the simulation: in multiplayer every player needs the loader. 5 new signatures (smoke
+  `2/185`). Checked on 1.19.4.2 and 1.19.5; tested in game on 1.19.5 (2026-11-17): Berlin's borders
+  closed, Brandenburg and North Africa switched, the Alps border opened, save and load, supply (by
+  the owner), the red lines appearing and going away live and after loading.
 - **Native script API:** a Token parameter may be repeated (`repeat = true`, as Int and Block);
   `Args::at` gives the tokens in script order.
 - **Shared code:** `Engine::ProvinceById`, `MapProvinceById`, `StateObjectOwner`,

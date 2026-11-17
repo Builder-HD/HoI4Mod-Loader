@@ -2003,10 +2003,18 @@ impassable = yes                                                             # v
   must be neighbours on the map (`loader.log` says so otherwise; nothing changes).
 - **An impassable state** works like vanilla's: troops may not enter (the province tooltip says
   "Impassable: Troops may not enter"). Divisions already inside stay and may leave, as in vanilla.
-- **What follows at once:** the game reads both live, so movement, attacks, the AI and the
-  vanilla `impassable` trigger follow inside the effect. Supply across a closed border: not
-  checked in game yet.
-- **Not the map's look:** the map draws no mountains along a closed border.
+- **What follows at once:** the game reads both live, so movement, attacks, supply, the AI and
+  the vanilla `impassable` trigger follow inside the effect.
+- **The map's lines:** the red impassable border lines follow at once (next frame, also while
+  paused): along a closed border, around a state made impassable; they go away when a border or
+  state opens. The game draws them with its own rules: a border gets them if it is closed or if
+  exactly one side is in an impassable state (between two impassable states there are none, as in
+  vanilla). The terrain itself does not change (no mountains along a closed border).
+- **Resistance:** vanilla starts resistance through the scripted trigger `should_initiate_resistance`
+  (`common/scripted_triggers/00_resistance_initiate_triggers.txt`, which begins with
+  `impassable = no`). After every state change the loader lets the game check that trigger again
+  for the state, so an occupied state that opens gets its resistance (as if it had been passable
+  when it was taken), one that closes loses it. Mods that change the trigger keep their rules.
 - **Tooltips:** "The border between provinces 6521 and 375 becomes impassable.", "... becomes
   passable.", "... is restored.", "Brandenburg becomes impassable.", "... becomes passable.", "...
   gets its original passability back.", "The border between provinces 6521 and 375 is passable".
