@@ -497,12 +497,24 @@ void FlushPendingNaval() {
     RecordNaval(g_pendingSide, 0);
 }
 
+// No admiral: the owners of the side's units, read like a land side's (CNavalCombatant and
+// CLandCombatant share the CCombatant base; gave the right countries in a test). Its own SEH, so a
+// surprise here only drops this fallback.
+int NavalFleetTags(const void* side, int* tags, int max) {
+    __try {
+        return SideTags(side, tags, max);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+
 void* __fastcall NavalSideDetour(void* side, void* won, void* c, void* d) {
     NavalSide s;
     if (Active() && side) {
         s.n = NavalSideTags(side, s.tags, 16);
         s.won = ((uintptr_t)won & 0xff) != 0;
     }
+    if (Active() && side && s.n == 0 && g_sideUnits) s.n = NavalFleetTags(side, s.tags, 16);
     void* r = g_origNavalSide(side, won, c, d);
     if (s.n > 0) {
         if (g_havePending && g_pendingSide.won != s.won) {
