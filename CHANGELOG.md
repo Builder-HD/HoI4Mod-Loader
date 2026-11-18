@@ -4,7 +4,7 @@ Release versions name the DLL package. The script version is the number script r
 `global.hoi4_loader_version` (MODDING.md "Versions and compatibility"). Development went in parts
 A–F; NOTES.md has the findings and test results behind each.
 
-## Unreleased
+## 0.7.0-beta (2026-11-18), script version 3
 
 - **New feature `equipment_designers`** (engine tier; guard `hoi4_loader_feature_equipment_designers`;
   no script commands; NOTES.md Part N, MODDING.md "Equipment designers"). Modular equipment the game
