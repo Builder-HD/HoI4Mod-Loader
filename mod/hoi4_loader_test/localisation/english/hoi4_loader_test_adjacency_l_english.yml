@@ -1,0 +1,8 @@
+﻿l_english:
+ hoi4_loader_adj_close_berlin:0 "Adjacency: close Berlin's borders"
+ hoi4_loader_adj_open_alps:0 "Adjacency: open the central Alps 3641-658"
+ hoi4_loader_adj_brandenburg_impassable:0 "Adjacency: Brandenburg impassable"
+ hoi4_loader_adj_north_africa_passable:0 "Adjacency: North Africa passable"
+ hoi4_loader_adj_reset:0 "Adjacency: reset all"
+ hoi4_loader_adj_status:0 "Adjacency: status (see game.log)"
+ hoi4_loader_adj_invalid:0 "Adjacency: invalid uses (see loader.log)"

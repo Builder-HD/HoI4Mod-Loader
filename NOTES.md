@@ -7560,3 +7560,153 @@ Parameters and fields to confirm in game (diagnostic dump), then signatures.
   exactly for the `impassable` pairs of `adjacencies.csv` (10825-1991, 10825-8029, 12730-2098,
   12730-5018), with `-1` at `+0xc` and `+0x28`/`+0x2c` (entries from the csv). Bit `0x02` seen on
   10825-1898 (not in the csv; meaning unknown).
+# Part R: map connections (`map_adjacency`, investigation)
+
+Owner's choice (2026-11-17): close and open map connections at runtime, "like the impassable
+mountains in Austria" and "impassable states like the Sahara desert". Rivers are left for a later
+PR together with loading a new map. Branch `feature/map-adjacency`, from main after #29.
+
+## R1: syntax (approved by the owner, 2026-11-17)
+
+```
+set_province_adjacency = { province = A neighbour = B passable = no }   # or yes: opens it again
+reset_province_adjacency = { province = A neighbour = B }               # back to the map's
+province_adjacency_passable = { province = A neighbour = B }            # trigger
+set_state_impassable = { state = 514 impassable = yes }                 # or a state scope; no opens it
+reset_state_impassable = { state = 514 }                                # back to history/states'
+impassable = yes                                                        # vanilla's state trigger reads it
+```
+
+- Both directions always (A to B and B to A); blocks movement, attacks and supply as the game's own
+  impassable borders and states do.
+- Stored as global flags, applied when a save loads; without the loader the save stays vanilla.
+- Divisions inside a state when it closes: whatever the game does with units in a vanilla
+  impassable state (to check in game); if that breaks, refuse and log.
+
+## R2: what vanilla has
+
+- **Borders:** `map/adjacencies.csv`, `From;To;Type;Through;...`, type `impassable` (93 lines in
+  1.19.5, e.g. the Alps, the Himalayas). Nothing changes them at runtime (no effect).
+- **States:** `impassable = yes` in `history/states/*.txt` (22 states: 514 North Africa, 515 Central
+  Africa, 552 Western Egypt, 273 Italian Africa, ...), the state trigger `impassable = yes/no`.
+  No effect sets it.
+
+## R3: the engine side (1.19.5)
+
+- **Neighbour entries:** a map province's neighbours `+0x70` (stride 0x30, count `+0x7c`); the
+  neighbour's id `+8`, through `+0xc` (-1: none), the **type byte `+0x10`**: the csv parser
+  (`0x140ab3660`) maps `sea` -> 1, a 5-letter type -> 2, an 11-letter one -> 3, `impassable` -> 4;
+  0 = a plain border. In game the four Himalayan csv pairs (10825-1991, 10825-8029, 12730-2098,
+  12730-5018) have type 4 in both provinces' entries. `0x1414a6240(mapProvince, id)` finds an
+  entry.
+- **Readers of type 4 (live, no cache seen yet):** the move check `0x140e98690` (type 4: the
+  "blocked" result), the attack check `0x141ad1ca0` (type 4 or a lake end: no attack across), and
+  about ten more `cmp byte [entry+0x10], 4` (to sort: supply, AI, map).
+- **State impassable:** `0x140a26120(state)` = `*(byte*)(*(state+0x30) + 0x15c)`, about 30
+  callers (the `impassable` trigger `0x1404836b0`, movement, supply, AI, ...): read live. Two
+  writers (`0x142290a99`, `0x1422b8c46`, the state file parser). To check: `state+0x30` is a
+  per-state object (not shared between states).
+- **Not it:** map province `+0xd2` bit 0x2 (the attack check refuses it too) is set at map load from
+  the province definition (`0x140ab5b10`; bit 0x1 = land): most likely lake.
+
+## R4: plan
+
+- `engine_adjacency.cpp`: neighbour entry by (province, neighbour) through the game's own finder,
+  read/write the type byte; the state flag's object and offset from the getter's code.
+- The type byte and the state flag live in the static map/state data, which outlives a game:
+  originals recorded at the first change, restored before every game entry, the save's flags
+  applied after it (as `province_terrain`).
+- Flags: `hoi4_adj_<A>_<B>_<0|1>` (A < B; 1 = passable), `hoi4_imp_<state>_<0|1>`.
+- Tests in game: a closed border between two German provinces (movement, attack, supply), a
+  vanilla impassable border opened, a closed state with divisions inside, a Sahara state opened,
+  save and load, a second game in the session.
+
+## R5: implementation and test (2026-11-17)
+
+- **Resolve:** `kSigAdjAttackCheck` (the attack check, `0x141ad1d2c`): the finder's code gives the
+  list (`+0x70`, count `+0x7c`, id `+8`, stride 0x30), the compare the type byte (`+0x10`) and the
+  impassable value (4). `kSigAdjStateImpassable` (the `impassable` trigger's call): the getter gives
+  `state+0x30 -> +0x15c`. Both unique in 1.19.4.2 and 1.19.5.
+- **Self-check per game:** the first 64 states' definition objects are distinct (the flag is per
+  state). Passed.
+- **Borders:** both entries' type set; closed = 4, opened = the original if passable, else 0.
+  Originals recorded at the first change, restored before every game entry (as province_terrain).
+- **In game (Germany, 1936):**
+  - Berlin's five borders closed: a division in Hamburg gets "There is no available land route to
+    this province" for Berlin; a neighbouring Brandenburg province stays reachable (5 days 15 h).
+    So the game's pathfinding reads the type live (no cached graph).
+  - Brandenburg impassable: the province tooltip shows "Impassable: Troops may not enter" and "Unit
+    cannot enter province"; a division already inside left the state (to Breslau), as vanilla
+    lets units leave. Nothing breaks for units inside.
+  - The triggers: `province_adjacency_passable` and vanilla's `impassable` follow every change
+    (Berlin-375 closed, Alps 3641-658 opened, Brandenburg, North Africa 514 switched), the resets
+    bring back the map's and history's values.
+  - Invalid uses refused with a log line (6521-658 no neighbours, state 99999).
+  - Save and load: the autosave held the five `hoi4_adj_..._0` flags; after a restart and loading it,
+    `save loaded: 5 border(s)` and Berlin unreachable again.
+- **Not checked in game:** supply across a closed border (its reader not identified among the
+  type-4 compares), an attack order across one (the attack check reads the same byte), a second game
+  in the same session (keys do not reach the game's menu from the test tools; the restore is the
+  same pattern as province_terrain's, tested there).
+
+## R6: owner's test, map lines and resistance (2026-11-17)
+
+Owner's test of #30: supply across a closed border is blocked as it should be. Two gaps:
+- **No red lines.** Vanilla draws the impassable border texture (`map/terrain/border_impassable_*.dds`)
+  along the csv's impassable borders and around impassable states. A closed border, a state made
+  impassable, or a vanilla impassable state made passable keeps its old lines.
+- **Resistance.** Impassable states have none (good). Brandenburg made impassable: resistance
+  gone, passable again: back. A vanilla impassable state made passable: resistance stays gone.
+
+**Lines (1.19.5):**
+- Border segments: an array at `borders+0x49b8` (stride 0x14: province index a `+0`, b `+2`, a flag
+  `+0x12`), a cached type byte per segment at `borders+0x5ca8`. The type function `0x14130b200(a, b,
+  flag)` (game provinces) reads everything live: land to land, neighbour entry type 4 -> 3
+  (impassable), exactly one side in an impassable state (`0x140ef0160` -> the state getter) -> 3;
+  else 2 country (controllers differ), 1 state, 0 province; sea cases 4/5. Texture order (`0x1412ed350`):
+  province, state, country, impassable, sea, sea_region.
+- The cache is refreshed per segment (`0x14130eb90`) from a dirty set: the tracker
+  (`0x141a6c8e0(tracker, province)` adds a province's segments, `0x141a6ca80` recomputes them once per
+  frame, called from the map update `0x140ab8b40`).
+- The game's own path when a province changes controller (`0x140ef1860`, at `0x140ef213c`): `call
+  0x140ab7ea0` (returns the map updater global) then `call 0x140ab8890(updater, province)` (thunk:
+  `mov rcx,[rcx+8]; jmp 0x140e847d0`), which marks the province's segments dirty and its map-mode
+  colour for an update. **Fix:** the loader makes the same call for both provinces of a changed
+  border and for every province of a changed state. The game then recomputes those segments with its
+  own rules, so the lines follow vanilla's: closed borders and impassable states get them, opened ones
+  lose them.
+
+**Resistance (1.19.5):**
+- Vanilla starts resistance by script: `should_initiate_resistance` (`common/scripted_triggers/
+  00_resistance_initiate_triggers.txt`) begins with `impassable = no`. The state's resistance object
+  is `state+0x268`; its "active" byte `+0x208` is set from the trigger (`0x141020a40`: force enable /
+  disable lists, then the trigger) when the controller changes (`0x14101f5e0`) or when the occupied
+  country changes (the periodic `0x14101f3f0`, which only restarts if the current occupied country
+  is invalid). So a state impassable when it was taken stays inactive after it opens; Brandenburg
+  comes back because its byte was set before and the display reads the trigger live.
+- `0x141020d90(resistance)`: `+0x50` (the occupied country) <= 0 -> inactive; else `+0x208` = the
+  validity check (the trigger). Called by the game after a restart. **Fix:** after a state's flag
+  changes (and after the save's flags are applied), the loader calls it for that state: the trigger
+  decides as vanilla would at capture. The resistance value itself is the game's (set at capture).
+- Not done: `start_resistance`'s full restart (it resets resistance and compliance to the capture
+  values); the refresh keeps them, as Brandenburg's case shows the owner expects.
+
+**Signatures** (unique in 1.19.4.2 and 1.19.5):
+- `kSigAdjMapRefresh` at the controller change: the getter call `+0x1b` (checked: `48 8B 05 rel32
+  C3` -> the updater global), the thunk call `+0x2a` (checked: `48 8B 49 08 E9`).
+- `kSigAdjResistRefresh` in `0x14101f3f0`: the refresh call `+0x1b` (checked: `40 53 48 83 EC 20 83
+  79`).
+- `kSigAdjStateResistance` in the controller change: `lea rcx, [rdi+0x268]`, disp `+3`.
+- Without them the feature keeps working without the lines or the resistance refresh (logged).
+
+**When:** after each change; in OnGameEntered for the save's flags and for whatever OnGameEntering
+restored (the map graphics and their cached types may outlive a game).
+
+**In game (1.19.5, the owner's France save with 6 borders and 2 states changed):** `map lines yes,
+resistance +0x268` resolved; after loading, Berlin's closed borders and Brandenburg's outline had
+the red lines. "Reset all" (paused): the lines went away in the next frame. "Close Berlin's
+borders": Berlin's ring came back; "Brandenburg impassable": the state's outline came back. Status:
+both states' resistance inactive (neither is occupied in that save, as expected). No faults. Not
+checked in game: resistance in an occupied state that opens or closes (needs a war; the owner's
+test). Seen on the way: between two impassable states (Libyan Desert and the French side) vanilla
+draws no red line, only the country border, as the type function says.

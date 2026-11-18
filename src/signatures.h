@@ -1318,6 +1318,31 @@ static const size_t kCodePtabScriptedTemplateDisp = 0xc, kCodePtabScriptedEvalSl
 SIG(kSigTerrainCombatLocation, "48 89 51 ?? 48 8B 82 ?? ?? ?? ?? 48 8B 90 ?? ?? ?? ?? 48 89 51 ?? C3")
 static const size_t kSigTerrainCombatProvince = 3, kSigTerrainCombatMap = 7, kSigTerrainCombatTerrain = 0xe,
                     kSigTerrainCombatCopy = 0x15;
+
+// --- map_adjacency (NOTES.md Part R) -----------------------------------------------------------
+// Can a unit attack across a border (0x141ad1ca0, at 0x141ad1d2c): the neighbour finder
+// 0x1414a6240(mapProvince, id) (call +0x10; its code gives the list: count [disp8 +3], array
+// [disp8 +0xe], id [disp8 +0x18], stride [imm8 +0x2d]), then the entry's type byte [disp8 +0x17]
+// compared with the impassable type [imm8 +0x18] (4, the csv's "impassable").
+SIG(kSigAdjAttackCheck, "48 8B BF ?? ?? ?? ?? 8B 93 ?? ?? ?? ?? 48 8B CF E8 ?? ?? ?? ?? 80 78 ?? 04 74 ?? F6 87 ?? ?? ?? ?? 02")
+static const size_t kSigAdjFindCall = 0x10, kSigAdjTypeDisp = 0x17;
+// The state trigger impassable (CIsImpassableTrigger slot 22, at 0x1404837e3): its getter (call +9)
+// is mov rax, [rcx+def]; movzx eax, byte [rax+flag]; ret (0x140a26120).
+SIG(kSigAdjStateImpassable, "48 8B 0C C8 48 85 C9 74 ?? E8 ?? ?? ?? ?? 3A 46 ?? 75 ?? B0 01")
+static const size_t kSigAdjStateGetterCall = 9;
+// A province's controller change (0x140ef2121, NOTES.md R6): after the map's controller update, the
+// map updater getter (call +0x1b: mov rax, [rip+global]; ret) and the province refresh (call +0x2a,
+// (updater, CProvince): mov rcx, [rcx+8]; jmp ...), which marks the province's border segments for
+// the per-frame type update.
+SIG(kSigAdjMapRefresh, "48 8B 05 ?? ?? ?? ?? 48 8B 88 ?? ?? ?? ?? 48 8B 01 4C 8D 45 ?? 49 8B D7 FF 50 10 E8 ?? ?? ?? ?? 4C 8D 45 ?? 49 8B D7 48 8B C8 E8")
+static const size_t kSigAdjMapGetterCall = 0x1b, kSigAdjMapRefreshCall = 0x2a;
+// The periodic resistance check (0x14101f475): after a restart, the refresh of the active flag
+// (call +0x1b, (resistance)): occupied country <= 0 -> inactive, else the validity check.
+SIG(kSigAdjResistRefresh, "48 8B 57 08 4C 8D 44 24 ?? 48 81 C2 ?? ?? ?? ?? 48 8B CF E8 ?? ?? ?? ?? 48 8B CF E8 ?? ?? ?? ?? 80 BF ?? ?? ?? ?? 00")
+static const size_t kSigAdjResistRefreshCall = 0x1b;
+// The state controller change (0x140a28924): lea rcx, [rdi+resistance] (disp32 +3) before the restart.
+SIG(kSigAdjStateResistance, "48 8D 8F ?? ?? ?? ?? 39 B7 ?? ?? ?? ?? 7F ?? 89 B5 ?? ?? ?? ?? 4C 8D 85 ?? ?? ?? ?? 48 8D 95 ?? ?? ?? ?? E8")
+static const size_t kSigAdjStateResistanceDisp = 3;
 // A province's supply value (0x140eee51c): province->[disp32 +3] (map province)->[disp32 +0xa]
 // (terrain); later the province's state province->[disp32 +0x28] and its province count
 // state->[disp8 +0x3a].

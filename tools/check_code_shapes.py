@@ -215,6 +215,7 @@ def check(path, codes):
     results += check_production_tabs(img, codes, text_va, text)
     results += check_province_terrain(img, codes, text_va, text)
     results += check_engine_on_actions(img, codes, text_va, text)
+    results += check_map_adjacency(img, codes, text_va, text)
     return results
 
 
@@ -873,6 +874,52 @@ def check_production_tabs(img, codes, text_va, text):
                      u8(ev + k['kCodePtabScriptedTemplateDisp']) if ok else -1, u8(ev + k['kCodePtabScriptedEvalSlot']) if ok else -1),
                     ok, hex(st or 0)))
     return results
+
+
+def check_map_adjacency(img, codes, text_va, text):
+    """map_adjacency (NOTES.md Part R): the neighbour finder's list layout and the border type compare
+    (kSigAdjAttackCheck), the state impassable getter (kSigAdjStateImpassable), as engine_adjacency.cpp
+    reads them."""
+    hdr = pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h'
+    sigs, _ = cs.load_signatures(hdr)
+    sigs, k = dict(sigs), load_constants(hdr)
+    u8 = lambda va: img.d[img.va2off(va)]
+    u32 = lambda va: struct.unpack_from('<I', img.d, img.va2off(va))[0]
+
+    def one(name):
+        m = [text_va + x.start() for x in cs.compile_pattern(sigs[name]).finditer(text)]
+        return m[0] if len(m) == 1 else None
+
+    at, st = one('kSigAdjAttackCheck'), one('kSigAdjStateImpassable')
+    if not (at and st):
+        return [('map_adjacency signatures', False, 'missing')]
+    r = []
+    f = rel32(img, at + k['kSigAdjFindCall'])
+    ok = (img.d[img.va2off(f):img.va2off(f) + 3] == bytes([0x48, 0x63, 0x41]) and
+          img.d[img.va2off(f) + 0xb:img.va2off(f) + 0xe] == bytes([0x4C, 0x8B, 0x59]) and
+          img.d[img.va2off(f) + 0x2a:img.va2off(f) + 0x2d] == bytes([0x48, 0x83, 0xC0]))
+    r.append(('kSigAdjAttackCheck (neighbours +0x%x, count +0x%x, id +0x%x, stride 0x%x, type +0x%x == %d)' %
+              (u8(f + 0xe), u8(f + 3), u8(f + 0x18), u8(f + 0x2d), u8(at + k['kSigAdjTypeDisp']), u8(at + k['kSigAdjTypeDisp'] + 1)),
+              ok and u8(f + 0x2d) >= 0x10, hex(at)))
+    g = rel32(img, st + k['kSigAdjStateGetterCall'])
+    o = img.va2off(g)
+    ok = img.d[o:o + 3] == bytes([0x48, 0x8B, 0x41]) and img.d[o + 4:o + 7] == bytes([0x0F, 0xB6, 0x80]) and img.d[o + 0xb] == 0xC3
+    r.append(('kSigAdjStateImpassable (state +0x%x -> flag +0x%x)' % (u8(g + 3), u32(g + 7)), ok, hex(st)))
+    # R6: the map lines (updater getter, province refresh thunk) and the resistance refresh.
+    mr, rr, sr = one('kSigAdjMapRefresh'), one('kSigAdjResistRefresh'), one('kSigAdjStateResistance')
+    if not (mr and rr and sr):
+        r.append(('map_adjacency R6 signatures', False, 'missing'))
+        return r
+    get = img.va2off(rel32(img, mr + k['kSigAdjMapGetterCall']))
+    th = img.va2off(rel32(img, mr + k['kSigAdjMapRefreshCall']))
+    ok = img.d[get:get + 3] == bytes([0x48, 0x8B, 0x05]) and img.d[get + 7] == 0xC3 and img.d[th:th + 5] == bytes([0x48, 0x8B, 0x49, 0x08, 0xE9])
+    r.append(('kSigAdjMapRefresh (getter, refresh thunk)', ok, hex(mr)))
+    fn = img.va2off(rel32(img, rr + k['kSigAdjResistRefreshCall']))
+    ok = img.d[fn:fn + 8] == bytes([0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x83, 0x79])
+    r.append(('kSigAdjResistRefresh (occupied +0x%x)' % img.d[fn + 8], ok, hex(rr)))
+    off = u32(sr + k['kSigAdjStateResistanceDisp'])
+    r.append(('kSigAdjStateResistance (state +0x%x)' % off, 0 < off < 0x4000, hex(sr)))
+    return r
 
 
 def check_province_terrain(img, codes, text_va, text):

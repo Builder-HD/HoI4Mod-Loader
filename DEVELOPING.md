@@ -66,6 +66,8 @@ src/plugin_province_terrain.cpp  province_terrain feature (effects, triggers, ho
 src/engine_terrain.cpp        engine access for province_terrain (categories, masks, battles, supply)
 src/plugin_engine_on_actions.cpp  engine_on_actions feature (on_action names, data commands)
 src/engine_events.cpp         engine access for engine_on_actions (event hooks, marked passes, firing order)
+src/plugin_map_adjacency.cpp  map_adjacency feature (border and state effects, trigger, hoi4_adj/hoi4_imp flags, game entry)
+src/engine_adjacency.cpp      engine access for map_adjacency (neighbour entries' border type, state impassable flag)
 src/script_tree.cpp           the Paradox script reader shared by the definition parsers
 src/plugin_time_control.cpp   time_control feature (speed lock, pause block, hidden date; saved as flags)
 src/engine_data.cpp           engine access for the data triggers (read-only game state)

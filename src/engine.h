@@ -626,6 +626,27 @@ using AirPick_t = void* (*)(int slot, const void* attackers, const void* defende
 bool HookAirScenarios(AirBuilt_t built, AirPick_t pick);  // all hooks or none
 void DisableAirScenarios();  // after a fault: the game's own templates from now on
 
+// --- Map connections (map_adjacency; engine_adjacency.cpp, NOTES.md Part R) ---------------------
+// A border's type is a byte in each of the two provinces' neighbour entries (0 plain, 1 sea, ...,
+// ImpassableBorderType() = the csv's "impassable"); a state's impassable flag is a byte in its
+// definition. Both are static data the game reads live. All functions here: main thread.
+void ResolveAdjacency();  // after ResolveProvinceData
+bool HaveAdjacency();
+int ImpassableBorderType();
+int BorderType(int a, int b);                    // a's entry for neighbour b; -1 if b is no neighbour of a
+bool SetBorderType(int a, int b, int type);      // a's entry only (callers set both directions)
+int StateImpassable(int stateId);                // 1, 0, or -1 if no such state
+bool SetStateImpassable(int stateId, bool impassable);
+// Once per game: the states' definition objects are distinct (the flag is per state).
+bool AdjacencySelfCheck(std::string* problem);
+// The game's follow-ups after a change (NOTES.md R6), each optional (false: unresolved, no such
+// province/state, or turned off after a fault). Main thread, in a running game.
+bool HaveAdjacencyMapLines();
+bool HaveAdjacencyResistance();
+bool RefreshProvinceBorders(int provinceId);  // its border lines get their type again (next frame)
+bool RefreshStateBorders(int stateId);        // the same for every province of the state
+bool RefreshStateResistance(int stateId);     // resistance active again from should_initiate_resistance
+
 // --- Province terrain (province_terrain; engine_terrain.cpp, NOTES.md Part P) --------------------
 // A province's terrain category (CTerrainType, common/terrain) is the pointer in its static map
 // province; the game also keeps per-state and per-country terrain masks (has_terrain) and a copy

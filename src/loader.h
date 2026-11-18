@@ -156,5 +156,6 @@ bool EquipmentDesignersInit();  // plugin_equipment_designers.cpp
 bool ProductionTabsInit();      // plugin_production_tabs.cpp
 bool ProvinceTerrainInit();     // plugin_province_terrain.cpp
 bool EngineOnActionsInit();     // plugin_engine_on_actions.cpp
+bool MapAdjacencyInit();        // plugin_map_adjacency.cpp
 bool EquipmentConversionInit();  // plugin_equipment_conversion.cpp
 bool AttentionAreaInit();        // plugin_attention_area.cpp

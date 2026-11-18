@@ -25,6 +25,7 @@ hoi4_loader_init = {
 	clr_global_flag = hoi4_loader_plugin_production_tabs
 	clr_global_flag = hoi4_loader_plugin_province_terrain
 	clr_global_flag = hoi4_loader_plugin_engine_on_actions
+	clr_global_flag = hoi4_loader_plugin_map_adjacency
 	clr_global_flag = hoi4_loader_plugin_equipment_conversion
 	clr_global_flag = hoi4_loader_plugin_attention_area
 }
