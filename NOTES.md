@@ -52,6 +52,7 @@ Addresses below are for orientation in the named build only. Code uses the signa
 | **1.19.3** | **vanilla, from Steam "Verify integrity" at 23:01** | `7dc947be34970da1e1c787bcddbe7f62b610ff258aebf8f06aa8b348f3a031d5` |
 | **1.19.4.2** | **vanilla (`v1.19.4.2.2da5`), Steam update of 2026-11-05** | `bccc62909b6a1ec2c1d5a46ef18608e4d0c7cdc89ad341b7402a23c40f7a8037` |
 | **1.19.5** | **vanilla (`v1.19.5.0.7c6c`), Steam update of 2026-11-12** | `709f916afbebcfe64a26678702691aeb40945d206074c2a80de8e9d601fce148` |
+| **1.20** | **vanilla (`v1.20.0.0.8873`), Steam update of 2026-11-19** | `1beb2a38fe2d747e5b7adb9b9648e350b0b851845dd228ffb87d2d2ac1b63a9f` |
 
 **What changed from 1.19.4.2 to 1.19.5 (compared 2026-11-13):**
 - No checksum patch (`E8 ?? ?? ?? ?? 31 C0 0F 94 C3`: 0 matches), so vanilla.
@@ -60,6 +61,19 @@ Addresses below are for orientation in the named build only. Code uses the signa
 - `.text` has three changed spots (VA `0x14123d9ed` 2 bytes, `0x14124b944` 424 bytes,
   `0x141256ff5` 1 byte), none within 0x800 bytes of any loader signature; every function keeps
   its address. That is why every signature and code shape matches unchanged.
+
+**What changed from 1.19.5 to 1.20 (compared 2026-11-20):**
+- No checksum patch (`E8 ?? ?? ?? ?? 31 C0 0F 94 C3`: 0 matches), so vanilla.
+- 56,556,664 bytes (21,504 more than 1.19.5). A real code update: of the 185 signatures and
+  anchors, 183 match at a new address (shifts of a few hundred bytes to ~0x3700); 2 keep theirs.
+- `tools/check_signatures.py`: 185/185 match exactly once. `tools/check_code_shapes.py`: 97/97 ok.
+  No signature or shape needed a change.
+- The vanilla files patched at load (`gfx/FX/standardfuncsgfx.fxh`, `gfx/FX/border.shader`,
+  `interface/equipmentdesignerview.gui`, `tank_designer_view.gui`, `plane_designer_view.gui`,
+  `interface/countrystateview.gui`) still carry the file date 2026-10-15, so they are unchanged
+  by this update.
+- **Not checked:** struct offsets the code reads outside the code shapes (e.g. table sizes such as
+  the equipment stat ids, 0..77 on 1.19.5). Listed as `1.20_vanilla`; not run in game yet.
 
 **Vanilla 1.19.3 verified (2026-10-12 23:01):**
 - After Steam's "Verify integrity", `hoi4.exe` is `v1.19.3.0.c01a`, the same size as the
