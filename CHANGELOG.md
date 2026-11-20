@@ -4,6 +4,15 @@ Release versions name the DLL package. The script version is the number script r
 `global.hoi4_loader_version` (MODDING.md "Versions and compatibility"). Development went in parts
 A–F; NOTES.md has the findings and test results behind each.
 
+## Unreleased
+
+- **Game 1.20** (`v1.20.0.0.8873`, Steam update of 2026-11-19) is listed in `loader_config.ini`.
+  Unlike 1.19.5 this is a real code update (183 of the 185 signatures sit at new addresses), but
+  every signature and anchor (185/185) and every code shape (97/97) still matches exactly once
+  (checked offline on a copy); no code changes were needed. The vanilla files the loader patches
+  (`standardfuncsgfx.fxh`, `border.shader`, the three designer views, `countrystateview.gui`) are
+  unchanged. Not yet tested in game on this build.
+
 ## 0.7.0-beta (2026-11-18), script version 3
 
 - **New feature `equipment_designers`** (engine tier; guard `hoi4_loader_feature_equipment_designers`;
