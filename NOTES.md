@@ -8194,3 +8194,316 @@ resolves to `0x1433e6060`, the known `VOLUNTEERS_TRANSFER_SPEED`); smoke test pa
 - Save while travelling and reload, with and without the loader.
 - `loader.log`: the `send_home:` resolve line and the self-check line.
 - Multiplayer: in the G3 plan.
+
+# Part W: division pathing triggers (`division_pathing`, investigation)
+
+Owner's request (2026-11-21, after `send_home`): division-scope triggers that ask the game's own
+pathfinder three questions, so a mod can tell stranded divisions (send them home) from ones that
+can walk:
+1. Is there **no land path** to territory controlled by the division's country or an ally?
+2. How long would the **travel** take to a province (or to the nearest friendly one)?
+3. Does the route need **naval transport**?
+
+Branch `notes/division-pathing` (worktree `HoI4Mod-Loader-pathing`), on top of
+`notes/division-teleport` (Part V, unit fields reused). Nothing in `src/` yet.
+
+Addresses are from **1.20 (`v1.20.0.0.8873`, sha256 `1beb2a38…`)**, the Ghidra 12.2 project in
+`HoI4Mod-Loader-ghidra120/`, and only for orientation. The 64-byte starts of the functions W2 uses
+were compared with the **1.19.5** copy (`HoI4Mod-Loader-ghidra/hoi4_1.19.5.0_copy.exe`): see W2.7.
+
+## W1: what vanilla script has
+
+| Need | Vanilla | Notes |
+|---|---|---|
+| Path exists / travel time / transport | none | Division scope has no location, path or movement trigger (1.20 documentation). |
+| Where the division is | none in division scope | Only state-scope counts (`divisions_in_state`, ...) and the loader's `divisions_count`. |
+
+The game computes all three for the UI. When a move is ordered or hovered it shows:
+- the arrival time: `UNIT_MOVING_DAYS_HOURS` "The Unit will arrive in its destination in $DAYS$
+  day(s) and $HOURS$ hour(s)", `UNIT_VIEW_MOVE_DAYS_HOURS`, `PROVINCE_UNIT_MOVE_DAYS_HOURS`;
+- a failed path: `UNITS_HAS_INVALID_PATH_WARNING` "Unable to find valid path to target",
+  `UNITS_HAS_INVALID_TRANSPORT_WARNING` "Unable to transport to target";
+- transport: `NAVAL_TRANSPORT_MOVE_DESC`, `NAVAL_TRANSPORT_INTERCEPT_WARNING`.
+
+None of it reaches script. **Loader material.**
+
+## W2: engine findings (1.20)
+
+### W2.1 From a move order to the pathfinder
+
+- A move order is a `CQueueUnitActionCommand` carrying a **`CUnitMoveAction`** (RTTI, vtable
+  `0x142a24868`; 0x60 bytes: `+0x10` unit handle, `+0x18`/`+0x24` the target provinces (token
+  `0x2840`), `+0x30`/`+0x3c` a ready-made path (`0x174`), flag bytes `+0x50..+0x5c`).
+  `CUnitNavalMoveAction` (vtable `0x142a24938`) is the naval twin. `CTransportUnitCommand` and
+  `COrderSetPathCommand` (battle plans) exist too.
+- Its execute (slot 9, `0x1412c5f30`): for each target province, `CArmy` vtable `+0x78`
+  (AddMovement) then `0x1412c53d0`, which builds the path with the request builders in W2.3. Its
+  validate (slot 10, `0x1412c6560`) calls `CArmy` vtable `+0x88` (`0x140cd68a0`, can move to).
+- `0x140cd68a0` → **`0x140e68620(&tag, from, to, unit+0x2ae, CMilAccessAreaCostCallback)`**, the
+  order's cheap reachability test:
+  - same land mass (province `+0xd8`) and access (`0x140746540`) → yes;
+  - else a neighbour by strait or adjacency rule;
+  - else, if transport is allowed, an **area-level search** `0x140d58920(from+0xd0, to+0xd0,
+    callback)` over sea areas. It is a Dijkstra with thread-local scratch (`+0x6f0`/`+0x710` of a
+    TLS block) and ties broken by province id.
+- The division's current path: **`unit+0x200` (province ids) / `+0x20c` (count)**. `0x140c54610`
+  returns its last province. `unit+0x2a8` is the path problem the UI shows (`0x140c548a0`):
+  1 invalid move in path, 4 invalid transport, **5 no valid path**, 6 lost its way.
+
+### W2.2 The arrival time the UI shows
+
+`0x141962000` (the unit tooltip, string `UNIT_MOVING_DAYS_HOURS`):
+
+```
+t = 0x140c53fa0(unit, &out, unit+0x1f0 /*here*/, 0x140c54610(unit) /*path end*/,
+                ui->+0x448 /*a UI flag*/, 0x140c50db0(unit) /*the unit's path-time cache*/)
+hours = 0x14049c240(t)   // ceil(t / 100000)
+days = hours / 24, hours % 24
+```
+
+- `0x140c53fa0` gives a fresh path array (allocator `DAT_143103000`) to
+  **`0x140c540c0`**, frees it, and returns the time.
+- Time is **fixed point: 100000 = one hour.**
+- `0x140c50db0` is `unit+0x300`, a per-unit cache of path times, but only outside a parallel
+  section (`DAT_1433e3b38 < 1`). Otherwise it is null. So **the UI tooltip writes into this cache on
+  the local machine only.** A trigger must not use it (W4).
+
+### W2.3 The path and time call: `0x140c540c0`
+
+```
+int64* PathAndTime(CArmy* unit, int64* outTime, CProvince* from, CProvince* to,
+                   CPdxArray<int>* outPath, bool p6, PathCache* cache, bool strategic, bool useCache)
+```
+
+1. `outPath.size = 0`. Strategic mode if `unit+0x2af` (strategic redeployment) or `strategic`.
+2. With `useCache` and a cache: returns a cached time for (from id, to id, strategic, p6).
+3. A **`CPathFind` on the stack** (`0x140e9b4d0` constructor, 0x50 bytes; byte `+0` = 0 turns its
+   edge memo off, W2.5). Then:
+   - strategic: `0x140e9c8e0` (rail), retried with transport allowed;
+   - `p6 = 0` (what the UI passes): **`0x140e9bec0` land only** (request byte `+0x29 = 0`); if the
+     path is empty, again with **`+0x29 = 1` = naval transport allowed**;
+   - `p6 = 1`: `0x140e9c800` (mode 2, then 0), the same retry, then it drops a path that starts at
+     sea unless both ends are coastal.
+4. **Time along the path** `0x140c53cb0(unit, &t, path)`, for each step a → b:
+   - distance: the adjacency's `+0x18` (province `+0xb8` → `+0x70`, 0x30-byte entries, `+0x7c`
+     count), or 100000 without an adjacency, or a define `DAT_1433e7570` for a land unit going from
+     sea to land (landing);
+   - `t += distance * 100000 / speed`, where speed = `CArmy` vtable `+0xd8` (`0x140ce11e0` →
+     `0x140cddba0`: terrain, org, fuel, modifiers, the movement tooltip text);
+   - minus the progress already made if the path starts on the division's current step
+     (`unit+0x200[0]`, progress `unit+0x240`).
+5. With a cache: stores the result. **Null cache = nothing stored.**
+
+Request (0x30 bytes, built by `0x140e9bec0` / `0x140e9c800` / `0x140e9c8e0`):
+
+| Offset | Meaning |
+|---|---|
+| `+0x00` | mode: 0 land, 1 naval, 2 land + port check, 3, 4, 5 (special searches) |
+| `+0x08` | the unit (`CArmy*`) |
+| `+0x10` / `+0x18` | from / to (`CProvince*`) |
+| `+0x20` | a tag pointer (`0x140c08e50(&t, 0)`: none) |
+| `+0x28` | `unit+0x2ae` |
+| `+0x29` | **naval transport allowed** |
+| `+0x2a`..`+0x2f` | other flags (`+0x2c = 1` set by the builders) |
+
+### W2.4 The search: `0x140e9d990(CPathFind*, CPdxArray<int>* out, request*)`
+
+- **Precheck** `0x140e9e7f0`:
+  - no unit, from or to → no path;
+  - the unit can't enter the target (`CArmy` vtable `+0x70`) → no path;
+  - **a land unit with transport not allowed, both ends on land on different continents
+    (province `+0xb8` → `+0xd0`, a short) → no path without searching.** That is the cheap "needs a
+    ship" case.
+- **A\*** over the province graph:
+  - its open list and visited arrays come from a thread-local bump allocator (`0x14256cdc0`),
+    reset on return;
+  - each neighbour is tested by **`0x140e9d520`** (per mode; W2.5);
+  - the path is rebuilt by `0x140e9b530` into `out` (province ids, start excluded);
+  - it reads one double (`0x1425dec8c`, the distance estimate).
+- Called by:
+  - the unit's own movement (`0x1412c53d0`, the move action's execute: runs in lockstep);
+  - about 15 AI functions (`0x1410c6260`, `0x141105540`, `0x14111b4f0`, ...: AI planning,
+    called from parallel AI threads);
+  - supply / UI (`0x140f17d00`, `0x14171cf20`, `0x14156eea0`, ...).
+- It is the same function for every caller. **Vanilla game logic already depends on its result
+  being the same on every machine.**
+
+### W2.5 Purity (what a call writes)
+
+Read through `0x140c540c0` → `0x140e9bec0` → `0x140e9d990` → `0x140e9d520` → `0x140e9ba30`, and
+`0x140c53cb0` → `0x140cddba0`:
+- **Written:** the caller's out path and out time; the stack `CPathFind`; the TLS scratch (reset
+  on return); and debug-only assert flags.
+- **Edge memo:** a hash map inside the `CPathFind` (`+8`), only when its byte `+0` is set and
+  `DAT_14312f740`. The stack object from the constructor has 0, so it is off.
+- **Path-time cache:** only with a non-null cache. The trigger passes null.
+- **Speed:** writes into its tooltip string only when given one (null from `0x140c53cb0`). It has
+  a debug log line (`"Speed mod: %lli"`, level 5).
+- **Not seen:** any write to the unit, a province, a country or the game state.
+- **Not proven:** every callee was not read to the bottom. `0x140e9ba30` →
+  `0x1407463a0(country, province, &a, &b)` (an access lookup, writes its two out bytes) and the
+  `CArmy` vtable `+0x70` (`0x140ce6d00` → `0x140e688b0`, can enter) were read only at the call
+  level. **To check in code review before building.**
+
+### W2.6 Land, sea, ally
+
+- **Sea province:** `province+0xb8 → +0xd2 & 1 == 0` (bit 0 = land; `& 3 == 0` is the "at sea" test
+  in `0x140cd6ca0`, `0x140c540c0`, `0x140c53cb0`).
+- **Needs transport:** the land-only search fails and the transport one succeeds (exactly
+  `0x140c540c0`'s retry), or, the same, the returned path has a sea province.
+- **Controller:** `province+0x188` (Part V). Access and war tests: `0x140749580(country, &tag)`
+  and `0x140746540(country, province, 0)`. Not identified further; `0x140c0a340` is the
+  tag-equivalence test (V2.4).
+- **There is no "nearest friendly province" search in the engine.** The A\* has one goal, and
+  `MOVING_TO_FRIEND_TERRITORY` is only the unit view's label. So question 1 with "or an ally"
+  needs a target (W3).
+
+### W2.7 Builds checked
+
+The 64-byte starts of these functions are **byte-identical and unique in 1.20 and 1.19.5** (1.19.5
+address in brackets):
+- `0x140c540c0` path and time (`0x140c52370`)
+- `0x140c53cb0` time along path (`0x140c51f60`)
+- `0x140e9d990` A\* (`0x140e9a5f0`)
+- `0x140e9bec0` land request (`0x140e98b20`)
+- `0x140e9e7f0` precheck (`0x140e9b450`)
+- `0x14049c240` hours (`0x14049b870`)
+- `0x140c53fa0` UI time, first 32 bytes (`0x140c52250`); then a RIP-relative load differs
+
+The constructor `0x140e9b4d0` differs only in its RIP-relative allocator addresses (to be masked).
+1.19.4.2 and older were not checked: no copies here. Script with the shapes in W4.
+
+## W3: proposal (for the owner's decisions)
+
+All triggers are in **division scope**, guarded like every native trigger (`division_pathing` in
+the feature table).
+
+```
+# 1. no land path home / to a province
+has_path_home = no                         # no land route to friendly territory (W3.1)
+has_land_path = { province = 6521 }        # a land route to that province exists
+
+# 2. travel time (as the game's move order would go: by land, else by sea)
+travel_time = { province = 6521 days < 10 }
+travel_time = { hours > 48 }               # no province: to the nearest friendly territory (W3.1)
+travel_time = { province = 6521 naval = no days < 10 }  # land route only
+
+# 3. naval transport
+needs_naval_transport = { province = 6521 }   # no land route, but one with transport
+needs_naval_transport = yes                    # to the nearest friendly territory
+```
+
+- **Values:** `hours` is what the UI rounds (`ceil(t / 100000)`); `days` = hours / 24, fractional.
+  Compared like the counts in Part E: `<`, `>`, `=` (equal). The right side can be a variable.
+- **No route at all** (not even by sea), an unknown province, or a division at sea or in
+  transport (`unit+0x2f8`): every trigger is **false**, and true under `NOT`, as Part E.
+  `has_path_home = no` is true then, which is what "stranded" means.
+- **Tooltip:** "Travel time of 12. Infanterie-Division to Berlin (6521) below 10 days (currently 7
+  days 5 hours, by sea)".
+
+**How (engine):** one call per trigger, `0x140c540c0(unit, &t, unit+0x1f0, ProvinceById(p), &path,
+false, null, false, false)`, with a path array on the loader's stack (the game's allocator
+`DAT_143103000`, freed with it as `0x140c53fa0` does).
+- `has_land_path` and `naval = no` stop after the land-only half. For that, the loader calls the
+  land request `0x140e9bec0` once itself (+`0x29 = 0`), with a stack `CPathFind`.
+- The time, the transport retry and the sea test are the game's.
+
+### W3.1 "Friendly territory": two designs
+
+**Design A: home = the capital (simple, all game code).** The target is the owner's capital
+province. If the owner doesn't control it, the first province of the capital state it controls
+(as V2.5 step 1, `0x140735560` / `0x1407356a0`). No capital: false.
+- **One A\* per trigger.**
+- **Misses:** allies. Afrika Korps in Italian Libya counts as "no land path home" (it needs a ship to
+  Germany), although it stands next to allied territory.
+
+**Design B: nearest friendly territory (closer to the request).** A breadth-first walk from the
+division's province over the province graph:
+- it uses the **game's own edge test `0x140e9d520`**, with a request built as the land builder
+  builds it, so the rules are the game's (access, war, impassable, straits, adjacency rules);
+- it stops at the first province controlled by the owner, a tag-equivalent country or an ally;
+- "ally" = the loader's existing `allied_with` (faction members, subjects, overlords, as
+  `divisions_count` uses it);
+- that province is the target for `travel_time` / `needs_naval_transport`. It is the nearest
+  **by provinces, not by time.**
+- **Costs more:**
+  - a bounded own loop (a province limit, e.g. 4000, logged when hit; then false);
+  - the edge test's signature and the request layout become shapes;
+  - its result ignores sea (land walk). So "needs transport home" = no land walk reaches friendly
+    land, and the game's transport search to the capital (Design A's target) succeeds.
+
+**Recommended:** both designs share the engine call. Build `has_land_path`, `travel_time` and
+`needs_naval_transport` with an explicit `province` first, plus `has_path_home` as Design A. Add
+Design B's nearest search if the owner wants allies counted.
+
+### W3.2 Cost
+
+- **Not measured** (no game run yet). A\* is goal-directed, and the game runs it for every move
+  order and many times per day in AI planning.
+- Expected:
+  - a few µs when the precheck fails (different continent without transport, or a target the
+    division can't enter);
+  - tens of µs to about a millisecond for a long route across a continent;
+  - twice that when the land half fails and the transport half runs;
+  - a no-path search costs as much as the region the division can reach. A stranded division can
+    reach little (no access), so it is cheap.
+- **Risk:** `every_country_division` with `travel_time` daily, over hundreds of divisions far from
+  the target, could cost milliseconds per day. MODDING.md will say: filter with cheap triggers
+  first, and don't run it every day.
+- **No cache in the first version.** A loader cache needs invalidation on control, access and war
+  changes, and a cache filled by tooltips would differ between machines (W4).
+- Measure with `[diagnostics] trigger_timing = 1` in the test mod (as Part E).
+
+## W4: multiplayer safety
+
+- **Same code as vanilla's lockstep logic:**
+  - the move action's execute builds paths with `0x140e9bec0` / `0x140e9c800` on every machine;
+  - AI planning calls the same A\*;
+  - the inputs are game state only (unit, provinces, controllers, access, wars, speed modifiers,
+    weather);
+  - ties are broken by province id.
+- **Nothing is written** (W2.5): null path-time cache, edge memo off, TLS scratch reset. So a
+  tooltip evaluation on one machine can't change what a later script evaluation sees on another.
+- **Floating point:** one double in the A\* estimate. The movement and AI results already depend on
+  it, so it is as deterministic as they are (MP needs the same build anyway).
+- **Not used:** the UI flag `+0x448` (`0x140c53fa0`'s fifth argument, a local UI setting). The
+  trigger passes `strategic = false`. The unit's own `+0x2af` (in strategic redeployment) still
+  applies, as game state.
+- **Threads:** the A\* is reentrant (TLS scratch) and the game calls it from parallel AI threads.
+  The game's own parallel-section test (`DAT_1433e3b38`) only switches the per-unit cache, which the
+  trigger never uses. So the trigger is safe on whatever thread evaluates triggers (Threading
+  model: trigger reads).
+- Not testable here (no MP setup). It goes into the G3 plan.
+
+## W5: resolution and fail-safe (plan)
+
+| Piece | Found from | Cross-check |
+|---|---|---|
+| UI time `0x140c53fa0`, hours `0x14049c240` | the only reference to `UNIT_MOVING_DAYS_HOURS` (`0x141962000`): `call path-end; mov r8,[r12+0x1f0]; call ui_time; mov rcx,rax; call hours` | `+0x1f0` = send_home's unit province |
+| path end `0x140c54610`, path `+0x200/+0x20c` | the same block | `cmp [rcx+0x20c]` in its shape |
+| path and time `0x140c540c0` | ui_time's call (`+0xa5`) | its shape: `mov [rdi+0xc],0; cmp byte [rcx+0x2af],0` |
+| allocator `DAT_143103000` | ui_time `lea rax,[rip+..]` (+0x5b) | = the one the A\* uses (`0x140e9d990`) |
+| land request `0x140e9bec0`, constructor `0x140e9b4d0` | the first two calls in path-and-time | shapes; request flags +0x28/+0x29 from the call's stack stores |
+| time along path `0x140c53cb0` | the call after the searches | reads `[rcx+0x1f0]` (unit province) |
+| sea bit `+0xb8 → +0xd2` | `0x140c540c0` after the naval search | per game: the sea provinces by this bit = the map's sea provinces (`province_terrain`) |
+| province id `+0xa4` | path-and-time's cache key | = province data's (M14) |
+
+- **Self-check per game entry:**
+  - for a few of the player's divisions with a path (`+0x20c > 0`), a trigger call to the path's
+    end must give a path (not empty) and a time;
+  - the sea-bit check above;
+  - if either fails, the feature is off for the session.
+- **Fail safe:** any shape or cross-check fails → `division_pathing` is off (logged), the guard
+  trigger is false, the triggers are false. Nothing is hooked: the feature only calls game
+  functions, so being off changes nothing in the game.
+
+## W6: decisions for the owner
+
+1. **"Home":** Design A (capital), B (nearest friendly incl. allies), or A first and B later.
+2. **Names:** `has_path_home`, `has_land_path`, `travel_time`, `needs_naval_transport`, or others
+   (e.g. `can_walk_home`, `travel_days`).
+3. **Units:** `days` and `hours` both, or one.
+4. **`naval = no`** option on `travel_time`: wanted?
+5. **Builds:** 1.20 and 1.19.5 (W2.7 shapes match), as `send_home`.
+6. **Feature name:** `division_pathing`, its own guard. Separate from `send_home`, so either works
+   without the other.
