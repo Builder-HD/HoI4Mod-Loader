@@ -7783,8 +7783,8 @@ draws no red line, only the country border, as the type function says.
 
 Owner's request (2026-11-21): a "teleport" for land units that works the way the game brings
 volunteers home. The divisions travel for a while, out of reach, and then arrive in their own
-country. The main use is troops left in another country after a peace deal. Investigation only,
-nothing implemented. Branch `notes/division-teleport`, from `origin/main`.
+country. The main use is troops left in another country after a peace deal. V1–V4 are the investigation (branch
+`notes/division-teleport`). The owner then chose "both, as proposed", and V5 records what was built.
 
 Addresses are from **1.20 (`v1.20.0.0.8873`, sha256 `1beb2a38…`)** and only for orientation. They
 come from a full Ghidra 12.2 analysis of a copy (`HoI4Mod-Loader-ghidra120/`, `q.ps1` there runs
@@ -8119,3 +8119,78 @@ red line.
 - Save while they travel, and reload. They still arrive.
 - What vanilla does with ordinary divisions left in another country after peace. Do they stay
   (the owner's report) or are they moved?
+
+## V5: implementation (`send_home`, 2026-11-21)
+
+The owner chose **"both, as proposed"** (V4.4). Built on `feature/hoi4-1.20`, because `origin/main`
+does not list 1.20 yet. Files: `src/engine_send_home.cpp` (engine), `src/plugin_send_home.cpp`
+(the two effects), shapes in `src/signatures.h`, offline check `check_send_home` in
+`tools/check_code_shapes.py`, MODDING.md "Sending divisions home".
+
+**Decisions taken from the proposal:**
+1. **Names:** `send_home` (division scope) and `send_divisions_home` (country scope), both built.
+2. **Options:** `days`, `province`, `state`. `days` below 1 counts as 1 (the next day). The V2.4
+   countdown arrives on the next daily step either way. `province` wins over `state`. A `state`
+   gives its owner-controlled province nearest, by map rectangle centres, to where the divisions
+   stand: the division's own province, or for `send_divisions_home` the first selected division's.
+   A place the owner does not control is ignored (logged, and named in the tooltip): the game then
+   picks.
+3. **Equipment:** vanilla's 5% loss is kept. Nothing extra is written.
+4. **Refusals:** the V4 table as proposed: in battle (the unit's combat list), at sea or already
+   travelling (not in its province's land unit list, or a province without controller), at home,
+   volunteer (the game's own test), the transfer's own filter (`unit+8`, `+0x1dc`), and a border
+   war.
+5. **on_action and trigger:** not built. They need a hook in the daily step. Later, if wanted.
+6. **Builds:** the shapes are byte-identical on 1.20 and 1.19.5 (only addresses differ). 1.19.4.2
+   and older were not checked: no copies here. On a build where they don't match, the feature
+   logs why and stays off.
+
+**One change from V4: `send_home` arrives without an army.** V2.2 groups per army *per call*. An
+`every_country_division` calls the effect once per division, so each division would become its
+own transfer. On arrival `0x1415c1230` always makes a **new** army from the recorded one, so N
+divisions of an army would come back as N armies with the same name. There is no point after an
+iterator to batch the calls. A deferred flush (`RunOnMainThread`) is not lockstep-safe: a machine
+catching up may run several ticks in one frame. So `send_home` clears the transfer's "army
+recorded" byte (`+0x34`), and the division arrives unassigned. `send_divisions_home` passes all
+its divisions in one call, so it keeps the game's grouping, army names and generals.
+
+**Resolution (engine_send_home.cpp), each with a cross-check against another feature's value:**
+
+| Piece | Found from | Cross-check |
+|---|---|---|
+| recall `0x14071f8d0` | `CRecallVolunteersFromEffect` slot 13, `kCodeRecallVolunteersExecute` (+0x32) | - |
+| division list `+0x290/+0x29c` | `kCodeRecallVolunteers` | = `army.daily` (Part E) |
+| is-volunteer `0x140c591d0` | the recall (+0x66) | called as the game calls it |
+| create `0x14072fef0` | `kCodeRecallCreateCall` in the recall | `kCodeTransferCreate` at its start |
+| second tag `+0x1dc`, unit army `+0xc0` | `kCodeTransferUnitFilter` | army = add_to_army's move (G4) |
+| transfers `+0x13b0/+0x13bc` | `kCodeTransferAppend` | count = list + 0xc |
+| start `0x1415c1820` | the call after the append | `kCodeTransferStart` at its start |
+| province id `+0xa4`, arrival `+0x30`, days `+0x28`, default days define | `kCodeTransferStart` | id = province data's (M14) |
+| unit province `+0x1f0`, army recorded `+0x34` | `kCodeTransferLeave` in start | army = add_to_army's; the three transfer fields differ and lie in 0xa0 |
+| `CVolunteerForceTransfer` vtable | RTTI | each new list entry is checked against it |
+
+**Call:** `create(owner country, &from, &owner, {data, n, n, null}, false)`. Then the loader writes
+`days`, the arrival province and (for `send_home`) `+0x34 = 0`, but only into the list entries
+appended by that call that carry the transfer vtable. `from` is the controller of the division's
+province (`send_home`) or the `from` parameter.
+
+**Self-check per game entry:** the player country's divisions are found in the land unit list of
+the province `+0x1f0` names. Divisions at sea may not be, so it fails only if none is. Every entry
+of the transfer list carries the transfer vtable and a sane day count. A failure switches the
+feature off for the session.
+
+**Checks done (offline):** build without warnings; `check_signatures.py` and
+`check_code_shapes.py` pass on the 1.20 and 1.19.5 copies (new shapes included; on 1.20 the define
+resolves to `0x1433e6060`, the known `VOLUNTEERS_TRANSFER_SPEED`); smoke test passes.
+
+**Still open, to test in game (1.20):**
+- `send_divisions_home = { from = SPR }` with a few armies in Spain: they vanish, return after
+  14 days at a port with their army names and generals, and the message shows.
+- `send_home` in `every_country_division`: every division leaves, none is skipped or doubled.
+  Whether the iterator copies its list first is not established. The effect re-checks each
+  division (still in its province's list) before acting.
+- `days`, `province`, `state`; a place the owner lost while they travel (the game picks again).
+- Refusals: in battle, at sea, border war, volunteer, at home. Check the tooltip lines.
+- Save while travelling and reload, with and without the loader.
+- `loader.log`: the `send_home:` resolve line and the self-check line.
+- Multiplayer: in the G3 plan.

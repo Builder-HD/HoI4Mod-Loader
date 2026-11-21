@@ -208,6 +208,7 @@ def check(path, codes):
                         hex(fn)))
     results += check_create_army(img, codes, text_va, text)
     results += check_add_to_army(img, codes, text_va, text)
+    results += check_send_home(img, codes, text_va, text)
     results += check_air_scenarios(img, codes, text_va, text)
     results += check_time_control(img, codes, text_va, text)
     results += check_equipment_conversion(img, codes, text_va, text)
@@ -516,6 +517,62 @@ def check_add_to_army(img, codes, text_va, text):
     ok = bool(getter) and img.match_at(getter, codes['kCodeScopeDivision'])
     ok = ok and u8(getter + 7) == 0x70 and rel32(img, getter + 0x13) == resolve and u8(getter + 0x20) == 0xf0
     results.append(('kCodeScopeDivision (destroy_unit slot 13 + 9; scope +0x70, resolver, -0x10)', ok, hex(getter)))
+    return results
+
+
+def check_send_home(img, codes, text_va, text):
+    """send_home (NOTES.md Part V): the same pieces engine_send_home.cpp resolves, with its cross-checks."""
+    k = load_constants(pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h')
+    u8 = lambda va: img.d[img.va2off(va)]
+    results = []
+    # The cross-check values other features resolve: the division list (army.daily) and the
+    # division's army field (add_to_army's move).
+    refs, _ = cs.anchor_refs(img.d, text_va, text, 'army.daily')
+    lst = (i32(img, refs[0] + k['kArmyDailyListDisp']), i32(img, refs[0] + k['kArmyDailyCountDisp'])) if len(refs) == 1 else None
+    sigs, _ = cs.load_signatures(pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h')
+    army = [m.start() for m in cs.compile_pattern(dict(sigs)['kSigBorderWarArmy']).finditer(text)]
+    ms = find_in(img, rel32(img, text_va + army[0] + 0x1b), 0x400, codes['kCodeCreateArmyMove']) if len(army) == 1 else None
+    ua = find_in(img, rel32(img, ms + 0x12), 0x200, codes['kCodeArmyMoveUnitArmy']) if ms else None
+    unit_army = i32(img, ua + 3) if ua else None
+
+    rv = img.vtable('.?AVCRecallVolunteersFromEffect@@')
+    exe = rv[1][13] if rv and len(rv[1]) > 13 else 0
+    ok = bool(exe) and img.match_at(exe, codes['kCodeRecallVolunteersExecute'])
+    recall = rel32(img, exe + k['kCodeRecallVolunteersCall']) if ok else 0
+    ok = ok and img.match_at(recall, codes['kCodeRecallVolunteers'])
+    div = (i32(img, recall + k['kCodeRecallDivisionsDisp']), i32(img, recall + k['kCodeRecallDivisionCountDisp'])) if ok else None
+    ok = ok and div == lst
+    results.append(('kCodeRecallVolunteersExecute / Recall (divisions +0x%x/+0x%x = army.daily, fighting for +0x%x)' %
+                    (div + (i32(img, recall + k['kCodeRecallFightingForDisp']),) if div else (-1, -1, -1)), ok, hex(recall)))
+
+    cc = find_in(img, recall, 0x300, codes['kCodeRecallCreateCall']) if recall else None
+    create = rel32(img, cc + k['kCodeRecallCreateCallAt']) if cc else 0
+    ok = bool(create) and img.match_at(create, codes['kCodeTransferCreate'])
+    flt = find_in(img, create, 0x100, codes['kCodeTransferUnitFilter']) if ok else None
+    app = find_in(img, create, 0x500, codes['kCodeTransferAppend']) if ok else None
+    ok = bool(flt and app) and i32(img, flt + k['kCodeTransferUnitArmyDisp']) == unit_army
+    tl, tc = (i32(img, app + k['kCodeTransferListDisp']), i32(img, app + k['kCodeTransferCountDisp'])) if app else (-1, -1)
+    ok = ok and tc == tl + 0xc and 0x100 <= tl <= 0x10000
+    results.append(('kCodeRecallCreateCall / TransferCreate / UnitFilter / Append (transfers +0x%x/+0x%x, second tag +0x%x, '
+                    'unit army +0x%x)' % (tl, tc, i32(img, flt + k['kCodeTransferSecondTagDisp']) if flt else -1,
+                                          unit_army or -1), ok, hex(create)))
+
+    start = rel32(img, app + k['kCodeTransferStartCall']) if app else 0
+    ok = bool(start) and img.match_at(start, codes['kCodeTransferStart'])
+    lv = find_in(img, start, 0x800, codes['kCodeTransferLeave']) if ok else None
+    ok = ok and bool(lv) and i32(img, lv + k['kCodeTransferLeaveArmyDisp']) == unit_army
+    if ok:
+        days, arrival, rec = u8(start + k['kCodeTransferDaysDisp']), u8(start + k['kCodeTransferArrivalDisp']), \
+            u8(lv + k['kCodeTransferArmyRecordedDisp'])
+        define = start + k['kCodeTransferDaysDefineRel'] + 4 + i32(img, start + k['kCodeTransferDaysDefineRel'])
+        ok = len({days, arrival, rec}) == 3 and max(days, arrival, rec) < 0xa0
+        detail = 'province id +0x%x, days +0x%x (define %s), arrival +0x%x, army recorded +0x%x, unit province +0x%x' % (
+            i32(img, start + k['kCodeTransferProvinceIdDisp']), days, hex(define), arrival, rec,
+            i32(img, lv + k['kCodeTransferUnitProvinceDisp']))
+    else:
+        detail = '-'
+    results.append(('kCodeTransferStart / Leave (%s)' % detail, ok, hex(start)))
+    results.append(('CVolunteerForceTransfer vtable', bool(img.vtable('.?AVCVolunteerForceTransfer@@')), '-'))
     return results
 
 

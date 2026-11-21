@@ -84,6 +84,7 @@ int ProvinceCount() {
 void* ProvinceById(int id) { return HaveProvinceIds() ? ProvinceObject(id) : nullptr; }
 
 int ProvinceIdOf(const void* province) { return province && g_provId ? Rd<int>(province, g_provId) : 0; }
+uint32_t ProvinceIdOffset() { return g_provId; }
 
 bool ProvinceIsCoastal(int id) {
     void* map = g_ppMapData ? *g_ppMapData : nullptr;

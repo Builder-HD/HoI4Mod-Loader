@@ -340,6 +340,27 @@ bool CountryDivisionList(int tag, std::vector<void*>* out) {
 int UnitOwnerTag(const void* unit) { return unit && g_unitOwner ? Rd<int>(unit, g_unitOwner) : 0; }
 uint32_t UnitOwnerOffset() { return g_unitOwner; }
 
+void CountryDivisionOffsets(uint32_t* list, uint32_t* count) {
+    *list = g_countryDivisions;
+    *count = g_countryDivisionCount;
+}
+
+bool UnitInCombat(const void* unit) {
+    if (!unit || !g_unitCombats) return false;
+    PtrList combats = ListAt(unit, g_unitCombats, g_unitCombatCount);
+    for (int c = 0; c < combats.count; ++c)
+        if (combats.data[c]) return true;
+    return false;
+}
+
+bool ProvinceHoldsLandUnit(const void* province, const void* unit) {
+    if (!province || !unit || !g_landUnits) return false;
+    PtrList units = ListAt(province, g_landUnits, g_landUnitCount);
+    for (int u = 0; u < units.count; ++u)
+        if (units.data[u] == unit) return true;
+    return false;
+}
+
 bool ForEachDivision(int tag, void (*fn)(void* division, void* ctx), void* ctx) {
     if (!HaveMilitaryCounts()) return false;
     void* country = CountryByTag(tag);

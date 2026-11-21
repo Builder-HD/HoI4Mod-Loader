@@ -53,6 +53,7 @@ src/plugin_region_control.cpp, plugin_military_counts.cpp, plugin_army_condition
 src/plugin_production_data.cpp   data trigger features (numeric triggers)
 src/plugin_region_scope.cpp   region_scope feature (strategic region scope blocks, iterators)
 src/plugin_create_army.cpp    create_army and add_to_army features (armies under a chosen general)
+src/plugin_send_home.cpp      send_home feature (divisions travel home as volunteers do)
 src/plugin_air_scenarios.cpp  air_scenarios feature (mods' definition files, picking a scenario)
 src/air_scenarios.cpp         air_scenarios without engine access: parser, mod list, matching (tested)
 src/engine_air.cpp            engine access for air_scenarios (templates, the game's loader, scenario start)
@@ -73,6 +74,7 @@ src/plugin_time_control.cpp   time_control feature (speed lock, pause block, hid
 src/engine_data.cpp           engine access for the data triggers (read-only game state)
 src/engine_scope.cpp          engine access for scope blocks (vanilla iterator templates, child scopes)
 src/engine_army.cpp           engine access for armies (create army, set leader, characters)
+src/engine_send_home.cpp      engine access for the game's volunteer transfer (send_home)
 src/plugin_railways.cpp       railways and railway_queue features (downgrade_railway, queue_railway_dismantle)
 src/engine_railway.cpp        engine access for railways (levels on both ends, supply refresh)
 src/engine_time.cpp           engine access for time_control (game speed, pause, top bar date) and its hooks

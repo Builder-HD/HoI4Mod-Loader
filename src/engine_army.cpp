@@ -438,6 +438,7 @@ void* ScopeDivision(const void* engineScope) {
 }
 
 void* DivisionArmy(const void* division) { return division ? Rd<void*>(division, g_unitArmy) : nullptr; }
+uint32_t DivisionArmyOffset() { return g_unitArmy; }
 
 bool ArmyInBorderWar(const void* army) { return army && Rd<uint64_t>(army, g_borderWar) != 0; }
 

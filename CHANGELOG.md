@@ -18,6 +18,19 @@ A–F; NOTES.md has the findings and test results behind each.
   dismantle entries a mod queues work as before. **Players:** update HoI4Mod Loader: Railway
   Dismantle (it sets the flag); with an older copy of it, Alt+Shift dismantling is off. The test
   mod sets the flag at `on_startup` and has decisions to clear and set it.
+- **New feature `send_home`** (engine tier; guard `hoi4_loader_feature_send_home`; NOTES.md Part V,
+  MODDING.md "Sending divisions home"). Two effects send land divisions home the way the game
+  brings volunteers home: `send_divisions_home = { from = POL }` (country scope: every division of
+  the country standing in territory `from` controls, one travelling group per army, armies come
+  back with their name and general) and `send_home = { }` (division scope: one division, which
+  arrives without an army). Both take `days` (default `VOLUNTEERS_TRANSFER_SPEED`, 14) and an
+  arrival `province` or `state` (default the port the game picks). While travelling the divisions
+  are off the map and out of reach; the game keeps 95% of their equipment. Divisions in battle,
+  at sea, in a border war, volunteers and ones already at home stay. The loader calls the game's
+  own volunteer transfer and only changes its days and arrival province, so nothing of the loader
+  is saved: a save loaded without the loader still brings them home. New code shapes checked
+  offline on 1.20 and 1.19.5 (the same shapes on both); older builds unchecked. Not yet tested in
+  game or in multiplayer.
 
 ## 0.7.1-beta (2026-11-23), script version 3
 

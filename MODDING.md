@@ -39,6 +39,7 @@ Current features:
 | `region_scope` | engine (needs `lifecycle`) | `hoi4_loader_plugin_region_scope` | `strategic_region`, `any_`/`every_`/`random_strategic_region` and the region identity triggers, see below |
 | `create_army` | engine (needs `lifecycle`) | `hoi4_loader_plugin_create_army` | `create_army`: spawn divisions as an army under a chosen general, see below |
 | `add_to_army` | engine (needs `create_army`) | `hoi4_loader_plugin_add_to_army` | `add_to_army`: put a division into a general's army, see below |
+| `send_home` | engine (needs `lifecycle`) | `hoi4_loader_plugin_send_home` | `send_home`, `send_divisions_home`: divisions travel home the way the game brings volunteers home, see below |
 | `railways` | engine (needs `lifecycle`) | `hoi4_loader_plugin_railways` | `downgrade_railway`: lower or remove a railway; `has_railway_between` trigger, see below |
 | `railway_queue` | engine (needs `railways`) | `hoi4_loader_plugin_railway_queue` | `queue_railway_dismantle`: dismantling as a construction queue entry; Alt+Shift dismantling on the railway map only once a mod sets `hoi4_loader_railway_dismantling`, see below |
 | `time_control` | engine (needs `lifecycle`) | `hoi4_loader_plugin_time_control` | `force_game_speed`, `release_game_speed`, `hide_date_display`, `hide_time_controls`, `has_forced_game_speed`: lock the game speed (and the pause) for a while, hide the top bar's date; single player, see below |
@@ -152,6 +153,7 @@ when the loader is missing or a feature is off. Without them, using a loader tri
 | `strategic_region`, `any_`/`every_`/`random_strategic_region`, `strategic_region_id`, `is_sea_region`, `region_has_state` | `scripted_triggers/hoi4_loader_feature_region_scope.txt` |
 | `create_army` | `scripted_triggers/hoi4_loader_feature_create_army.txt` |
 | `add_to_army` | `scripted_triggers/hoi4_loader_feature_add_to_army.txt` |
+| `send_home`, `send_divisions_home` | `scripted_triggers/hoi4_loader_feature_send_home.txt` |
 | `downgrade_railway`, `has_railway_between` | `scripted_triggers/hoi4_loader_feature_railways.txt` |
 | `queue_railway_dismantle` | `scripted_triggers/hoi4_loader_feature_railway_queue.txt` |
 | `force_game_speed`, `release_game_speed`, `hide_date_display`, `hide_time_controls`, `has_forced_game_speed` | `scripted_triggers/hoi4_loader_feature_time_control.txt` |
@@ -933,6 +935,92 @@ same order. **Not tested in multiplayer yet.**
 skips it; the other effects in the same block still run. Guard with
 `hoi4_loader_feature_add_to_army = yes` (stub:
 `stubs/common/scripted_triggers/hoi4_loader_feature_add_to_army.txt`).
+
+## Sending divisions home (`send_home`)
+
+Vanilla `teleport_armies` moves units home **at once**. These two effects send land divisions home
+**the way the game brings volunteers home** (`recall_volunteers_from`): they leave the map, travel
+for some days and then arrive in their own country. The main use is troops left in another
+country after a peace.
+
+```
+send_divisions_home = {                  # country scope: this country's divisions ...
+    from = POL                           # ... standing in territory POL controls (required)
+    days = 20                            # optional: travel days (default 14, see below)
+    province = 6521                      # optional: arrival province, or
+    state = 64                           #   arrival state
+}
+
+every_country_division = {               # division scope: one division at a time
+    limit = { ... }
+    send_home = { days = 20 }            # days, province and state as above, all optional
+}
+```
+
+- **Scope:** `send_divisions_home` in a country scope; `send_home` in a division scope (inside
+  `every_country_division`, `random_country_division`, `every_state_division`, ...). Anywhere else
+  the effect does nothing.
+- **What happens:** the game's own volunteer return runs for these divisions:
+  - they leave the map, their army and the country's division list. While they travel they can't
+    be seen, ordered, attacked or supplied;
+  - after `days` they appear in their country: at `province`, or at the province of `state`
+    nearest to where they leave, if their country controls it then; otherwise at the port the
+    game picks (a port of the country, nearest to the country they leave);
+  - the game keeps 95% of their equipment on the way (`VOLUNTEERS_RETURN_EQUIPMENT`) and shows its
+    "volunteers returned" message.
+- **Armies:**
+  - `send_divisions_home` makes one travelling group per army, as for volunteers. The army comes
+    back under its old name, and its general leads it again if they lead nothing else by then.
+  - `send_home` sends one division at a time, so it **arrives without an army** (otherwise every
+    division would come back as an army of its own). To bring armies back whole, use
+    `send_divisions_home`.
+- **`days`:** default the game's `NDiplomacy.VOLUNTEERS_TRANSFER_SPEED` (14 in vanilla). 0 or 1
+  means the next day.
+- **Arrival:** checked again by the game on arrival. If the country lost the province by then, the
+  game picks another. If the country no longer exists, the divisions are lost (vanilla behaviour).
+
+**When a division stays.** `loader.log` says why (a reason that repeats for every division of an
+`every_country_division` is logged once and then counted), and `send_home`'s tooltip shows a red
+line such as "Cannot travel home: it is in battle."
+
+| Case | Reason |
+|---|---|
+| Already in territory its own country controls | "it already stands in territory its country controls" |
+| At sea (in transport) or already travelling | "it is at sea or already travelling" |
+| In battle | "it is in battle" (stricter than the game's recall) |
+| Its army is in a border war | "its army <name> is in a border war" |
+| A volunteer | "it is a volunteer": use `recall_volunteers_from`, which also does the volunteer bookkeeping |
+| A unit the game's transfer does not take | "the game's transfer does not take this division" |
+| Not a land division | "this is not a land division" |
+
+`send_divisions_home` only looks at divisions standing in territory `from` controls, and skips the
+ones in that table. Nothing happens if `from` is the country itself, or if the game finds no
+arrival port (the country, or `from`, has no capital).
+
+**Tooltip.**
+- "Travels home to **Germany**: out of reach for **14** days, then arrives without an army."
+- "**12** division(s) of **Germany** in territory controlled by **Poland** travel home: out of
+  reach for **14** days, then they arrive with their armies." Then the number that stays, if any.
+- A `province` or `state` the country does not control is named, with "the game picks the arrival
+  port".
+- The texts can be translated: `HOI4_LOADER_SEND_HOME`, `_AT`, `_ANY`, `_REFUSED`,
+  `_PLACE_IGNORED`, `_PROVINCE`, `HOI4_LOADER_SEND_DIVISIONS_HOME`, `_AT`, `_NONE`, `_STAY`, `_SELF`,
+  and the reason keys (`loader_script_docs.md` lists them).
+
+**Multiplayer:** an ordinary effect that runs the game's own volunteer return on every machine in
+the same order; no random numbers. **Not tested in multiplayer yet.**
+
+**Saves:** a travelling group is the game's own volunteer transfer, saved by the game with its
+divisions, days and arrival province. Nothing of the loader is saved: a save made while they
+travel and loaded without the loader still brings them home.
+
+**Not tested in game yet** (the offline checks pass on 1.20 and 1.19.5). See NOTES.md Part V.
+
+**Without the loader:** both are unknown effects. The game logs them once when parsing and skips
+them; the other effects in the same block still run. Guard with
+`hoi4_loader_feature_send_home = yes` (stub:
+`stubs/common/scripted_triggers/hoi4_loader_feature_send_home.txt`), and use vanilla
+`teleport_armies` as the fallback if the troops must come home anyway.
 
 ## Lowering railways (`railways`)
 

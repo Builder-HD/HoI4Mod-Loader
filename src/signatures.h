@@ -897,6 +897,46 @@ static const size_t kDestroyUnitGetterCall = 9;
 CODE(kCodeScopeDivision, "48 83 EC 28 48 83 C1 ?? 83 39 00 75 06 83 79 04 00 74 ?? E8 ?? ?? ?? ?? 48 85 C0 74 ?? 48 83 C0 ?? 48 83 C4 28 C3")
 static const size_t kCodeScopeDivisionDisp = 7, kCodeScopeDivisionResolveCall = 0x13, kCodeScopeDivisionRefImm = 0x20;
 
+// --- Sending divisions home (send_home, NOTES.md Part V) -------------------------------------------
+// Addresses are 1.20 (v1.20.0.0.8873); every shape is the same on 1.19.5. The game's own return
+// of volunteers (CVolunteerForceTransfer), reached from recall_volunteers_from.
+// CRecallVolunteersFromEffect slot 13: the target country (scope slot 0xc8), tag -> country of the
+// scope's own tag (+0x25), recall(owner, &target) (call at +0x32). Function start. (0x140374f00)
+CODE(kCodeRecallVolunteersExecute, "40 53 48 83 EC 20 48 8B 01 48 8B DA 4C 8B C2 48 8D 54 24 30 FF 90 ?? ?? ?? ?? 83 7C 24 30 00 7E ?? 48 8D 4B 08 E8 ?? ?? ?? ?? 48 8D 54 24 30 48 8B C8 E8 ?? ?? ?? ??")
+static const size_t kCodeRecallVolunteersCall = 0x32;
+// recall(owner, &host) itself: the owner's division list (disp32 at +0x37) and count (disp32 at
+// +0x3e), each division tested by the game's is-volunteer (call at +0x66), then its "fighting for"
+// tag (disp32 at +0x76). Function start. (0x14071f8d0)
+CODE(kCodeRecallVolunteers, "48 8B C4 48 89 58 08 48 89 68 10 48 89 70 18 57 41 54 41 55 41 56 41 57 48 81 EC 90 00 00 00 0F 29 70 C8 4C 8B FA 4C 8B E9 48 8D 4C 24 30 E8 ?? ?? ?? ?? 90 4D 8B B5 ?? ?? ?? ?? 49 63 85 ?? ?? ?? ?? 49 8D 2C C6 45 33 E4 4C 3B F5 0F 84 ?? ?? ?? ?? F3 0F 10 35 ?? ?? ?? ?? 66 0F 1F 44 00 00 49 8B 1E 48 8B CB E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ?? 48 8D 8B ?? ?? ?? ??")
+static const size_t kCodeRecallDivisionsDisp = 0x37, kCodeRecallDivisionCountDisp = 0x3e, kCodeRecallIsVolunteerCall = 0x66,
+                    kCodeRecallFightingForDisp = 0x76;
+// ... and later in it (SigFindIn): create(owner, &host, &owner's tag, &divisions, sending = 0)
+// (call at +0x14). (0x14071faba)
+CODE(kCodeRecallCreateCall, "44 88 64 24 20 4C 8D 4C 24 30 4D 8D 45 08 49 8B D7 48 8B C8 E8 ?? ?? ?? ??")
+static const size_t kCodeRecallCreateCallAt = 0x14;
+// create(owner, &from, &to, &divisions, sending) itself: the arrival province first,
+// choose(&from, &to) (call at +0x3f); none = nothing created. Function start. (0x14072fef0)
+CODE(kCodeTransferCreate, "48 8B C4 48 89 58 20 4C 89 40 18 48 89 50 10 48 89 48 08 55 56 57 41 54 41 55 41 56 41 57 48 8D 68 A9 48 81 EC A0 00 00 00 0F 29 70 B8 49 8B D9 4D 8B F8 48 8B C2 4C 8B E9 49 8B D0 48 8B C8 E8 ?? ?? ?? ?? 48 89 45 F7 48 85 C0 0F 84")
+static const size_t kCodeTransferChooseCall = 0x3f;
+// ... in it (SigFindIn): the divisions it takes: land units (+8 == 0) whose second tag (disp32 at
+// +0x18) is not set, grouped by their army (disp32 at +0x2c). (0x14072ffa0)
+CODE(kCodeTransferUnitFilter, "48 8B 1F 48 85 DB 0F 84 ?? ?? ?? ?? 83 7B 08 00 0F 85 ?? ?? ?? ?? 83 BB ?? ?? ?? ?? 00 0F 8F ?? ?? ?? ?? 41 8B D1 89 55 ?? 48 8B 83 ?? ?? ?? ??")
+static const size_t kCodeTransferSecondTagDisp = 0x18, kCodeTransferUnitArmyDisp = 0x2c;
+// ... (SigFindIn) each new transfer appended to the owner's transfer list (disp32 at +3; count
+// disp32 at +0xe), then start(transfer, province) (call at +0x19). (0x140730271)
+CODE(kCodeTransferAppend, "49 8B 85 ?? ?? ?? ?? 4C 89 24 C8 41 FF 85 ?? ?? ?? ?? 48 8B 55 F7 49 8B CC E8 ?? ?? ?? ??")
+static const size_t kCodeTransferListDisp = 3, kCodeTransferCountDisp = 0xe, kCodeTransferStartCall = 0x19;
+// start(transfer, province) itself: the province's id (disp32 at +0x29) into the transfer's arrival
+// province (disp8 at +0x2f); the days from VOLUNTEERS_TRANSFER_SPEED (rip rel32 at +0x45, insn
+// ends at +0x49) into the transfer's days (disp8 at +0x4c). Function start. (0x1415c1820)
+CODE(kCodeTransferStart, "40 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ?? ?? ?? ?? 48 81 EC ?? ?? ?? ?? 0F 29 B4 24 ?? ?? ?? ?? 4C 8B E9 8B 82 ?? ?? ?? ?? 89 41 ?? 48 83 C1 0C E8 ?? ?? ?? ?? 4C 8B F8 48 89 85 ?? ?? ?? ?? 8B 15 ?? ?? ?? ?? 41 89 55 ??")
+static const size_t kCodeTransferProvinceIdDisp = 0x29, kCodeTransferArrivalDisp = 0x2f, kCodeTransferDaysDefineRel = 0x45,
+                    kCodeTransferDaysDisp = 0x4c;
+// ... in it (SigFindIn): each division leaves its province (the unit's province, disp32 at +6), then
+// its army (disp32 at +0x1d) is recorded once (the transfer's flag, disp8 at +0x2d). (0x1415c1d42)
+CODE(kCodeTransferLeave, "48 8B D6 48 8B 8E ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B CE E8 ?? ?? ?? ?? 48 8B F8 48 8B 9E ?? ?? ?? ?? 48 85 DB 0F 84 ?? ?? ?? ?? 41 80 7D ?? 00 0F 85")
+static const size_t kCodeTransferUnitProvinceDisp = 6, kCodeTransferLeaveArmyDisp = 0x1d, kCodeTransferArmyRecordedDisp = 0x2d;
+
 // --- Time control (time_control, NOTES.md Part K) ------------------------------------------------
 // CInGameIdler::TogglePause(int mode) at the slot the console calls (kSigConsoleSpeedPause): mode 1
 // = the player (button, Space, console), mode 0 = automatic (event popups: CAutomaticPause). Single
