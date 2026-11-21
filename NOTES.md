@@ -7778,3 +7778,344 @@ both states' resistance inactive (neither is occupied in that save, as expected)
 checked in game: resistance in an occupied state that opens or closes (needs a war; the owner's
 test). Seen on the way: between two impassable states (Libyan Desert and the French side) vanilla
 draws no red line, only the country border, as the type function says.
+
+# Part V: sending divisions home (`send_home`, investigation)
+
+Owner's request (2026-11-21): a "teleport" for land units that works the way the game brings
+volunteers home. The divisions travel for a while, out of reach, and then arrive in their own
+country. The main use is troops left in another country after a peace deal. Investigation only,
+nothing implemented. Branch `notes/division-teleport`, from `origin/main`.
+
+Addresses are from **1.20 (`v1.20.0.0.8873`, sha256 `1beb2a38…`)** and only for orientation. They
+come from a full Ghidra 12.2 analysis of a copy (`HoI4Mod-Loader-ghidra120/`, `q.ps1` there runs
+the same `Query.java`). Nothing was checked on 1.19.5 yet.
+
+## V1: what vanilla script has
+
+| Need | Vanilla | Notes |
+|---|---|---|
+| Move units at once | `teleport_armies = { to_state / to_state_array / to_province limit = { ... } }` (state scope; `CTeleportArmiesEffect`, execute `0x14032aa50`) | Moves every army in the state whose owner passes `limit`; no target means the owner's capital. **Instant**, no travel. |
+| Bring volunteers home | `recall_volunteers_from = TAG` (country scope) | Only units that are volunteers in TAG; this is the travelling path (V2). |
+| Hand units over | `transfer_units_fraction`, `annex_country = { transfer_troops = yes }` | Changes the owner, not a way home. |
+| A division-scope trigger for "where is it" | none | Division scope has no location or owner-location trigger in the 1.20 documentation. |
+
+**Script alone covers the instant half.** Vanilla already uses it after peace and annexation.
+The LAR Spanish civil war events and the MTG Rhodes on_action run
+`teleport_armies = { limit = { tag = X } to_state_array = owned_controlled_states }` in the state
+the units stand in. So a mod can do this today, without the loader:
+
+```
+# common/on_actions/my_mod.txt
+on_peace = {
+    effect = {
+        # ROOT/FROM per vanilla's on_peace; for each state ROOT's troops may be stranded in:
+        every_state = {
+            limit = { NOT = { is_controlled_by = ROOT } }
+            teleport_armies = { limit = { tag = ROOT } to_state_array = ROOT.owned_controlled_states }
+        }
+    }
+}
+```
+
+What script can't do: **the travel**. That means the divisions being gone for some days (they
+can't be attacked, ordered or seen), arriving at a sensible province, and keeping their army,
+general and name. Only the game's volunteer transfer does that.
+
+**Defines (1.20 `00_defines.lua`):**
+- `NDiplomacy.VOLUNTEERS_TRANSFER_SPEED = 14`: the days every volunteer transfer counts, both
+  ways (V2).
+- `VOLUNTEERS_RETURN_EQUIPMENT = 0.95`: the equipment kept on the way back.
+- `VOLUNTEERS_RECALL_DAYS_PER_UNIT = 2`: only read by a date builder next to the recall UI
+  (`0x141a18750`, units × 2 days), not by the transfer.
+- `NCountry.GIE_ESCAPING_DIVISIONS_TRANSFER_DAYS = 30`: the exile twin (V2.6).
+
+## V2: engine findings (1.20)
+
+### V2.1 The transfer object
+
+`CVolunteerForceTransfer` (RTTI; vtable `0x142a51fc8`, 9 slots, base `CPersistent`, 0xa0 bytes,
+constructor `0x1415becb0`):
+
+| Offset | Save token | Meaning |
+|---|---|---|
+| `+0x08` | `0x2990` | destination country tag (the "receiver") |
+| `+0x0c` | `0x298f` | source country tag (the "sender") |
+| `+0x10` / `+0x1c` | `0x1d7` per division | the travelling divisions (unit handles; count `+0x1c`) |
+| `+0x28` | `0x296d` | **days left** |
+| `+0x2c` | `0x240` | 1 = sending volunteers, 0 = bringing them back |
+| `+0x30` | `0x2d15` | **arrival province id** |
+| `+0x34` | `0x3f` | an army was recorded (then `+0x38` general handle `0x28b7`, `+0x40` a unit handle `0x41bf`, `+0x50` `0x35cf`, `+0x70` army name `0x35d0`) |
+| `+0x90` | `0x19e` | arrive without waiting (V2.4) |
+
+- Slot 2 (`0x1415c22a0`) writes the object. It writes **each travelling division in full, inline**
+  (token `0x1d7`).
+- Slot 4 (`0x1415c0c40`) reads it back: it allocates a new `CArmy` (`0x688`, constructor
+  `0x140ccbf00`), reads the division into it, then takes it off its province again
+  (`0x140ef4470`) and out of its army. A bad one is destroyed ("Bad army").
+- Every transfer lives in the **owner's** country, list `country+0x13b0`, count `+0x13bc`.
+- The save key strings `volunteers_transfer`, `exile_divisions_transfer` and
+  `expeditionary_force_transfer` are registered in the token table (`0x1400e9482`, ...). Which of
+  these the country writer uses was not traced. The local saves are binary, so check in game.
+
+### V2.2 Creating transfers: `0x14072fef0(owner, &from, &to, divisions, sending)`
+
+Callers:
+- `recall_volunteers_from` (`CRecallVolunteersFromEffect` slot 13 `0x140374f00` → recall
+  `0x14071f8d0(owner, &host)`), with `sending = 0`;
+- the automatic recall check `0x14071fb20` (from the country daily `0x1407303a0` and six other
+  places), with `sending = 0`;
+- the send-volunteers action `0x141193930`, with `sending = 1`.
+
+What it does:
+1. Picks the arrival province first: `0x1415bf200(&from, &to)` (V2.5). If there is none, it does
+   nothing and returns 0.
+2. Takes only land units (`unit+8 == 0`) whose `unit+0x1dc < 1` (meaning not identified: a second
+   tag next to the owner `+0x1d8`, which `0x140ccd2c0` prefers when it is set).
+3. **Groups them by their army** (`unit+0xc0`).
+4. For each group:
+   - allocates a transfer and sets `to`, `from` and `sending` (`0x1415b20f0` / `0x1415b20e0` /
+     `0x1415b2100`);
+   - adds the divisions (`0x1415c1460`; with `sending = 1` capped by the volunteer limits, with 0
+     not capped);
+   - appends the transfer to `owner+0x13b0`;
+   - calls **StartTransfer** `0x1415c1820(transfer, province)`.
+   It logs "CreateVolunteersTransfer with %i".
+
+The recall goes through `0x14071f8d0`:
+- it collects the owner's divisions with `unit+0x1e0 == host`, the "fighting for" tag that
+  `0x140c591d0` checks (volunteer = `+0x1d8` differs from `+0x1e0`; `0x140c5c070` sets it on
+  arrival);
+- it cancels sends still under way to that host (`0x1411cd3a0`);
+- it calls `0x140757bf0(host, owner, 0)`;
+- then it calls the function above with `(owner, &host, &owner, list, 0)`.
+
+### V2.3 StartTransfer: how a division disappears (`0x1415c1820`)
+
+1. Stores the province: `transfer+0x30 = province+0xa4` (the province id).
+2. Sets the days: `transfer+0x28 = VOLUNTEERS_TRANSFER_SPEED` (`DAT_1433e6060`), for both
+   directions.
+3. For each division:
+   - `0x140c52c90(unit, 0)` cancels its movement and orders ("Cancel movement %s"). It returns
+     early when the object at `unit+0x2f8` has `+0x24` set (not identified).
+   - Return only: scales the division's equipment (`unit+0x348`) by `VOLUNTEERS_RETURN_EQUIPMENT`
+     (`DAT_1433e5fb8`). The difference goes to the stockpile `0x140ccd2c0` gives (the unit's
+     `+0x1dc` country if set, else the owner).
+   - Send only: puts the unit's handle into the owner's sent list (`country+0x310`,
+     `0x14071afb0`).
+   - Takes it off its province: `0x140ef4470(unit+0x1f0, unit)` removes it from the province's
+     unit lists (`+0xe0` / `+0xec`, and the per-type lists).
+   - Records the army once (`+0x34`): its general's handle, name `+0x160` → `transfer+0x70`, and
+     two more fields.
+   - Takes it out of its army (`0x140f82f20`) or deletes the emptied army (`0x140f82ea0`).
+   - Takes it out of the owner's division list (`0x140759440` → `0x140748a00`).
+   - For a human owner, removes the UI and AI references ("RemoveReferences from StartTransfer",
+     `0x1402c3c20`).
+4. Send only: fires `on_send_volunteers` (ROOT the sender, FROM the receiver).
+
+So while travelling, a division is in **no** province, army or country list. It only exists
+inside the transfer. That is the "out of reach" state: no combat, no orders, no supply, not
+listed.
+
+### V2.4 Daily countdown and arrival (`0x1415bf8b0`)
+
+Called from `0x140761b20`, which walks `country+0x13b0` once a day. Its caller is the country
+daily `0x1407303a0` (← `0x1401eafe0`). It deletes a transfer that is finished (`0x140d0b900`).
+Whether `0x1401eafe0` runs in the serial part of the daily update is to check (Part Q's rule). The
+function asserts game-state access, deletes units and edits lists, so it must be serial.
+
+Each day:
+1. **Count down:** `+0x28 -= 1`, and stop while it is still > 0. The count is skipped when
+   `0x1415c0a90` says "now". For a return that is:
+   - `+0x90` is set; or
+   - the destination country has no `+0x484` (not identified: zero when it is gone); or
+   - `to == from`, or the two tags count as the same in the game's tag-equivalence table
+     (`0x140c0a340`: `gamestate+0x340` maps both to one index); or
+   - a few AI cases (`to+0xf88 → +0x328`).
+2. **Divisions that no longer resolve are dropped.** For a send, also those whose owner changed.
+3. **Arrival province:**
+   - the stored one (`+0x30`, looked up by id) if its controller (`province+0x188`) is `to` or
+     tag-equivalent, and its state is not impassable (`0x140ef3500` = the state flag of Part R,
+     `state+0x30 → +0x15c`);
+   - else a new choice `0x1415bf200(&from, &to)`.
+   - If there is none:
+     - for a return: wait one more day (`+0x28 = 1`) while the destination country still has
+       `+0x484`; otherwise **the divisions are destroyed** (`0x1401edb30`, the engine's destroy
+       unit);
+     - for a send: the sender's own country is tried.
+4. **Placing:** for each division, `0x14071b970(country, unit, 1)` (back into the country),
+   `0x1407592d0(country, unit)` (its typed lists), `vtable+0xe8(unit, province)` (location) and
+   `vtable+0xb0` (refresh).
+   - A send also sets `unit+0x1e0 = to` and calls `0x1402c0320` for a human sender.
+   - Then `0x1415c1230` rebuilds the army: `0x140f73840(theatre, 0, name, +0x50, 0)` makes an
+     army with the recorded name, and `0x140c47380` moves each unit in. The general is put back
+     through `0x1418cf030` / `0x1418de9e0` (a set-leader command built and executed directly),
+     only if he leads nothing and has no other assignment. `+0x40` goes to `0x140c4d350`.
+5. **Message** (`0x140fb79a0`, alerts), only for the players involved:
+   - return: `VOLUNTEER_MESSAGE_RETURNED` / `VOLUNTEERS_RETURNED_TITLE`;
+   - send: `VOLUNTEER_MESSAGE_ARRIVED` or `..._REINFORCEMENTS_ARRIVED`;
+   - keys `SENDER` / `RECEIVER` / `COUNT` / `LOCATION`.
+
+No on_action fires on arrival.
+
+### V2.5 The arrival province: `0x1415bf200(&from, &to)`
+
+1. The receiver's capital state (`0x140735560`) and capital province (`0x1407356a0`). If the
+   capital province is not controlled by `to`, the first province of the capital state that is.
+   No capital state means none (0).
+2. The sender's capital province is the reference point. It falls back to the first province of
+   the sender's capital state, and with no capital state there is none (0). So **`from` must be a
+   country with a capital.**
+3. `0x1415c0660` collects candidate provinces by flood fill over neighbouring states (`state+0x30
+   → +0x110`, count `+0x11c`), starting from the capital state. A state counts only if `to`
+   controls it and it is not impassable (`0x140a27e70`). It takes one province per state
+   (`0x140a25190`; probably the state's naval base province).
+4. Choice, by `0x140ab45b0(map, a, b)` (province distance) to the sender's capital:
+   - first the nearest candidate with `province+0xd0` set (naval base, by its use) that passes
+     `0x140d5b540`;
+   - then the nearest non-impassable province of the receiver's controlled states
+     (`0x140718030`);
+   - then the nearest candidate;
+   - last the receiver's capital (or its first core province `0x140735d40`).
+
+In words: a port of the home country that land connects to the capital, nearest to the country
+they leave; failing that, the nearest home province; failing that, the capital.
+
+### V2.6 The exile twin
+
+`CExileDivisionsTransfer` (vtable `0x142a50ca8`, the same 9-slot layout, created by
+`0x14072f530` "CreateExilesTransfer with %i", StartTransfer `0x1415b21a1` area,
+`GIE_ESCAPING_DIVISIONS_TRANSFER_DAYS`) is the same mechanism for divisions escaping to a
+government in exile's host. Not needed here.
+
+## V3: what is hard-coded and what isn't
+
+- **Hard-coded:** who can travel (volunteers only, by recall or by an automatic recall) and how
+  long (one define for every transfer). There is no "send home" for an ordinary division. That
+  is loader material.
+- **Already data:**
+  - the day count and the arrival province are per transfer (`+0x28`, `+0x30`) and saved;
+  - arrival re-checks the province and falls back to the game's own choice.
+
+  So the loader only has to start the game's own transfer and adjust two saved fields. It needs
+  no state of its own.
+
+## V4: proposal (for the owner's decisions)
+
+```
+# division scope: this division (with its army if the whole army goes, V2.2 groups per army)
+every_country_division = {
+    limit = { ... }
+    send_home = {
+        days = 20          # optional: travel days (default: the game's VOLUNTEERS_TRANSFER_SPEED, 14)
+        province = 6521    # optional: arrival province, or
+        state = 64         #           arrival state (its province nearest to where they leave);
+                           # default: the game's own choice (V2.5)
+    }
+}
+
+# country scope: every land division of this country standing in territory controlled by `from`
+send_divisions_home = {
+    from = POL             # required: a country, or THIS/ROOT/FROM/PREV
+    days = 20              # optional, as above
+    province = 6521        # optional, as above (or state = 64)
+}
+```
+
+**How (engine):**
+- `send_home` calls the game's creator `0x14072fef0(owner, &from, &owner, [division], 0)`
+  (V2.2), exactly as `recall_volunteers_from` does. `from` = the controller of the division's
+  current province.
+- `send_divisions_home` passes all matching divisions at once, so the game makes one transfer
+  per army, as for a recall.
+- Then, only for the transfers it just appended (the `owner+0x13b0` count before and after):
+  - `days` → `+0x28`;
+  - `province` / `state` → `+0x30`, if the owner controls that province. The game still re-checks
+    it on arrival and falls back to its own choice if it was lost (V2.4).
+- Everything else is the game's: hiding, army and general on arrival, the 5% equipment
+  (`VOLUNTEERS_RETURN_EQUIPMENT`), the message.
+
+**Refused, with a log line and a red tooltip line, as for `add_to_army`:**
+
+| Case | Why |
+|---|---|
+| not a land division | the transfer takes only land units |
+| already at home: its province's controller is the owner or tag-equivalent | `0x1415c0a90` would arrive next day with nothing to do |
+| `from` has no capital, or the owner has no destination (V2.5 returns none) | the game would create nothing |
+| `unit+0x1dc > 0` | the game's creator skips these (meaning to identify first) |
+| a volunteer (`0x140c591d0`) | use `recall_volunteers_from`, which also does the volunteer bookkeeping |
+| in battle, or at sea (naval transfer, invasion) | proposed, stricter than the game: what StartTransfer does to a unit in battle is not established (`0x140c52c90` may return early) |
+| its army is in a border war (`army+0x1b0`, Part G) | as `add_to_army` |
+
+**Tooltip:** "Travels home to **Germany** (14 days)", or "...arriving in **Berlin**". Otherwise the
+red line.
+
+**Optional, as engine on_actions (Part Q rules):**
+- `on_divisions_returned_home`: ROOT the owner, FROM the country they left. It fires after
+  `0x1415bf8b0` placed them, for vanilla recalls too.
+- A country trigger `divisions_travelling_home` (a number: the travelling divisions in
+  `+0x13b0` with `sending = 0`).
+
+### V4.1 Multiplayer
+
+- It is an effect, run by every machine in the same order. It calls only game-state code that
+  vanilla's own `recall_volunteers_from` effect already runs in lockstep.
+- No random numbers are used. The destination is deterministic (distances, list order).
+- The two field writes are plain game state.
+- The human/AI branch (`0x140748dc0`) reads the player list, which is the same on every machine.
+- The arrival message is vanilla's own alert.
+- Not testable here (no MP setup). It goes into the G3 plan.
+
+### V4.2 Save and load while travelling
+
+- **Nothing of the loader's is saved.** A travelling group is a vanilla `CVolunteerForceTransfer`
+  in the owner's country, divisions included (V2.1), with the loader's `days` and `province` in
+  its own fields.
+- A save made mid-journey and loaded **without the loader** continues the journey and arrives.
+- To check in game: the countdown and arrival after a reload; the army name and general; a save
+  loaded without the loader.
+
+### V4.3 What can break on a game update
+
+- **New signatures and code shapes** (all to be made unique on 1.20 and checked on 1.19.5):
+  - the creator `0x14072fef0`, found from `recall_volunteers_from`'s execute (RTTI
+    `CRecallVolunteersFromEffect` slot 13 → its only callee → the recall `0x14071f8d0` → the
+    creator, the call with `xor r9d`/`0` flag);
+  - the list `+0x13b0` / `+0x13bc` (cross-checked in the daily walker `0x140761b20` and the
+    creator);
+  - `+0x28` (`mov eax, [define]; mov [rcx+0x28], eax` in StartTransfer, and the decrement in the
+    daily step);
+  - `+0x30` and the province id `+0xa4` (StartTransfer's first instruction pair);
+  - the province controller `+0x188`;
+  - `unit+0x1dc` / `+0x1e0`.
+- **Already resolved by the loader:** the division scope getter, the CArmy vtable, the unit owner
+  `+0x1d8`, the army field `+0xc0` and the border war field (Parts G4, E).
+- **Fail safe:** if any shape or cross-check fails, the feature is off for the session (logged),
+  as every engine feature. The vanilla `teleport_armies` fallback (V1) stays available to mods
+  through their own scripts.
+- **Riskier than `add_to_army`:**
+  - it removes units from the map. A wrong offset here could leave a unit nowhere or double it.
+    So a self-check per game entry: every division of the player's country is in its province's
+    list, and every transfer's divisions resolve and are in no province;
+  - the destroy path (destination country gone, V2.4) is the game's and stays as it is.
+
+### V4.4 Open decisions for the owner
+
+1. **Names:** `send_home` (division scope) and `send_divisions_home` (country scope), or others.
+   Both, or only one.
+2. **Options:** `days` and `province` / `state` as above. Should `days = 0` (arrive the next day)
+   be allowed?
+3. **Equipment:** keep vanilla's 5% loss (simplest), or give it back (the loader adds the
+   difference to the stockpile after StartTransfer).
+4. **Stricter refusals:** battle, at sea, border war, as in the table, or what the game's recall
+   allows.
+5. **The optional on_action and trigger** (V4), now or later.
+6. **Builds:** 1.20 only, or also check 1.19.5 (copy at `HoI4Mod-Loader-ghidra/`).
+
+### V4.5 To check in game before code (1.20, no loader needed)
+
+- `recall_volunteers_from` from the console or a test decision, with volunteers in Spain.
+  Expected: the divisions vanish from the map and the army list for 14 days, reappear at a port
+  near the sender's side, keep their army name and general, and show "volunteers returned".
+- Save while they travel, and reload. They still arrive.
+- What vanilla does with ordinary divisions left in another country after peace. Do they stay
+  (the owner's report) or are they moved?
