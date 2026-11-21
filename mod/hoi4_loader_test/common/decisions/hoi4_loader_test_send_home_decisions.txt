@@ -1,0 +1,114 @@
+# Test decisions for hoi4_loader's send_home / send_divisions_home (MODDING.md "Sending divisions
+# home", NOTES.md V5). Play as Germany (1936 start).
+#
+# 1. "Armies: prepare", then Army A (6 divisions at Frankfurt) and Army C (6 in Brandenburg).
+# 2. "Send home: Austria grants access" (Austria gives Germany military access, no war needed).
+#    Walk Army A and Army C into Austria and wait until they stand there.
+# 3. Hover a decision: the tooltip shows the effect's line (or the reason in red); loader.log names
+#    what happened. The divisions vanish and come back after the given days with the game's
+#    "volunteers returned" message.
+#
+# Every decision is guarded with hoi4_loader_feature_send_home = yes, so without the loader they are
+# hidden.
+
+hoi4_loader_army_category = {
+
+	hoi4_loader_send_access = {
+		icon = generic_research
+		cost = 0
+		visible = {
+			hoi4_loader_feature_send_home = yes
+			NOT = { has_country_flag = hoi4_loader_send_access }
+		}
+		complete_effect = {
+			set_country_flag = hoi4_loader_send_access
+			AUS = { give_military_access = GER }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# Every German division in Austria, default days (14), arrival port picked by the game. Armies
+	# come back whole with their names and generals.
+	hoi4_loader_send_all_default = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_send_home = yes has_country_flag = hoi4_loader_send_access }
+		complete_effect = {
+			send_divisions_home = { from = AUS }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# The same after 5 days, arriving in Nassau (state 55: the Nassau province nearest to Austria).
+	hoi4_loader_send_all_state = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_send_home = yes has_country_flag = hoi4_loader_send_access }
+		complete_effect = {
+			send_divisions_home = { from = AUS days = 5 state = 55 }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# One division at a time (every_country_division), next day, at Frankfurt (6488). The divisions
+	# in Austria arrive without an army; the ones at home stay ("already stands in territory its
+	# country controls", logged once and counted). Check none in Austria is left behind.
+	hoi4_loader_send_each = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_send_home = yes has_country_flag = hoi4_loader_send_access }
+		complete_effect = {
+			every_country_division = {
+				send_home = { days = 0 province = 6488 }
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# Arrival in a state Germany does not control (69, Sudetenland): ignored, the game picks.
+	hoi4_loader_send_place_ignored = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_send_home = yes has_country_flag = hoi4_loader_send_access }
+		complete_effect = {
+			send_divisions_home = { from = AUS days = 3 state = 69 }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# Nothing happens: from is the country itself (red tooltip line).
+	hoi4_loader_send_fail_self = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_send_home = yes has_country_flag = hoi4_loader_send_access }
+		complete_effect = {
+			send_divisions_home = { from = GER }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# Nothing happens: no German division stands in French territory.
+	hoi4_loader_send_fail_none = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_send_home = yes has_country_flag = hoi4_loader_send_access }
+		complete_effect = {
+			send_divisions_home = { from = FRA }
+		}
+		ai_will_do = { base = 0 }
+	}
+
+	# One random division, usually one at home: the red "already stands in territory its country
+	# controls" line.
+	hoi4_loader_send_fail_at_home = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_send_home = yes has_country_flag = hoi4_loader_send_access }
+		complete_effect = {
+			random_country_division = {
+				send_home = { }
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+}
