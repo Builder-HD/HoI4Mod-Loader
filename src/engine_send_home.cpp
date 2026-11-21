@@ -139,6 +139,8 @@ int SendHomeDefaultDays() {
     return d > 0 && d < 100000 ? d : 0;
 }
 
+uint32_t UnitProvinceOffset() { return g_create ? g_unitProvince : 0; }
+
 void* UnitProvince(const void* unit) { return unit && g_unitProvince ? Rd<void*>(unit, g_unitProvince) : nullptr; }
 
 bool UnitIsVolunteer(const void* unit) { return unit && g_isVolunteer && g_isVolunteer(unit); }

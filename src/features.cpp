@@ -31,6 +31,7 @@ static Feature g_features[] = {
     {"create_army", Tier::Engine, &CreateArmyInit, "lifecycle", false, 0},
     {"add_to_army", Tier::Engine, &AddToArmyInit, "create_army", false, 0},
     {"send_home", Tier::Engine, &SendHomeInit, "lifecycle", false, 0},
+    {"division_pathing", Tier::Engine, &DivisionPathingInit, "lifecycle", false, 0},
     {"railways", Tier::Engine, &RailwaysInit, "lifecycle", false, 0},
     {"railway_queue", Tier::Engine, &RailwayQueueInit, "railways", false, 0},
     {"time_control", Tier::Engine, &TimeControlInit, "lifecycle", false, 0},

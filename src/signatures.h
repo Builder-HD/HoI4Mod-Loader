@@ -937,6 +937,52 @@ static const size_t kCodeTransferProvinceIdDisp = 0x29, kCodeTransferArrivalDisp
 CODE(kCodeTransferLeave, "48 8B D6 48 8B 8E ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B CE E8 ?? ?? ?? ?? 48 8B F8 48 8B 9E ?? ?? ?? ?? 48 85 DB 0F 84 ?? ?? ?? ?? 41 80 7D ?? 00 0F 85")
 static const size_t kCodeTransferUnitProvinceDisp = 6, kCodeTransferLeaveArmyDisp = 0x1d, kCodeTransferArmyRecordedDisp = 0x2d;
 
+// --- Division pathing (division_pathing, NOTES.md Part W) -----------------------------------------
+// Addresses are 1.20 (v1.20.0.0.8873); every shape is the same on 1.19.5. The game's own route and
+// travel time, as the unit tooltip's "arrives in N days" computes them.
+ANCHOR(kAnchorUnitMovingDaysHours, "UNIT_MOVING_DAYS_HOURS")
+// Before that lea (SigFindIn, kPathUiBlockRange back): the tooltip's time call: the unit's path-time
+// cache (call at +3), its path end (+0xe), then ui_time(unit, &out, unit->[disp32 +0x28] (the
+// province it stands in), end, flag, cache) (call at +0x36) and hours(&t) (call at +0x3e).
+// (0x14196383a)
+CODE(kCodePathUiBlock, "49 8B CC E8 ?? ?? ?? ?? 48 8B D8 49 8B CC E8 ?? ?? ?? ?? 48 89 5C 24 28 0F B6 4C 24 38 88 4C 24 20 4C 8B C8 4D 8B 84 24 ?? ?? ?? ?? 48 8D 95 ?? ?? ?? ?? 49 8B CC E8 ?? ?? ?? ?? 48 8B C8 E8 ?? ?? ?? ??")
+static const size_t kPathUiBlockRange = 0x100, kCodePathUiProvinceDisp = 0x28, kCodePathUiTimeCall = 0x36,
+                    kCodePathUiHoursCall = 0x3e;
+// hours(const int64* t): ceil(t / 100000) (imm32 100000 at +0x21): time is fixed point, 100000 = one
+// hour. Function start. (0x14049c240)
+CODE(kCodePathHours, "4C 8B 01 48 B8 09 E1 D1 C6 11 6B F1 29 49 F7 E8 48 C1 FA 0E 48 8B C2 48 C1 E8 3F 48 03 D0 48 69 C2 A0 86 01 00 4C 2B C0 33 C0 4D 85 C0 0F 9F C0 03 C2 C3")
+// ui_time(unit, int64* out, from, to, flag, cache) itself: a path array on its stack (data at
+// rsp+0x50, count +0x5c, allocator +0x60 from the lea at +0x5b (rel32 +0x5e, length 7), a dword
+// +0x68), path_time(... useCache = 1) (call at +0xa5), then, if the array has data, count = 0 and
+// allocator->vtable[+0x10](allocator, data). Function start. (0x140c53fa0)
+CODE(kCodePathUiTime, "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 48 83 EC 70 49 8B F9 49 8B F0 48 8B DA 48 8B E9 45 33 F6 4C 89 74 24 50 4C 89 74 24 58 44 8B 15 ?? ?? ?? ?? 65 48 8B 04 25 58 00 00 00 B9 ?? ?? ?? ?? 4A 8B 04 D0 8B 04 01 39 05 ?? ?? ?? ?? 0F 8F ?? ?? ?? ?? 48 8D 05 ?? ?? ?? ?? 48 89 44 24 60 44 89 74 24 68 C6 44 24 40 01 0F B6 84 24 A0 00 00 00 88 44 24 38 48 8B 84 24 A8 00 00 00 48 89 44 24 30 C6 44 24 28 00 48 8D 44 24 50 48 89 44 24 20 4C 8B CF 4C 8B C6 48 8B D3 48 8B CD E8 ?? ?? ?? ?? 90 48 8B 54 24 50 48 85 D2 74 ?? 44 89 74 24 5C 48 8B 4C 24 60 48 8B 01 FF 50 10")
+static const size_t kCodePathUiTimeAllocLea = 0x5b, kCodePathUiTimePathCall = 0xa5;
+// path_time(unit, int64* out, from, to, CPdxArray<int>* path, bool p6, cache*, bool strategic, bool
+// useCache) itself: path->count (+0xc) = 0; strategic if unit->[disp32 +0x3a] (in strategic
+// redeployment) or the argument. Function start. (0x140c540c0)
+CODE(kCodePathTime, "48 89 5C 24 18 48 89 54 24 10 55 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 ?? 48 81 EC ?? ?? ?? ?? 4D 8B E9 4D 8B E0 4C 8B D2 48 8B F1 48 8B 7D ?? C7 47 0C 00 00 00 00 80 B9 ?? ?? ?? ?? 00 75 ?? 80 7D ?? 00 75 ?? 45 32 F6 EB ?? 41 B6 01")
+static const size_t kCodePathTimeStrategicDisp = 0x3a, kPathTimeRange = 0x600;
+// In it (SigFindIn): the "path starts at sea" test of its p6 branch: province->[disp32 +3] ->
+// byte [disp32 +9] & 3 (imm8 at +0xd); 0 = a sea province. (0x140c54406)
+CODE(kCodePathSeaTest, "48 8B 88 ?? ?? ?? ?? F6 81 ?? ?? ?? ?? 03 0F 85")
+static const size_t kCodePathSeaInfoDisp = 3, kCodePathSeaFlagsDisp = 9;
+// ... and (SigFindIn) the time along the path: time(unit, &t, path) (call at +0xa). (0x140c544ab)
+CODE(kCodePathTimeCall, "4C 8B C7 48 8D 55 ?? 48 8B CE E8 ?? ?? ?? ??")
+static const size_t kCodePathTimeCallAt = 0xa;
+// time(unit, int64* out, path) itself: starts from the unit's province (disp32 at +0x28). Function
+// start. (0x140c53cb0)
+CODE(kCodePathAlong, "48 89 5C 24 10 4C 89 44 24 18 55 56 57 41 54 41 55 41 56 41 57 48 83 EC ?? 4D 8B 38 33 DB 49 63 40 0C 4C 8B EA 4C 8B B1 ?? ?? ?? ?? 4C 8B E1")
+static const size_t kCodePathAlongProvinceDisp = 0x28;
+// The volunteer transfer's arrival choice (send_home's choose, reached as there), at its start
+// (SigFindIn kPathChooseRange): tag -> country, capital_state(country) (call at +0x13), none ->
+// nothing; capital_province(country) (call at +0x27). (0x1415bf22a)
+CODE(kCodeChooseCapital, "48 8B CA E8 ?? ?? ?? ?? 48 8B D8 48 89 44 24 ?? 48 8B C8 E8 ?? ?? ?? ?? 4C 8B F0 48 85 C0 0F 84 ?? ?? ?? ?? 48 8B CB E8 ?? ?? ?? ??")
+static const size_t kPathChooseRange = 0x60, kCodeChooseCapitalStateCall = 0x13, kCodeChooseCapitalProvinceCall = 0x27;
+// capital_province(country) itself: capital_state(country) (call at +4), its best victory point
+// province, null without a capital. Function start. (0x1407356a0)
+CODE(kCodeCapitalProvince, "48 83 EC 38 E8 ?? ?? ?? ?? 80 3D ?? ?? ?? ?? 00 74")
+static const size_t kCodeCapitalProvinceStateCall = 4;
+
 // --- Time control (time_control, NOTES.md Part K) ------------------------------------------------
 // CInGameIdler::TogglePause(int mode) at the slot the console calls (kSigConsoleSpeedPause): mode 1
 // = the player (button, Space, console), mode 0 = automatic (event popups: CAutomaticPause). Single

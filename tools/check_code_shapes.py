@@ -209,6 +209,7 @@ def check(path, codes):
     results += check_create_army(img, codes, text_va, text)
     results += check_add_to_army(img, codes, text_va, text)
     results += check_send_home(img, codes, text_va, text)
+    results += check_division_pathing(img, codes, text_va, text)
     results += check_air_scenarios(img, codes, text_va, text)
     results += check_time_control(img, codes, text_va, text)
     results += check_equipment_conversion(img, codes, text_va, text)
@@ -573,6 +574,46 @@ def check_send_home(img, codes, text_va, text):
         detail = '-'
     results.append(('kCodeTransferStart / Leave (%s)' % detail, ok, hex(start)))
     results.append(('CVolunteerForceTransfer vtable', bool(img.vtable('.?AVCVolunteerForceTransfer@@')), '-'))
+    return results
+
+
+def check_division_pathing(img, codes, text_va, text):
+    """division_pathing (NOTES.md Part W): the same pieces engine_division_pathing.cpp resolves, with its cross-checks."""
+    k = load_constants(pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h')
+    results = []
+    refs, _ = cs.anchor_refs(img.d, text_va, text, 'UNIT_MOVING_DAYS_HOURS')
+    lea = refs[0] if len(refs) == 1 else 0
+    ui = find_in(img, lea - k['kPathUiBlockRange'], k['kPathUiBlockRange'], codes['kCodePathUiBlock']) if lea else None
+    hours = rel32(img, ui + k['kCodePathUiHoursCall']) if ui else 0
+    ok = bool(hours) and img.match_at(hours, codes['kCodePathHours'])
+    results.append(('kCodePathUiBlock / PathHours (tooltip time call, ceil(t / 100000))', ok, hex(ui or 0)))
+    ui_time = rel32(img, ui + k['kCodePathUiTimeCall']) if ok else 0
+    ok = bool(ui_time) and img.match_at(ui_time, codes['kCodePathUiTime'])
+    alloc = ui_time + k['kCodePathUiTimeAllocLea'] + 7 + i32(img, ui_time + k['kCodePathUiTimeAllocLea'] + 3) if ok else 0
+    results.append(('kCodePathUiTime (allocator %s)' % hex(alloc), ok, hex(ui_time)))
+    path = rel32(img, ui_time + k['kCodePathUiTimePathCall']) if ok else 0
+    ok = bool(path) and img.match_at(path, codes['kCodePathTime'])
+    sea = find_in(img, path, k['kPathTimeRange'], codes['kCodePathSeaTest']) if ok else None
+    tc = find_in(img, path, k['kPathTimeRange'], codes['kCodePathTimeCall']) if ok else None
+    along = rel32(img, tc + k['kCodePathTimeCallAt']) if tc else 0
+    ok = ok and bool(sea) and bool(along) and img.match_at(along, codes['kCodePathAlong'])
+    prov = i32(img, ui + k['kCodePathUiProvinceDisp']) if ui else -1
+    ok = ok and prov == i32(img, along + k['kCodePathAlongProvinceDisp'])
+    detail = 'unit province +0x%x, sea +0x%x -> +0x%x' % (prov, i32(img, sea + 3), i32(img, sea + 9)) if ok else '-'
+    results.append(('kCodePathTime / PathSeaTest / PathTimeCall / PathAlong (%s)' % detail, ok, hex(path)))
+    # The capital getters, from send_home's arrival choice.
+    rv = img.vtable('.?AVCRecallVolunteersFromEffect@@')
+    exe = rv[1][13] if rv and len(rv[1]) > 13 else 0
+    recall = rel32(img, exe + k['kCodeRecallVolunteersCall']) if exe and img.match_at(exe, codes['kCodeRecallVolunteersExecute']) else 0
+    cc = find_in(img, recall, 0x300, codes['kCodeRecallCreateCall']) if recall else None
+    create = rel32(img, cc + k['kCodeRecallCreateCallAt']) if cc else 0
+    choose = rel32(img, create + k['kCodeTransferChooseCall']) if create and img.match_at(create, codes['kCodeTransferCreate']) else 0
+    cap = find_in(img, choose, k['kPathChooseRange'], codes['kCodeChooseCapital']) if choose else None
+    state = rel32(img, cap + k['kCodeChooseCapitalStateCall']) if cap else 0
+    province = rel32(img, cap + k['kCodeChooseCapitalProvinceCall']) if cap else 0
+    ok = bool(province) and img.match_at(province, codes['kCodeCapitalProvince']) and \
+        rel32(img, province + k['kCodeCapitalProvinceStateCall']) == state
+    results.append(('kCodeChooseCapital / CapitalProvince (capital state %s)' % hex(state), ok, hex(province)))
     return results
 
 

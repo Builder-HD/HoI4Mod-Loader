@@ -8205,7 +8205,7 @@ can walk:
 3. Does the route need **naval transport**?
 
 Branch `notes/division-pathing` (worktree `HoI4Mod-Loader-pathing`), on top of
-`notes/division-teleport` (Part V, unit fields reused). Nothing in `src/` yet.
+`notes/division-teleport` (Part V, unit fields reused). Design A built (W7).
 
 Addresses are from **1.20 (`v1.20.0.0.8873`, sha256 `1beb2a38…`)**, the Ghidra 12.2 project in
 `HoI4Mod-Loader-ghidra120/`, and only for orientation. The 64-byte starts of the functions W2 uses
@@ -8507,3 +8507,68 @@ Design B's nearest search if the owner wants allies counted.
 5. **Builds:** 1.20 and 1.19.5 (W2.7 shapes match), as `send_home`.
 6. **Feature name:** `division_pathing`, its own guard. Separate from `send_home`, so either works
    without the other.
+
+**Answered (2026-11-21):** 1. **Design A now, B later** (the owner). The rest I chose, open to change:
+2. `has_path_home`, `has_land_path`, `needs_naval_transport`, `travel_time` (as proposed);
+3. `days` only (`travel_time`'s compare key; hours = days × 24 in script);
+4. `naval = no` kept; 5. both builds; 6. its own feature and guard.
+
+## W7: implementation (Design A)
+
+Files: `src/engine_division_pathing.cpp`, `src/plugin_division_pathing.cpp`, shapes in
+`signatures.h` ("Division pathing"), `tools/check_code_shapes.py` `check_division_pathing`.
+
+**Syntax** (division scope; W3 changed where one name could not take two forms):
+
+| Trigger | Form | True when |
+|---|---|---|
+| `has_path_home = yes/no` | bool | yes: a land route home; no: none (sea only, or no route) |
+| `has_land_path = <province>` | int | a land route to that province |
+| `needs_naval_transport = home / <province>` | int or the word `home` | no land route, but one with transport |
+| `travel_time` (`days`) | numeric, Count | value form `travel_time < 10` = home; block `{ province naval days }` |
+
+`needs_naval_transport = yes` from W3 became `= home`: a trigger has one form, and the province
+form needs the value.
+
+**Resolution** (`ResolveDivisionPathing`, after `ResolveSendHome`):
+1. Anchor `UNIT_MOVING_DAYS_HOURS` (one lea, `0x1419638e7`); `kCodePathUiBlock` in the 0x100 bytes
+   before it (`0x14196383a`, lea − 0xad; the same block appears again after the lea for a second
+   text, so the search must go backwards).
+2. Its hours call → `kCodePathHours` (exact bytes: ceil(t / 100000), so 100000 = one hour).
+3. Its ui_time call → `kCodePathUiTime`: the path array layout (data +0, count +0xc, allocator
+   +0x10, dword +0x18), the allocator (lea at +0x5b → `0x143103000`), and the free
+   (`allocator->vtable[2](allocator, data)`) are all in the exact bytes.
+4. ui_time's call (+0xa5) → `kCodePathTime`; in it `kCodePathSeaTest` (+0xb8 → +0xd2 & 3) and
+   `kCodePathTimeCall` → `kCodePathAlong`.
+5. **Cross-check:** the unit province field from the tooltip block (+0x28) = the one the time along
+   the path reads = send_home's (when resolved): `+0x1f0` on both builds.
+6. Capital: send_home's chain (recall_volunteers_from → recall → create → choose), then
+   `kCodeChooseCapital` at choose's start: capital_state (`0x140735560`) and capital_province
+   (`0x1407356a0`); `kCodeCapitalProvince` must call that same capital_state.
+- The allocator object is constant-initialized: ui_time's thread-safe static guard only registers
+  its atexit destructor, no constructor runs, so it is usable from image load.
+
+**Call:** `path_time(unit, &t, unit province, to, &array, p6 = 0, cache = null, strategic = 0,
+useCache = 0)`; the array starts empty with the game's allocator and is freed as ui_time frees it.
+Route = Land if the path has no sea province, Naval if it has one (the game only searches with
+transport after the land search came back empty), None if empty. A path id the loader can't map,
+or a count outside 1..100000, is Unknown.
+
+**Deviation from the trigger rules (DEVELOPING.md "no allocation"):** the game's search allocates
+its result array with the game's allocator, exactly as the tooltip and the AI threads' searches
+do. The loader itself allocates nothing in evaluate.
+
+**Not used:** `unit+0x2f8` (in transport, W3): a division in transport stands in a sea province, and
+the sea test already makes it Unknown. The path fields `+0x200/+0x20c` are not used either.
+
+**Self-check** (game entry, player country): the sea test over every province splits the map
+(some sea, not all); the home province is land; up to 8 of the player's land divisions are routed
+home: no Unknown, every route ends at the home province with a time in 0..10 years. Fail →
+feature off for the session.
+
+**Checked offline:** `tools/check_code_shapes.py` ok on 1.20 and 1.19.5 (allocator `0x143103000` /
+`0x1430fd000`, capital state `0x140735560` / `0x1407343e0`); `check_signatures.py`: the anchor has
+one lea on both. Build and smoke test pass (signature count 186).
+
+**Not done:** in-game test, cost measurement (`trigger_timing`), multiplayer, Design B. Reading the
+unread callees of W2.5 (access lookup, can enter) to the bottom is still open.

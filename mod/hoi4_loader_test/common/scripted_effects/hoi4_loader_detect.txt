@@ -17,6 +17,7 @@ hoi4_loader_init = {
 	clr_global_flag = hoi4_loader_plugin_create_army
 	clr_global_flag = hoi4_loader_plugin_add_to_army
 	clr_global_flag = hoi4_loader_plugin_send_home
+	clr_global_flag = hoi4_loader_plugin_division_pathing
 	clr_global_flag = hoi4_loader_plugin_railways
 	clr_global_flag = hoi4_loader_plugin_railway_queue
 	clr_global_flag = hoi4_loader_plugin_time_control

@@ -631,6 +631,25 @@ int SendHome(int owner, int fromTag, const std::vector<void*>& divisions, int da
 // The layout send_home relies on, with a country's own data: its divisions stand in the province
 // their province field names, and its travelling groups are the game's transfer objects.
 bool SendHomeSelfCheck(int tag, int* onMap, int* groups, const char** why);
+uint32_t UnitProvinceOffset();  // unit -> its province, as send_home resolved it (0 if not; cross-check)
+
+// --- Division pathing (division_pathing; engine_division_pathing.cpp, NOTES.md Part W) -------------
+// The game's own route search and travel time (what the unit tooltip's arrival time uses), with no
+// cache: nothing is written to game state. Trigger reads, any thread (the game runs the same search
+// from its AI threads).
+void ResolveDivisionPathing();  // after ResolveSendHome, ResolveData and ResolveProvinceData
+bool HaveDivisionPathing();
+void* DivisionProvince(const void* unit);  // the CProvince the unit stands in, or null
+bool ProvinceIsSea(const void* province, bool* sea);  // the game's own "at sea" test; false if unreadable
+// "Home" (Design A): the owner's capital province if the owner controls it, else the first province
+// of its capital state it controls; null without one.
+void* HomeProvince(int owner);
+// How the division's move order would go from where it stands to `to`: the game tries a land route
+// first, then one with naval transport. Unknown: unreadable, or the division is at sea. *time: fixed
+// point hours (100000 = 1 hour), as the tooltip; *steps / *lastId (optional): the path's length and
+// last province id.
+enum class Route { Unknown, None, Land, Naval };
+Route DivisionRoute(void* unit, void* to, int64_t* time, int* steps = nullptr, int* lastId = nullptr);
 
 // --- Air scenarios (air_scenarios; engine_air.cpp, NOTES.md Part L) ------------------------------
 // The 3D air animations on the map. The game builds one template per scenario slot

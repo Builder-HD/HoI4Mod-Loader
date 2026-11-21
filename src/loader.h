@@ -148,6 +148,7 @@ bool RegionScopeInit();       // plugin_region_scope.cpp
 bool CreateArmyInit();        // plugin_create_army.cpp
 bool AddToArmyInit();         // plugin_create_army.cpp
 bool SendHomeInit();          // plugin_send_home.cpp
+bool DivisionPathingInit();   // plugin_division_pathing.cpp
 bool RailwaysInit();          // plugin_railways.cpp
 bool RailwayQueueInit();      // plugin_railways.cpp
 bool TimeControlInit();       // plugin_time_control.cpp

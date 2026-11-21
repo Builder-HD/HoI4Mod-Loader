@@ -40,6 +40,7 @@ Current features:
 | `create_army` | engine (needs `lifecycle`) | `hoi4_loader_plugin_create_army` | `create_army`: spawn divisions as an army under a chosen general, see below |
 | `add_to_army` | engine (needs `create_army`) | `hoi4_loader_plugin_add_to_army` | `add_to_army`: put a division into a general's army, see below |
 | `send_home` | engine (needs `lifecycle`) | `hoi4_loader_plugin_send_home` | `send_home`, `send_divisions_home`: divisions travel home the way the game brings volunteers home, see below |
+| `division_pathing` | engine (needs `lifecycle`) | `hoi4_loader_plugin_division_pathing` | `has_path_home`, `has_land_path`, `needs_naval_transport`, `travel_time`: a division's route and travel time by the game's own pathfinder, see below |
 | `railways` | engine (needs `lifecycle`) | `hoi4_loader_plugin_railways` | `downgrade_railway`: lower or remove a railway; `has_railway_between` trigger, see below |
 | `railway_queue` | engine (needs `railways`) | `hoi4_loader_plugin_railway_queue` | `queue_railway_dismantle`: dismantling as a construction queue entry; Alt+Shift dismantling on the railway map only once a mod sets `hoi4_loader_railway_dismantling`, see below |
 | `time_control` | engine (needs `lifecycle`) | `hoi4_loader_plugin_time_control` | `force_game_speed`, `release_game_speed`, `hide_date_display`, `hide_time_controls`, `has_forced_game_speed`: lock the game speed (and the pause) for a while, hide the top bar's date; single player, see below |
@@ -154,6 +155,7 @@ when the loader is missing or a feature is off. Without them, using a loader tri
 | `create_army` | `scripted_triggers/hoi4_loader_feature_create_army.txt` |
 | `add_to_army` | `scripted_triggers/hoi4_loader_feature_add_to_army.txt` |
 | `send_home`, `send_divisions_home` | `scripted_triggers/hoi4_loader_feature_send_home.txt` |
+| `has_path_home`, `has_land_path`, `needs_naval_transport`, `travel_time` | `scripted_triggers/hoi4_loader_feature_division_pathing.txt` |
 | `downgrade_railway`, `has_railway_between` | `scripted_triggers/hoi4_loader_feature_railways.txt` |
 | `queue_railway_dismantle` | `scripted_triggers/hoi4_loader_feature_railway_queue.txt` |
 | `force_game_speed`, `release_game_speed`, `hide_date_display`, `hide_time_controls`, `has_forced_game_speed` | `scripted_triggers/hoi4_loader_feature_time_control.txt` |
@@ -1021,6 +1023,59 @@ them; the other effects in the same block still run. Guard with
 `hoi4_loader_feature_send_home = yes` (stub:
 `stubs/common/scripted_triggers/hoi4_loader_feature_send_home.txt`), and use vanilla
 `teleport_armies` as the fallback if the troops must come home anyway.
+
+## Division routes and travel time (`division_pathing`)
+
+Vanilla script can't ask where a division can go. These triggers ask the game's own pathfinder,
+the search a move order runs, so a mod can tell stranded divisions (for `send_home`) from ones
+that can walk.
+
+```
+every_country_division = {               # division scope
+    limit = {
+        has_path_home = no               # no land route home: it needs a ship, or has no route
+    }
+    send_home = { }
+}
+
+has_land_path = 6521                     # a land route to province 6521 exists
+needs_naval_transport = home             # home only with naval transport (or `= 6521`)
+travel_time < 10                         # days home, as a move order would go (land, else sea)
+travel_time = { province = 6521 naval = no days < 10 }   # days to 6521, land routes only
+```
+
+- **Scope:** a division scope (inside `every_country_division`, `any_country_division`, ...).
+- **Home:** the division's country's capital province; if the country doesn't control it, the first
+  province of its capital state it controls. A division standing in territory its own country
+  controls is home already (a land route, 0 days). **Allies' territory does not count yet:** a
+  German division in Italian Libya is "not home", and needs a ship to reach Germany.
+- **Route:** the game's own search, as a move order: a land route first, else one with naval
+  transport. It follows the game's rules for military access, war, impassable borders and straits.
+- **`travel_time`:** days, from the arrival time the unit tooltip shows (whole hours, rounded up),
+  so `travel_time < 10` is "arrives within 10 days if ordered now". It uses the division's current
+  speed (terrain, organisation, fuel, modifiers). Compared like the counts (`<`, `>`, `=` equal);
+  the right side can be a variable. `naval = no` counts land routes only.
+- **False when it can't tell**, so true under `NOT`: not a land division, at sea or in transport,
+  no capital, an unknown province; and for `travel_time`, no route at all (or no land route with
+  `naval = no`). `has_path_home = no` is true when the game finds no land route, sea route or not.
+- **Tooltip:** "Has no land route home (Berlin (6521)) (currently only by sea)", "Travel time to
+  home (Berlin (6521)) in days below 10 (currently 7.21)".
+
+**Cost.** Each evaluation runs one route search, two when the land search fails and the sea one
+runs. That is microseconds up to about a millisecond for a long route; a different continent
+without a ship is rejected without searching. **Not measured in game yet.** Filter with cheap
+triggers first (where the division stands, its owner), and don't
+evaluate it for every division every day. `[diagnostics] trigger_timing = 1` reports
+`travel_time`'s time per day.
+
+**Multiplayer:** the same search the move orders and the AI run on every machine, with no cache and
+nothing written, so it gives the same answer everywhere. **Not tested in multiplayer yet.**
+
+**Not tested in game yet** (the offline checks pass on 1.20 and 1.19.5). See NOTES.md Part W.
+
+**Without the loader:** unknown triggers, logged once when parsing; the game treats an unknown
+trigger as false. Guard with `hoi4_loader_feature_division_pathing = yes` (stub:
+`stubs/common/scripted_triggers/hoi4_loader_feature_division_pathing.txt`).
 
 ## Lowering railways (`railways`)
 

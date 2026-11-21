@@ -31,6 +31,14 @@ A–F; NOTES.md has the findings and test results behind each.
   is saved: a save loaded without the loader still brings them home. New code shapes checked
   offline on 1.20 and 1.19.5 (the same shapes on both); older builds unchecked. Not yet tested in
   game or in multiplayer.
+- **New feature `division_pathing`** (engine tier; guard `hoi4_loader_feature_division_pathing`;
+  NOTES.md Part W, MODDING.md "Division routes and travel time"). Division-scope triggers on the
+  game's own route search, the one move orders use: `has_path_home = yes/no` (a land route home:
+  `no` = stranded), `has_land_path = <province>`, `needs_naval_transport = home / <province>` and
+  `travel_time` (days, as the unit tooltip's arrival time; `travel_time = { province = <id>
+  naval = no days < 10 }`). "Home" is the country's capital (allies' territory does not count
+  yet). Read only, no cache, nothing hooked. Code shapes checked offline on 1.20 and 1.19.5. Not
+  yet tested in game (cost not measured) or in multiplayer.
 
 ## 0.7.1-beta (2026-11-23), script version 3
 

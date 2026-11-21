@@ -502,6 +502,7 @@ bool Resolve() {
     ResolveProductionTabs();  // after ResolveData: production_data's type offsets
     ResolveProvinceData();  // after ResolveRailways: the province controller offset
     ResolveSendHome();  // after ResolveArmies, ResolveData and ResolveProvinceData
+    ResolveDivisionPathing();  // after ResolveSendHome (cross-check), ResolveData and ResolveProvinceData
     ResolveAttention();
     ResolveTerrain();  // HaveTerrain needs ResolveProvinceData, ResolveData and ResolveRailways
     ResolveAdjacency();  // after ResolveProvinceData
