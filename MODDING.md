@@ -957,6 +957,9 @@ every_country_division = {               # division scope: one division at a tim
     limit = { ... }
     send_home = { days = 20 }            # days, province and state as above, all optional
 }
+
+send_home = { days = ROOT.my_days }      # days from a variable (both effects)
+send_home = { travel_time = yes }        # away for its travel time home (division_pathing)
 ```
 
 - **Scope:** `send_divisions_home` in a country scope; `send_home` in a division scope (inside
@@ -977,7 +980,12 @@ every_country_division = {               # division scope: one division at a tim
     division would come back as an army of its own). To bring armies back whole, use
     `send_divisions_home`.
 - **`days`:** default the game's `NDiplomacy.VOLUNTEERS_TRANSFER_SPEED` (14 in vanilla). 0 or 1
-  means the next day.
+  means the next day. A number or a variable. A variable is read in the effect's scope, which
+  for `send_home` is the division: use `ROOT.my_days`, `global.my_days` or similar. A fraction is
+  cut to whole days, as vanilla does.
+- **`travel_time = yes`** (`send_home` only): the division is away for its travel time home, as
+  `travel_time` of `division_pathing` computes it (whole days, rounded up). With no route home,
+  or without `division_pathing`, `days` applies.
 - **Arrival:** checked again by the game on arrival. If the country lost the province by then, the
   game picks another. If the country no longer exists, the divisions are lost (vanilla behaviour).
 

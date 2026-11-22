@@ -4,8 +4,9 @@
 //   every_country_division = {            # division scope: this division
 //       limit = { ... }
 //       send_home = {
-//           days = 20                      # optional: travel days (default: the game's
-//                                          #   VOLUNTEERS_TRANSFER_SPEED, 14)
+//           days = 20                      # optional: travel days, a number or a variable (default:
+//                                          #   the game's VOLUNTEERS_TRANSFER_SPEED, 14)
+//           travel_time = yes              # optional: its travel time home instead (division_pathing)
 //           province = 6521                # optional: arrival province, or
 //           state = 64                     #   arrival state (its province nearest to where they leave)
 //       }
@@ -166,7 +167,26 @@ Arrival ChooseArrival(const Args& a, size_t ip, size_t is, int owner, int nearPr
     return out;
 }
 
-int DaysArg(const Args& a, size_t i) { return a.has(i) ? (a.i(i) < 1 ? 1 : a.i(i)) : 0; }  // 0 = the game's
+// `days` (a number or a variable, read in the effect's scope); 0 = the game's default.
+int DaysArg(const Args& a, size_t i, const Scope& s) {
+    if (!a.has(i)) return 0;
+    int d = a.value(i, s);
+    return d < 1 ? 1 : d;
+}
+// send_home: `travel_time = yes` takes the division's travel time home (division_pathing) when
+// known, else `days`.
+const size_t kUnitTravelTime = 3;
+int UnitDays(const Args& a, const Scope& s, void* division, bool* fromRoute = nullptr) {
+    if (fromRoute) *fromRoute = false;
+    if (a.b(kUnitTravelTime) && division) {
+        int d = DivisionTravelDaysHome(division);
+        if (d > 0) {
+            if (fromRoute) *fromRoute = true;
+            return d;
+        }
+    }
+    return DaysArg(a, 0, s);
+}
 int DaysShown(int days) { return days > 0 ? days : Engine::SendHomeDefaultDays(); }
 
 // Repeated lines (the same refusal for every division of an every_country_division, all in one
@@ -213,7 +233,8 @@ void ExecuteUnit(const Args& a, const Scope& s) {
     }
     int here = Engine::ProvinceIdOf(Engine::UnitProvince(division));
     Arrival arr = ChooseArrival(a, 1, 2, owner, here, true);
-    int days = DaysArg(a, 0);
+    bool fromRoute = false;
+    int days = UnitDays(a, s, division, &fromRoute);
     int made = Engine::SendHome(owner, from, {division}, days, arr.province, false);
     if (made <= 0) {
         LogLine("send_home (" + country + "): the game " +
@@ -224,13 +245,13 @@ void ExecuteUnit(const Args& a, const Scope& s) {
     }
     LogLine("send_home (" + country + "): a division leaves province " + std::to_string(here) + " (" +
             Engine::CountryTagName(from) + ") for " + ArrivalLog(arr) + ", " + std::to_string(DaysShown(days)) +
-            " days, without an army");
+            (fromRoute ? " days (its travel time)" : " days") + ", without an army");
 }
 
 void TooltipUnit(const Args& a, const Scope& s, TooltipText& out) {
     if (!g_ok.load()) return;
-    int days = DaysShown(DaysArg(a, 0));
     void* division = Engine::ScopeDivision(s.raw());
+    int days = DaysShown(UnitDays(a, s, division));
     if (!division) {
         // An iterator's header (every_country_division) has no division yet.
         out.add(native_localize(kUnitGoesAny, {{"DAYS", std::to_string(days)}}).c_str());
@@ -300,7 +321,7 @@ void ExecuteCountry(const Args& a, const Scope& s) {
         return;
     }
     Arrival arr = ChooseArrival(a, 2, 3, owner, sel.firstProvince, true);
-    int days = DaysArg(a, 1);
+    int days = DaysArg(a, 1, s);
     int made = Engine::SendHome(owner, from, sel.go, days, arr.province, true);
     if (made <= 0) {
         Log("send_divisions_home (%s): the game %s; %zu division(s) stay in territory of %s", country.c_str(),
@@ -332,7 +353,7 @@ void TooltipCountry(const Args& a, const Scope& s, TooltipText& out) {
     std::vector<LocArg> args = {{"COUNT", std::to_string(sel.go.size())},
                                 {"COUNTRY", name},
                                 {"FROM", fromName},
-                                {"DAYS", std::to_string(DaysShown(DaysArg(a, 1)))},
+                                {"DAYS", std::to_string(DaysShown(DaysArg(a, 1, s)))},
                                 {"PLACE", arr.place}};
     out.add(native_localize(arr.province ? kCountryGoesAt : kCountryGoes, args).c_str());
     if (arr.asked && !arr.province) out.add(" ").add(native_localize(kPlaceIgnored, {{"PLACE", arr.place}, {"COUNTRY", name}}).c_str());
@@ -378,7 +399,11 @@ bool SendHomeInit() {
     }
     std::vector<LocText> unitTexts = {kUnitGoes, kUnitGoesAt, kUnitGoesAny, kUnitRefused, kPlaceIgnored, kProvince};
     for (int r = 1; r < (int)(sizeof kReasons / sizeof kReasons[0]); ++r) unitTexts.push_back(kReasons[r]);
-    std::vector<ParamSpec> place = {{"days", ParamType::Int, false}, {"province", ParamType::Int, false}, {"state", ParamType::Int, false}};
+    ParamSpec days{"days", ParamType::Int, false};
+    days.variable = true;
+    std::vector<ParamSpec> place = {days, {"province", ParamType::Int, false}, {"state", ParamType::Int, false}};
+    std::vector<ParamSpec> unitParams = place;
+    unitParams.push_back({"travel_time", ParamType::Bool, false});  // kUnitTravelTime
     bool ok = register_native_effect(
         {"send_home",
          "Use it in a division scope (e.g. inside every_country_division): the division travels home the way the game brings "
@@ -388,9 +413,12 @@ bool SendHomeInit() {
          "95% of its equipment on the way (VOLUNTEERS_RETURN_EQUIPMENT). Nothing happens (logged in loader.log; the tooltip "
          "shows the reason in red) if the division already stands in territory its country controls, is at sea, in battle, a "
          "volunteer (use recall_volunteers_from) or in an army in a border war. To bring whole armies home with their name and "
-         "general, use send_divisions_home.",
+         "general, use send_divisions_home. `days` may be a variable (read in the division scope, so use ROOT.my_days or "
+         "a global). `travel_time = yes`: away for the division's travel time home in whole days, rounded up, as "
+         "division_pathing's travel_time computes it (the route a move order would take); `days` when there is no route or "
+         "division_pathing is off.",
          Form::Block,
-         place,
+         unitParams,
          ScopeMask::Unit,
          &ExecuteUnit,
          &TooltipUnit,

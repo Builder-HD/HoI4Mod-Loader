@@ -84,6 +84,21 @@ const char* RouteText(Engine::Route r, bool atHome) {
     }
 }
 
+}  // namespace
+
+// send_home's `travel_time = yes`: whole days home, rounded up, as travel_time computes them; -1
+// when it can't tell or there is no route (or the feature is off), 0 when the division is home.
+int DivisionTravelDaysHome(void* division) {
+    if (!FeatureActive(kFeature)) return -1;
+    int64_t t = 0;
+    Engine::Route r = RouteOf(division, 0, &t);
+    if (r != Engine::Route::Land && r != Engine::Route::Naval) return -1;
+    int64_t d = Days(t);
+    return (int)(d / 100000 + (d % 100000 > 0 ? 1 : 0));
+}
+
+namespace {
+
 std::string DaysText(int64_t time) { return NativeFormatNumber(NumericKind::Count, Days(time)) + " days"; }
 
 // --- has_path_home = yes/no ----------------------------------------------------------------------

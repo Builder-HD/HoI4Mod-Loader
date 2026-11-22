@@ -39,7 +39,11 @@ A–F; NOTES.md has the findings and test results behind each.
   naval = no days < 10 }`). "Home" is the country's capital (allies' territory does not count
   yet). Read only, no cache, nothing hooked. Code shapes checked offline on 1.20 and 1.19.5. Not
   yet tested in game (cost not measured) or in multiplayer.
-
+- **`send_home` / `send_divisions_home`: `days` may be a variable** (`days = ROOT.my_days`), read
+  by the game's own variable reader and evaluated in the effect's scope. **`send_home = {
+  travel_time = yes }`** keeps the division away for its travel time home from `division_pathing`
+  (whole days, rounded up; `days` when there is no route). Native script API: Int parameters can
+  be declared `variable` (read with `Args::value`). Not yet tested in game.
 ## 0.7.1-beta (2026-11-23), script version 3
 
 - **Game 1.20** (`v1.20.0.0.8873`, Steam update of 2026-11-19) is listed in `loader_config.ini`.

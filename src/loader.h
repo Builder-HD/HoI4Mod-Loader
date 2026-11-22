@@ -149,6 +149,9 @@ bool CreateArmyInit();        // plugin_create_army.cpp
 bool AddToArmyInit();         // plugin_create_army.cpp
 bool SendHomeInit();          // plugin_send_home.cpp
 bool DivisionPathingInit();   // plugin_division_pathing.cpp
+// plugin_division_pathing.cpp: a division's travel time home in whole days (rounded up), 0 at
+// home, -1 when unknown, no route, or division_pathing is off. Used by send_home's travel_time.
+int DivisionTravelDaysHome(void* division);
 bool RailwaysInit();          // plugin_railways.cpp
 bool RailwayQueueInit();      // plugin_railways.cpp
 bool TimeControlInit();       // plugin_time_control.cpp
