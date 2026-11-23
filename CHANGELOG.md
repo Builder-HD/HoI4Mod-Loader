@@ -4,14 +4,15 @@ Release versions name the DLL package. The script version is the number script r
 `global.hoi4_loader_version` (MODDING.md "Versions and compatibility"). Development went in parts
 A–F; NOTES.md has the findings and test results behind each.
 
-## Unreleased
+## 0.7.1-beta (2026-11-23), script version 3
 
 - **Game 1.20** (`v1.20.0.0.8873`, Steam update of 2026-11-19) is listed in `loader_config.ini`.
   Unlike 1.19.5 this is a real code update (183 of the 185 signatures sit at new addresses), but
   every signature and anchor (185/185) and every code shape (97/97) still matches exactly once
   (checked offline on a copy); no code changes were needed. The vanilla files the loader patches
   (`standardfuncsgfx.fxh`, `border.shader`, the three designer views, `countrystateview.gui`) are
-  unchanged. Not yet tested in game on this build.
+  unchanged. Tested in game on 1.20 (2026-11-21): every feature active, every game-start
+  self-check passed, the engine on_actions fired over ten game months. Same code as 0.7.0-beta.
 
 ## 0.7.0-beta (2026-11-18), script version 3
 

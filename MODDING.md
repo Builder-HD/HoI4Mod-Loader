@@ -334,7 +334,7 @@ There are two version numbers:
 
 | Number | Where | Changes when |
 |---|---|---|
-| **Release** (`0.7.0-beta`) | zip name, `CHANGELOG.md`, first line of `loader.log` | every published build |
+| **Release** (`0.7.1-beta`) | zip name, `CHANGELOG.md`, first line of `loader.log` | every published build |
 | **Script version** (`global.hoi4_loader_version`, now **3**) | script, `loader.log` | something script-visible that already existed changes or goes away |
 
 **What raises the script version:** removing or renaming a command, a parameter, a guard
