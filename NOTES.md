@@ -73,7 +73,12 @@ Addresses below are for orientation in the named build only. Code uses the signa
   `interface/countrystateview.gui`) still carry the file date 2026-10-15, so they are unchanged
   by this update.
 - **Not checked:** struct offsets the code reads outside the code shapes (e.g. table sizes such as
-  the equipment stat ids, 0..77 on 1.19.5). Listed as `1.20_vanilla`; not run in game yet.
+  the equipment stat ids, 0..77 on 1.19.5). Listed as `1.20_vanilla`.
+- **In game (2026-11-21, 0.7.0-beta DLL, this config):** `Supported hoi4.exe build: 1.20_vanilla`,
+  23 features active, 50 of 50 commands; new game (GER): every game-start self-check passed; at
+  speed 5 to 1936.11 the engine on_actions fired (battles, focuses, captures, research, training,
+  construction incl. two queued GER military factories typed right); no fault, no crash. The stat
+  table size is read at runtime, so that offset is covered.
 
 **Vanilla 1.19.3 verified (2026-10-12 23:01):**
 - After Steam's "Verify integrity", `hoi4.exe` is `v1.19.3.0.c01a`, the same size as the
