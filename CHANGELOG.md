@@ -44,6 +44,11 @@ A–F; NOTES.md has the findings and test results behind each.
   travel_time = yes }`** keeps the division away for its travel time home from `division_pathing`
   (whole days, rounded up; `days` when there is no route). Native script API: Int parameters can
   be declared `variable` (read with `Args::value`). Not yet tested in game.
+- **`division_pathing`: `in_friendly_territory = yes/no`** (division scope): the division stands in
+  a land province controlled by its country or an ally, by the game's own friendly test (the same
+  faction, or a subject or overlord either way; the one naval control uses). Cheap, no route
+  search. Not yet tested in game.
+
 ## 0.7.1-beta (2026-11-23), script version 3
 
 - **Game 1.20** (`v1.20.0.0.8873`, Steam update of 2026-11-19) is listed in `loader_config.ini`.

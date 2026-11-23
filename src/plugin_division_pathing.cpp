@@ -6,6 +6,7 @@
 //   needs_naval_transport = home             # home only by sea (or `= 6521`: to that province)
 //   travel_time < 10                         # days home, as the move order would go (land, else sea)
 //   travel_time = { province = 6521 naval = no days < 10 }   # days to 6521 by land only
+//   in_friendly_territory = yes              # stands where its country or an ally is in control
 //
 // "Home" is the owner's capital province, or the first province of its capital state it controls
 // (Design A: allies don't count). A division standing in territory its country controls is home
@@ -155,6 +156,34 @@ void NavalTooltip(const Args& a, const Scope& s, bool negated, TooltipText& out)
     out.add(" (currently ").add(RouteText(r, atHome)).add(")");
 }
 
+// --- in_friendly_territory = yes/no ----------------------------------------------------------------
+// 1 friendly, 0 not, -1 can't tell (no division, at sea, no controller).
+int FriendlyHere(void* division, int* controller) {
+    *controller = 0;
+    if (!g_ok.load(std::memory_order_relaxed) || !division) return -1;
+    int owner = Engine::UnitOwnerTag(division);
+    void* here = Engine::DivisionProvince(division);
+    bool sea = true;
+    if (owner <= 0 || !here || !Engine::ProvinceIsSea(here, &sea) || sea) return -1;
+    int c = Engine::ProvinceController(Engine::ProvinceIdOf(here));
+    *controller = c;
+    if (c <= 0) return -1;
+    return Engine::IsSameCountry(c, owner) || Engine::IsAllied(owner, c) ? 1 : 0;
+}
+bool FriendlyEval(const Args& a, const Scope& s) {
+    int c = 0;
+    int f = FriendlyHere(Division(s), &c);
+    return f >= 0 && (f == 1) == a.b(0);
+}
+void FriendlyTooltip(const Args& a, const Scope& s, bool negated, TooltipText& out) {
+    bool want = a.b(0) != negated;
+    out.add(want ? "Stands in territory its country or an ally controls"
+                 : "Stands outside the territory its country and its allies control");
+    int c = 0;
+    if (FriendlyHere(Division(s), &c) >= 0 && c > 0)
+        out.add(" (currently ").add(Engine::CountryTagName(c).c_str()).add(")");
+}
+
 // --- travel_time (days) -------------------------------------------------------------------------
 // Parameters: 0 province, 1 naval.
 bool TravelValue(const Args& a, const Scope& s, int64_t* out) {
@@ -299,6 +328,17 @@ bool DivisionPathingInit() {
     ok = register_native_trigger({"needs_naval_transport", kNavalHelp.c_str(), Form::Value,
                                   {{"target", ParamType::Int, true, ScopeDefault::None, "home"}}, ScopeMask::Unit, &NavalEval,
                                   &NavalTooltip},
+                                 kFeature) &&
+         ok;
+    if (!Engine::HaveAlliance())
+        Log("division_pathing: the alliance test is missing; in_friendly_territory counts only the country's own territory");
+    ok = register_native_trigger({"in_friendly_territory",
+                                  "Division scope. `in_friendly_territory = yes`: the division stands in a land province "
+                                  "controlled by its country or an ally (the game's friendly test: the same faction, or a "
+                                  "subject or overlord). `= no`: it stands in other territory. False if it can't tell (at "
+                                  "sea, no division), so true under NOT. Cheap: no route search.",
+                                  Form::Value, {{"friendly", ParamType::Bool, true}}, ScopeMask::Unit, &FriendlyEval,
+                                  &FriendlyTooltip},
                                  kFeature) &&
          ok;
     ok = register_native_numeric_trigger({"travel_time", kTravelHelp.c_str(), NumericKind::Count,

@@ -210,6 +210,10 @@ static bool AlliedWith(int owner, int tag) {
     return r && g_isFriendly(r);
 }
 
+// The IsFriendly test (FUN_140d8a410 on 1.20): the other country is in the relation owner's ally
+// list (faction), or one of the two is the other's subject.
+bool IsAllied(int a, int b) { return HaveCountries() && g_diplomacyOffset && a > 0 && b > 0 && AlliedWith(a, b); }
+
 static bool OwnerMatches(int owner, const UnitFilter& f) {
     if (f.owner && !SameCountry(owner, f.owner)) return false;
     if (f.enemyOf && !AtWar(f.enemyOf, owner)) return false;

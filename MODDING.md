@@ -40,7 +40,7 @@ Current features:
 | `create_army` | engine (needs `lifecycle`) | `hoi4_loader_plugin_create_army` | `create_army`: spawn divisions as an army under a chosen general, see below |
 | `add_to_army` | engine (needs `create_army`) | `hoi4_loader_plugin_add_to_army` | `add_to_army`: put a division into a general's army, see below |
 | `send_home` | engine (needs `lifecycle`) | `hoi4_loader_plugin_send_home` | `send_home`, `send_divisions_home`: divisions travel home the way the game brings volunteers home, see below |
-| `division_pathing` | engine (needs `lifecycle`) | `hoi4_loader_plugin_division_pathing` | `has_path_home`, `has_land_path`, `needs_naval_transport`, `travel_time`: a division's route and travel time by the game's own pathfinder, see below |
+| `division_pathing` | engine (needs `lifecycle`) | `hoi4_loader_plugin_division_pathing` | `has_path_home`, `has_land_path`, `needs_naval_transport`, `travel_time`, `in_friendly_territory`: a division's route and travel time by the game's own pathfinder, see below |
 | `railways` | engine (needs `lifecycle`) | `hoi4_loader_plugin_railways` | `downgrade_railway`: lower or remove a railway; `has_railway_between` trigger, see below |
 | `railway_queue` | engine (needs `railways`) | `hoi4_loader_plugin_railway_queue` | `queue_railway_dismantle`: dismantling as a construction queue entry; Alt+Shift dismantling on the railway map only once a mod sets `hoi4_loader_railway_dismantling`, see below |
 | `time_control` | engine (needs `lifecycle`) | `hoi4_loader_plugin_time_control` | `force_game_speed`, `release_game_speed`, `hide_date_display`, `hide_time_controls`, `has_forced_game_speed`: lock the game speed (and the pause) for a while, hide the top bar's date; single player, see below |
@@ -155,7 +155,7 @@ when the loader is missing or a feature is off. Without them, using a loader tri
 | `create_army` | `scripted_triggers/hoi4_loader_feature_create_army.txt` |
 | `add_to_army` | `scripted_triggers/hoi4_loader_feature_add_to_army.txt` |
 | `send_home`, `send_divisions_home` | `scripted_triggers/hoi4_loader_feature_send_home.txt` |
-| `has_path_home`, `has_land_path`, `needs_naval_transport`, `travel_time` | `scripted_triggers/hoi4_loader_feature_division_pathing.txt` |
+| `has_path_home`, `has_land_path`, `needs_naval_transport`, `travel_time`, `in_friendly_territory` | `scripted_triggers/hoi4_loader_feature_division_pathing.txt` |
 | `downgrade_railway`, `has_railway_between` | `scripted_triggers/hoi4_loader_feature_railways.txt` |
 | `queue_railway_dismantle` | `scripted_triggers/hoi4_loader_feature_railway_queue.txt` |
 | `force_game_speed`, `release_game_speed`, `hide_date_display`, `hide_time_controls`, `has_forced_game_speed` | `scripted_triggers/hoi4_loader_feature_time_control.txt` |
@@ -1041,10 +1041,13 @@ that can walk.
 ```
 every_country_division = {               # division scope
     limit = {
+        in_friendly_territory = no       # not in its own or an ally's territory (cheap: first)
         has_path_home = no               # no land route home: it needs a ship, or has no route
     }
     send_home = { }
 }
+
+in_friendly_territory = yes              # stands where its country or an ally is in control
 
 has_land_path = 6521                     # a land route to province 6521 exists
 needs_naval_transport = home             # home only with naval transport (or `= 6521`)
@@ -1056,7 +1059,11 @@ travel_time = { province = 6521 naval = no days < 10 }   # days to 6521, land ro
 - **Home:** the division's country's capital province; if the country doesn't control it, the first
   province of its capital state it controls. A division standing in territory its own country
   controls is home already (a land route, 0 days). **Allies' territory does not count yet:** a
-  German division in Italian Libya is "not home", and needs a ship to reach Germany.
+  German division in Italian Libya is "not home", and needs a ship to reach Germany. To leave
+  divisions alone in an ally's territory, add `in_friendly_territory = no` before it.
+- **`in_friendly_territory`:** the province the division stands in is controlled by its country or
+  an ally, by the game's own friendly test (the one naval control uses): the same faction, or a
+  subject or overlord either way. No route search. False at sea or when it can't tell.
 - **Route:** the game's own search, as a move order: a land route first, else one with naval
   transport. It follows the game's rules for military access, war, impassable borders and straits.
 - **`travel_time`:** days, from the arrival time the unit tooltip shows (whole hours, rounded up),

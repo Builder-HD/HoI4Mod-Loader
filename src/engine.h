@@ -193,6 +193,9 @@ struct UnitFilter {
 void* StateById(int id);
 bool IsSameCountry(int a, int b);
 bool HaveAlliance();  // alliedWith is available (IsFriendly resolved)
+// Allied by the IsFriendly test (same faction, or subject/overlord either way); never the same
+// country. False when it can't tell.
+bool IsAllied(int a, int b);
 // Counts in a state / strategic region. False if the area does not exist.
 bool CountDivisions(AreaKind kind, int id, const UnitFilter& f, int64_t* out);
 bool CountShips(AreaKind kind, int id, const UnitFilter& f, int64_t* out);
