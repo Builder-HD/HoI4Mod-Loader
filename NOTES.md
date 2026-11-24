@@ -8028,3 +8028,45 @@ northern edge, then folds into a close planet; zoomed out fully it is a small pl
 oceans dark blue everywhere, also across the Pacific seam; no names through the planet; hovering and
 clicking in space find nothing; the view down on the north pole has no missing slice; panning east
 goes round with no seam.
+
+## S10: third round (2026-11-24): polar caps, dragging, icons
+
+Owner's points and changes:
+
+1. **"Add some polar caps, it's very stretched at the top and bottom."** New keys `polar_cap = <latitude>`
+   and `polar_cap_color = { r g b }` (no caps without the key). Constants grew to five float4 (b13,
+   80 bytes): D = (z where the north / south caps start, edge width = 2 degrees, on), E = colour. The
+   terrain's pixel shader (`pdxmap`, the block where HL_GlobeSea goes) returns `HL_GlobeCap( vOut,
+   Input.prepos )`: the cap colour (times 0.8, as it is unlit) over the final colour, the edge wavy
+   with 5 and 9 waves round the planet (the first try, with frequencies per map unit, made a
+   star-shaped edge at the pole). Things on the ground use a new mode, `kBend` = `HL_GlobeSurface`
+   (border, river, tree, pdxmesh), the ground itself `kTerrain` (pdxmap); `HL_GlobeSurface` and
+   `HL_GlobeCull` drop vertices under a cap (z beyond where the cap starts). Dropping now pushes a
+   vertex along its view ray past the far plane (`HL_GlobeAway`), so a partly dropped triangle is cut
+   where it was seen instead of smeared toward the camera; the depth-bias row uses the same function
+   as the position. Picking on a cap finds nothing (`Params::InCap`).
+2. **"Movement over where the two map edges meet is very strange, you lag left and right with the
+   middle mouse button; in general the middle mouse button seems very buggy."** Two causes: the camera
+   was moved back by a map width whenever it left 0..W, in the middle of a drag (the grabbed point
+   then lay a width away and the drag jumped back); and the drag got the planet's point under the
+   cursor, whose flat distance grows toward the rim, so each frame's correction overshot. Now: the
+   map camera's own rays stay the game's flat rays while bent (drag, edge panning, zoom to the
+   cursor): it moves as over the flat map, which turns the planet smoothly. Its drag and zoom ask
+   the screen-to-map helper `FUN_140ba89e0` (shared with hover and clicks), so that helper is hooked
+   and marks (thread-local) the calls from the camera's two call sites (`kSigGlobeCamPoint1/2`,
+   0x1412f5b82 / 0x1412f5f34); the screen-ray hook then leaves those rays alone. The camera is moved
+   back over the map only when the planet folds back into the flat map (or at once if flat).
+   Tested: six middle drags westward turn the planet Europe -> Siberia -> Japan -> Pacific -> North
+   America, steadily, across the seam.
+3. **"Sometimes the map turns into a sphere and the city names and port icons are still there."**
+   The sphere now appears at lower heights (the edge rule) than where the game hides its 2D icons.
+   The map icons' update `FUN_140bb03c0` (`kSigGlobeIcons`) hands each province's icons the engine
+   camera that sees it; the icons compare their `NGraphics *_CUTOFF` with its height (`camera + 0x184`,
+   e.g. `FUN_1417271d0`, the victory point / capital icon: `CAPITAL_ICON_CUTOFF` at 0x1433e59b0). The
+   hook sets the three engine cameras' heights to 1e7 for the length of that call while bent and puts
+   them back (the matrices are made already, so drawing is not touched). Tested: flat over the
+   Baltic with city names, ports and counters; one wheel step later a planet without any.
+
+New signatures: `kSigGlobeCamPoint1`, `kSigGlobeCamPoint2`, `kSigGlobeIcons` (unique on 1.20, 1.19.5,
+1.19.4.2; smoke `2/196`). Offline: 42 cached vertex shaders (all four modes) and 56 pixel shaders
+(water, sea, caps, sky) compile.

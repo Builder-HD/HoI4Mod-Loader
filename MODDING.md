@@ -2242,6 +2242,8 @@ globe = {
 	south = -90            # latitude of the south edge (e.g. 66 / -65: the map's own proportions,
 	                       # with open caps at the poles)
 	background = "gfx/my_mod/space.png"   # optional: drawn behind the planet (PNG, JPEG, BMP)
+	polar_cap = 70         # optional: ice caps from this latitude to both poles (0 or left out: none)
+	polar_cap_color = { 0.72 0.77 0.82 }   # optional: the caps' colour (red green blue, 0..1)
 }
 ```
 
@@ -2278,11 +2280,23 @@ files (the loader patches whichever copy is loaded, as for attention areas).
   the planet it is not drawn; the seabed shows the sea in the colour map's sea tint, as dark as the
   game's water. Map modes, sea zones and borders on the sea stay.
 - Things beyond the map's edges (the frame with the logo, the filler water) sink below the surface.
-- 2D icons (unit counters, victory points) are not moved: the game hides them at these heights.
+- **Polar caps** (`polar_cap`): the map's top and bottom rows are stretched round the poles; caps
+  cover them from the given latitude, with a soft, gently wavy edge. Borders, names, rivers, trees and
+  units under them are hidden, and a click there selects nothing. The colour is drawn as given (not
+  lit by the sun), a little darkened.
+- **2D icons** (city names, victory points, ports, unit counters, combat icons, ...) are placed by the
+  game for the flat map, so while it is a planet they are hidden: during their update the game's
+  cameras report a very great height, and each icon hides by its own vanilla cutoff
+  (`NGraphics ..._CUTOFF`). They come back with the flat map.
 
-**Picking:** hovering, clicking a province (the state view), selecting and zoom to the cursor find
-what is under the cursor on the planet. A click or hover in space, past the planet's rim, finds
-nothing. Edge panning still works with the cursor in space (it turns the planet toward that side).
+**Picking:** hovering, clicking a province (the state view) and selecting find what is under the
+cursor on the planet. A click or hover in space, past the planet's rim, or on a polar cap finds
+nothing.
+
+**Moving the camera** works as on the flat map: dragging with the middle mouse button, edge panning
+and zooming toward the cursor use the game's own (flat) camera movement, which turns the planet
+smoothly; over the wrap line too. Zoom toward the cursor aims at the flat map point under it, so on
+the planet it lands near, not exactly on, the place under the cursor.
 
 **Limits:**
 - DirectX 11 only (the Windows default). With the DX9 or OpenGL renderer the map stays flat
@@ -2290,7 +2304,8 @@ nothing. Edge panning still works with the cursor in space (it turns the planet 
 - Lighting is the flat map's (the sun comes from the same side everywhere); day and night still
   follow the longitude.
 - 3D models stand upright as on the flat map; they are only drawn close up, where the map is flat.
-- Edge panning at planet heights is fast (the game pans by the flat distance under the cursor).
+- Edge panning and dragging at planet heights turn the planet quickly (the game moves the camera
+  by flat map distances).
 
 **Checks and messages** (`loader.log`):
 - At start: `Globe: map ... cameras +0x10/+0x230/+0x450 ...` (the resolved layout), `globe: on
@@ -2303,6 +2318,6 @@ nothing. Edge panning still works with the cursor in space (it turns the planet 
 - In a game: `globe: first globe frame (camera height ..., background on)`.
 
 **Test mod** (`common/hoi4_loader_globe/hoi4_loader_test_globe.txt`: default globe, 400 / 2500,
-0.35 s, background `gfx/hoi4_loader_test/space.png`, which is not in the repository: put any image
-there; decisions in `common/decisions/hoi4_loader_test_globe_decisions.txt`): "Globe: flat map",
+0.35 s, polar caps from 70 degrees, background `gfx/hoi4_loader_test/space.png`, which is not in the
+repository: put any image there; decisions in `common/decisions/hoi4_loader_test_globe_decisions.txt`): "Globe: flat map",
 "Globe: back to the globe", "Globe: status (see game.log)".
