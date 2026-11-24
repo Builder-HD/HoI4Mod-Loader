@@ -8070,3 +8070,26 @@ Owner's points and changes:
 New signatures: `kSigGlobeCamPoint1`, `kSigGlobeCamPoint2`, `kSigGlobeIcons` (unique on 1.20, 1.19.5,
 1.19.4.2; smoke `2/196`). Offline: 42 cached vertex shaders (all four modes) and 56 pixel shaders
 (water, sea, caps, sky) compile.
+
+## S11: fourth round (2026-11-24): polar seas instead of caps over the map
+
+Owner: "the polar caps currently cover some of the things; better to put the caps on top of the
+actual map and have some water between the map and the caps."
+
+- The caps no longer touch the map: the terrain pixel shader's `HL_GlobeCapOut` patch and
+  `Params::InCap` are gone, and `HL_GlobeSurface` / `HL_GlobeCull` no longer drop anything under caps.
+- The map covers `north` .. `south` (test mod: 82 N .. 60 S); beyond its edges nothing is drawn
+  (vertices beyond the map, and all of a wrap copy's pass, go through `HL_GlobeAway`; before, they
+  sank into the planet), so the sky's pixels show there.
+- The sky's pixel shader (`HL_GlobeSky`, now returning float4) traces the view ray onto the sphere;
+  where it hits (only possible beyond the map's band, the map covers the rest), it draws the polar sea
+  (constants F) or the ice (constants E) from the flat z where the ice starts (D.x / D.y, computed from
+  `polar_cap_north` / `polar_cap_south`, clamped to the map's edges so the ice is never over the map),
+  with the wavy edge (5 and 9 waves round the planet, amplitude 0.35 of a 2-degree edge). The colour
+  is scaled by 0.35 (about what the lighting makes of a terrain colour). Its alpha is the glow: the
+  sky returns 1 (bloom); the planet's surface 0 (the first try kept 1 and the ice glowed).
+- Constants: six float4 (96 bytes). New keys `polar_cap_north`, `polar_cap_south`, `polar_sea_color`;
+  `polar_cap = X` sets X / -X. `Unbend` reports a hit beyond the map's band as a miss, so picking on
+  the polar seas finds nothing.
+- Measured in game (screenshot pixels): vanilla's sea near the south edge 39..47 / 52..62 / 76..87,
+  the polar sea with { 0.1 0.17 0.3 } 31 / 48 / 75, hence the default { 0.14 0.19 0.27 }.

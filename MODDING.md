@@ -2239,11 +2239,14 @@ globe = {
 	globe_height = 2500    # always a planet above it (vanilla's highest is 3000)
 	transition = 0.35      # seconds the map takes to fold in or out (0: at once)
 	north = 90             # latitude of the map's north edge
-	south = -90            # latitude of the south edge (e.g. 66 / -65: the map's own proportions,
-	                       # with open caps at the poles)
+	south = -90            # latitude of the south edge (e.g. 82 / -60: the map ends there and
+	                       # polar seas fill the rest of the planet)
 	background = "gfx/my_mod/space.png"   # optional: drawn behind the planet (PNG, JPEG, BMP)
-	polar_cap = 70         # optional: ice caps from this latitude to both poles (0 or left out: none)
-	polar_cap_color = { 0.72 0.77 0.82 }   # optional: the caps' colour (red green blue, 0..1)
+	polar_cap_north = 85   # optional: ice from this latitude to the north pole (left out: only sea)
+	polar_cap_south = -68  # optional: ice from this latitude to the south pole
+	                       # (polar_cap = 85 sets both: 85 and -85)
+	polar_cap_color = { 0.72 0.77 0.82 }   # optional: the ice's colour (red green blue, 0..1)
+	polar_sea_color = { 0.14 0.19 0.27 }   # optional: the polar seas' colour
 }
 ```
 
@@ -2279,19 +2282,23 @@ files (the loader patches whichever copy is loaded, as for attention areas).
 - The sea: the game's water surface is a coarse grid that would sink under the curved seabed, so on
   the planet it is not drawn; the seabed shows the sea in the colour map's sea tint, as dark as the
   game's water. Map modes, sea zones and borders on the sea stay.
-- Things beyond the map's edges (the frame with the logo, the filler water) sink below the surface.
-- **Polar caps** (`polar_cap`): the map's top and bottom rows are stretched round the poles; caps
-  cover them from the given latitude, with a soft, gently wavy edge. Borders, names, rivers, trees and
-  units under them are hidden, and a click there selects nothing. The colour is drawn as given (not
-  lit by the sun), a little darkened.
+- Things beyond the map's edges (the frame with the logo, the filler water) are not drawn.
+- **Polar seas and ice:** with `north` / `south` short of the poles the map covers only that band and
+  is never covered; the rest of the planet round each pole is open sea (`polar_sea_color`), with ice
+  from `polar_cap_north` / `polar_cap_south` to the pole (soft, gently wavy edge; `polar_cap_color`).
+  They are drawn by the loader in the sky's shader (no game geometry there), so they hold nothing: a
+  click there selects nothing. The colours are drawn as given (not lit by the sun), darkened to about
+  what the sun makes of the terrain; the defaults match vanilla's sea. With `north = 90` and
+  `south = -90` there are no polar seas (the map's top and bottom rows are stretched round the
+  poles).
 - **2D icons** (city names, victory points, ports, unit counters, combat icons, ...) are placed by the
   game for the flat map, so while it is a planet they are hidden: during their update the game's
   cameras report a very great height, and each icon hides by its own vanilla cutoff
   (`NGraphics ..._CUTOFF`). They come back with the flat map.
 
 **Picking:** hovering, clicking a province (the state view) and selecting find what is under the
-cursor on the planet. A click or hover in space, past the planet's rim, or on a polar cap finds
-nothing.
+cursor on the planet. A click or hover in space, past the planet's rim, or on the polar seas and
+ice finds nothing.
 
 **Moving the camera** works as on the flat map: dragging with the middle mouse button, edge panning
 and zooming toward the cursor use the game's own (flat) camera movement, which turns the planet
@@ -2318,6 +2325,7 @@ the planet it lands near, not exactly on, the place under the cursor.
 - In a game: `globe: first globe frame (camera height ..., background on)`.
 
 **Test mod** (`common/hoi4_loader_globe/hoi4_loader_test_globe.txt`: default globe, 400 / 2500,
-0.35 s, polar caps from 70 degrees, background `gfx/hoi4_loader_test/space.png`, which is not in the
+0.35 s, the map from 82 N to 60 S with polar seas and ice from 85 N and 68 S, background
+`gfx/hoi4_loader_test/space.png`, which is not in the
 repository: put any image there; decisions in `common/decisions/hoi4_loader_test_globe_decisions.txt`): "Globe: flat map",
 "Globe: back to the globe", "Globe: status (see game.log)".

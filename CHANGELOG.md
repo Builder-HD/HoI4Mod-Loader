@@ -12,9 +12,9 @@ A–F; NOTES.md has the findings and test results behind each.
   sphere in front of the mod's background image; the point the camera looks at stays on top, so
   panning turns the planet (all the way round east-west, to the poles north-south); zooming in gives
   the flat map back. Turned on by a mod's `common/hoi4_loader_globe/*.txt` (`default`, `flat_height`,
-  `globe_height`, `transition`, `north`, `south`, `background`, `polar_cap`, `polar_cap_color`);
+  `globe_height`, `transition`, `north`, `south`, `background`, `polar_cap_north`, `polar_cap_south`, `polar_cap`, `polar_cap_color`, `polar_sea_color`);
   without one the map shaders are left alone. Clicks in space find nothing; names do not show through
-  the planet; the sea keeps the flat map's colour; optional polar caps hide the stretched poles; 2D map
+  the planet; the sea keeps the flat map's colour; the map can end short of the poles, with polar seas and ice beyond it; 2D map
   icons hide while it is a planet; dragging and edge panning move the camera as on the flat map. `set_globe_view =
   yes/no` (country scope, saved as global flags `hoi4_globe_<TAG>_<0|1>`) and `is_globe_view`. Every
   3D map shader's vertex positions are bent (the loader patches the shader files as read, also mods'
