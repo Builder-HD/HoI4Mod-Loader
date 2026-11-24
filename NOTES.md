@@ -8093,3 +8093,118 @@ actual map and have some water between the map and the caps."
   the polar seas finds nothing.
 - Measured in game (screenshot pixels): vanilla's sea near the south edge 39..47 / 52..62 / 76..87,
   the polar sea with { 0.1 0.17 0.3 } 31 / 48 / 75, hence the default { 0.14 0.19 0.27 }.
+
+# Part T: several planets (`globe` planets, plan)
+
+Owner's request (2026-11-24): "adding more planets, a second earth for now, the same map; I want to be
+able to have multiple maps and keep all functionalities; both planets have separate countries, which
+work independently like normal HoI4 countries; I should be able to switch between the planets, no
+matter which country I am, by zooming out and zooming into the planet." Then: "the planets should be
+completely split maps: divisions can't move between the two planets, same with ships and planes; I
+also want to add a LOT of planets later, up to 10 smaller than earth, but 2 is a good start."
+
+Owner's choices (2026-11-24): one country per planet for the test; two new tags; branch
+`feature/planets` off `feature/globe` (not merged); planes kept apart by the loader (not by distance).
+
+## T1: the idea
+
+HoI4 has exactly one map (one province list, one state list, one pathfinding graph). Independent
+worlds with real countries therefore have to be **parts of one map**: the engine sees one big map and
+everything (supply, AI, combat, saving, multiplayer) works as normal; the loader draws each part as its
+own planet and keeps everything from crossing between them.
+
+- **Map content (a mod):** the planets are rectangles of the map, separated by gaps of lake pixels.
+  Lakes are neither land nor sea for movement: no division walks and no ship sails across them.
+- **Loader (general):** `planet = { ... }` blocks in the globe settings name the rectangles; each is
+  drawn as its own sphere, picked, and zoomed into; the loader blocks what does not need a path
+  (planes, and units sent without walking).
+- **Without `planet` blocks** the whole map is one planet: today's globe, unchanged.
+
+## T2: layout and size
+
+- **Earth-sized planets use the full map width**, stacked in bands: the engine's east-west wrap (the
+  Pacific) then works for each of them as now. Twin Earth: 5632 x (2048 + 256 gap + 2048) = 5632 x 4352
+  (both multiples of 256), about 26,800 provinces and 2,160 states.
+- **Smaller planets** sit side by side in a band (e.g. four 1408-wide planets in one band). The
+  engine's wrap is only at the map's edge, so their east-west seam needs connections: plain
+  `adjacencies.csv` lines between the seam's provinces (land and sea), if the engine treats those as
+  ordinary neighbours (T5 Q3); else the loader adds the neighbour entries at map load (the entry
+  layout is known from Part R: `mapProvince+0x70`, stride 0x30).
+- A smaller planet is drawn with its own radius (width / 2 pi); travel times on it are the map's
+  (pixels), so a small planet is also quick to cross.
+
+## T3: settings (draft)
+
+```
+globe = {
+	# ... the existing keys; north / south / polar_* become the defaults for every planet
+	planet = {
+		name = PLANET_EARTH_A          # localisation key (for logs and a later UI)
+		x = 0  y = 2304  width = 5632  height = 2048   # map pixels, y from the map's bottom (as z)
+		north = 82  south = -60        # optional: this planet's latitudes and polar seas
+		polar_cap_north = 85  polar_cap_south = -68
+	}
+	planet = {
+		name = PLANET_EARTH_B
+		x = 0  y = 0  width = 5632  height = 2048
+	}
+}
+```
+
+A trigger `is_on_planet = PLANET_EARTH_A` (state / province scope) for script follows easily.
+
+## T4: what the loader does
+
+- **Drawing:** a planet table (up to 16 planets) in the constant buffer; each vertex finds its planet
+  by its flat position and is bent onto that planet's sphere; anything in no planet (the gaps) is
+  dropped. Polar seas per planet (the sky shader traces every sphere).
+- **Where the planets are in space:** the planet the camera is over is where it is now (under the
+  camera, turning with it); the others stand beside it in a fixed arrangement, so zoomed out you see
+  them all. With many planets the camera's top height may need raising (a define in the mod).
+- **Flat map:** the camera stays inside its planet's rectangle (a planet's edges behave as the map's
+  top and bottom edges do now).
+- **Switching:** zoomed out, zooming in (wheel) with the cursor over another planet moves the camera
+  onto that planet, at the point under the cursor; a click there selects as usual.
+- **Picking:** the ray is tested against every sphere; the nearest hit gives the flat point.
+- **Nothing crosses (T5 Q4):** divisions and ships by the map itself (lake gaps); planes and units
+  moved without a path by loader hooks.
+
+## T5: questions for the first test (before writing the loader part)
+
+1. **Does the engine take a map taller than 2048?** (5632 x 4352.) The camera's limits, the minimap,
+   the terrain textures (`map/terrain/colormap*.dds`, `world_normal.bmp`) and the province bitmap
+   size have to follow. If it refuses, the planets go side by side in width instead (with seams, T2).
+2. **Twice the provinces and states:** loading time, memory, the game's caches (province ids up to
+   26,800, state ids up to 2,162).
+3. **Seams:** do plain `adjacencies.csv` lines make ordinary neighbours (land and sea)? Tested with a
+   small seam on the twin map.
+4. **Everything that moves units without a path**, to block across planets (engine work, signatures
+   on 1.20, 1.19.5, 1.19.4.2): air missions and air base range, rebasing air wings, paradrops, naval
+   bombers / carrier air, nukes and missiles, expeditionary forces and volunteers. Units handed over
+   in peace deals stay where they are (fine). Lend-lease and trade move equipment, not units: left
+   alone unless the owner wants otherwise.
+
+## T6: the test content
+
+- `tools/make_planets_map.py` builds the twin-Earth mod **from the owner's own vanilla install** into
+  `Documents/.../mod/hoi4_loader_planets_test/` (a total-conversion map mod, separate from
+  `hoi4_loader_test`). The generated files are copies of game data, so they are **not committed**;
+  only the generator is. It writes: the bitmaps (provinces, heightmap, terrain, rivers, trees, cities,
+  world normal) stacked with the lake gap; the terrain textures; `definition.csv` (planet B's
+  provinces numbered after A's, colours remapped); states, strategic regions, supply areas (new ids);
+  `buildings.txt`, `unitstacks.txt`, `weatherpositions.txt`, railways, supply nodes, adjacencies,
+  airports and rocket sites, continents (z offsets and ids remapped).
+- History: two new tags (`PLA` "Earth A", `PLB` "Earth B"; plain flags, no focus trees) owning all of
+  their planet's states, one bookmark with both. Vanilla countries own nothing, so they do not exist
+  in that scenario.
+- The globe settings with the two planets.
+
+## T7: steps (each its own commits; the owner tests in game after each)
+
+1. Generator for the twin map (map only, all states owned by `PLA` / `PLB`), load test (T5 Q1-Q3).
+   Stop and report if the engine refuses.
+2. Loader: `planet` blocks, drawing several planets, picking, flat camera kept in its planet,
+   switching by zooming. Tests (pure maths, settings, shader compile).
+3. Blocking across planets (T5 Q4), with signatures and fail-safe (without them: logged, and the
+   feature says that planes can still cross).
+4. Docs (MODDING, CHANGELOG, DEVELOPING), the test decisions (zoom to each planet, status).
