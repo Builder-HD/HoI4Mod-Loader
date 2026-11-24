@@ -86,6 +86,10 @@ src/engine_army.cpp           engine access for armies (create army, set leader,
 src/engine_conversion.cpp     engine access for equipment conversion (convert-from lists, generations)
 src/plugin_attention_area.cpp attention_area feature (outlines on the map, camera focus, the area selector)
 src/engine_attention.cpp      engine access for it (outlines, stripe texture, camera) and its hooks
+src/plugin_globe.cpp          globe feature (the map as a planet: settings, set_globe_view, per-frame bend, picking)
+src/globe.cpp                 its pure part: the settings file, the bend and its inverse, the map shader patch
+src/globe_d3d.cpp             its shader constants: the loader's constant buffer on the game's DX11 device
+src/engine_globe.cpp          engine access for it (map camera, engine cameras, visible area) and its hooks
 src/area_select.h, .cpp       the area block (ids, state = this, owner/controller/coastal, random_provinces) and selection
 src/engine_province_data.cpp  province data for selection (ids, rects, coastal, controller, state owner)
 src/native_script.h, .cpp     native effect/trigger API: schemas, registration, parsing, docs
@@ -363,6 +367,10 @@ once, and from then on the hooks do what the game does and the feature switches 
 | `attention_area` | the outline owner's `SetHoveredProvince` (0x140bbff00) | the construction queue and map hover, main thread | with railway_queue's hover mark: drops the hovered railway line's end provinces, so the game's hovered-item mark does not cover the loader's outline |
 | `attention_area` | `CInGameIdler` centre-on-province (vtable slot after the id lookup, 0x140e3494b tail) | right-click on queue entries, goto_state | with the hover mark: a right-click on the hovered railway line fits the whole line instead (next frame) |
 | `attention_area` | the map renderer's outline colour table build (0x14130b730) | once, in the map graphics setup | after the original: colour 14 white, 32 extra slots appended for the areas' line colours |
+| `globe` | the map camera's visible-area update (0x1412f3c90 in 1.20) | the map camera's per-frame update, main thread (also the main menu's camera) | after the original, only for the in-game camera while the globe is wanted: publishes the bend for the shaders, opens the three engine cameras' frustum planes, widens the visible area, keeps the camera over the map (whole map widths); otherwise publishes "flat" |
+| `globe` | the engine camera's screen-to-ray (0x142358dc0) | map picking (hover, clicks, objects), edge panning, zoom to the cursor; any engine camera | only for the in-game map camera's three cameras while bent: aims the ray from the camera at the flat map point the cursor sees on the planet (the wrap copies' rays shifted by a map width) |
+| `globe` | the map camera's north/south edge clamp (0x1412f4550) | the camera's per-frame update | while bent: skipped (the eye passes unchanged), so the poles can be reached |
+| `globe` | `d3d11.dll!D3D11CreateDevice`, then the immediate context's `VSSetShader` (vtable slot 11) | the game's device creation; every vertex shader the game sets | creates the loader's constant buffer (b13) on the device; after each `VSSetShader` binds it (refreshed when the values changed) |
 
 The loader's own speed request, unpause and date refresh run from `OnMainThreadFrame`, outside
 the tick. Each hook logs once which thread it runs on (`time_control: ... runs on thread`), the

@@ -7893,3 +7893,83 @@ logged, feature off, map flat.
 5. Map modes, names, borders, rivers, weather, fog of war on the globe.
 6. `set_globe_view = no` / `yes` from the test mod's decisions; save, load, second game.
 7. Frame rate flat vs globe.
+
+## S7: implementation (2026-11-24, branch `feature/globe`)
+
+- **Files:** `globe.cpp/.h` (pure: settings file, bend and inverse, shader text patch; unit test
+  `globe_test`), `globe_d3d.cpp/.h` (the constant buffer), `engine_globe.cpp` (signatures, hooks),
+  `plugin_globe.cpp` (feature). `vfs.cpp`: several features may patch one file (the patchers run in
+  order on each other's result): `attention_area` and the globe both patch `border.shader`.
+- **Signatures (1.20):** `kSigGlobeArea` (visible area, hooked), `kSigGlobeScreenRay` (hooked),
+  `kSigGlobeEdgeClamp` (hooked), `kSigGlobeFrustum` (planes offset), `kSigGlobePickCams` (copies,
+  flags, wrap), `kSigGlobeCameraClamp` (map global and size, eye, look-at), `kCodeGlobeAreaStore`
+  (area points, first match in the area function), plus attention_area's `kSigCameraLookAt` for the
+  targets. Cross-checked: main camera in two places, one map in both clamps, the copies' stride, the
+  targets right after eye and look-at. All unique and identical on 1.20, 1.19.5 and 1.19.4.2
+  (`check_code_shapes.py`: 98/98 on each; smoke `2/191`). 1.19.3 / 1.19.2: no copies, unchecked.
+- **Shader patch:** 11 files (`pdxmap`, `pdxwater`, `border`, `river`, `tree`, `mapname`,
+  `maparrow`, `strait`, `traderoute`, `pdxmesh`, `particle`); in each vertex MainCode block (not
+  `*Shadow*`) `mul( ViewProjectionMatrix, X )` -> `mul( ViewProjectionMatrix, HL_Globe( X ) )` and
+  the depth-bias `dot( P, float4( GetMatrixData( ViewProjectionMatrix, 2, ...` bends P; the
+  constants (`cbuffer HL_GlobeConstants : register( b13 )`) and `HL_Globe` go in front of each patched
+  block, guarded, DX11 only. All 42 cached vanilla vertex shaders compile with it (vs_5_0).
+- **The bend (`HL_Globe`, `Globe::Bend`):** longitude = (x - Lx) wrapped by the map width / R,
+  latitude = (z - z_equator) * radians per unit; the sphere is turned so L is on top; heights go
+  outwards. R = W / 2pi / t, the z scale blends from 1 (flat) to the latitude band's (t = 1), so
+  t -> 0 is the identity. Anything beyond the map's four edges (frame, logo, filler water) sinks by
+  4 t per unit outside. A wrap copy's pass (its `vCamPos.x` a map width away from L) gets the same
+  planet in its frame.
+- **Per frame:** after the map camera's update and from the main-thread frame callback (the game
+  updates the camera only while it moves): t from the eye height, L = the eye-to-look-at ray on
+  y = 0; publish; open the three engine cameras' frustum planes (zero normal, d = -1e30: the update
+  negates the planes, so "outside" is n.p + d > 0); widen the visible area's corners x50 around L;
+  keep L inside 0..W by shifting eye, look-at and targets by whole map widths (next frame). Outside
+  a game or with the view off: t = 0.
+- **Picking:** the screen-ray hook, for the in-game map camera's three cameras while t > 0: the ray
+  (a copy's shifted back by its map width) is intersected with the sphere (a miss: the sphere's
+  point nearest the ray), turned into the flat point, taken on the camera's side of the seam,
+  shifted into the copy's frame, and the ray's direction is aimed from the camera at it (origin
+  unchanged), so edge panning and zoom to the cursor keep a direction.
+- **Script:** `set_globe_view = yes/no` (country scope) sets `hoi4_globe_<TAG>_1|0` (global flags,
+  the other cleared; the NOTES D1 text said country flags, global ones per tag do the same and follow
+  map_adjacency's storage); `is_globe_view = yes/no`. The view: the local player's country's flag,
+  else `default`.
+
+## S8: in-game test (2026-11-24, 1.20, test mod, Germany 1936; run by us)
+
+Mouse and wheel through `SendInput`/`mouse_event` (keyboard still does not reach the game).
+
+1. **Start:** loader.log: the layout line, `globe: on (default globe, flat up to height 800, globe from
+   2500, latitudes -90 to 90)`, the DX11 device and buffer b13, 11 shader patches when the map
+   loads; `border.shader` patched by both features in turn. No shader errors in error.log.
+2. **Zoom:** flat up to 800, curving between, a whole planet at 3000 (about a third of the screen
+   high), the sky and clouds behind it. Europe, Africa, Asia and the Americas recognisable; names,
+   borders, rivers and the political colours follow the surface.
+3. **Bugs found and fixed on the way:** (a) the map frame and logo stood on the north pole like a hat
+   -> geometry beyond the edges sinks; (b) hovering picked Burma over Germany: the game also picks
+   with the two wrap copies, whose rays missed the sphere -> copies' rays shifted back; (c) edge
+   panning went the wrong way and the view drifted: the first fix (a straight-down ray) killed the
+   ray's direction -> rays now keep the camera as origin; (d) panning east stalled at x 4790: the flat
+   point came back wrapped (x 200 instead of 5832) -> taken on the camera's side of the seam; (e) the
+   camera then ran off the map (x 23725 after a few turns) -> shifted back by map widths; (f) past
+   the seam the planet showed only filler water: with the copies switched off nothing drew the map
+   there -> copies left on, each drawing the planet in its frame (this also fixed a blue haze: the
+   distance fog measured flat distances from the wrong camera); (g) `set_globe_view` at the highest
+   zoom showed only after the next camera move -> refreshed every frame; (h) the Atlantic looked washed
+   out: where a copy camera is active, both it and the main camera drew the same part of the planet
+   and the transparent layers (water, borders) blended twice -> each point belongs to one pass (the
+   copy whose offset matches its flat distance from the camera; the boundary is the far side's
+   middle meridian, which shows as a thin line only when looking down on a pole).
+4. **Picking:** hover over Germany: Sachsen; west of it: Limousin; Libya: Libyan Desert; a click on
+   China's coast opened Fujian's state view. Zooming in toward Japan lands on the flat map near
+   Japan / the Sea of Japan.
+5. **Turning:** north up to the north pole (zooming out toward a northern point even puts the pole in
+   the middle), south down to the south pole; east and west round and round with no seam: Europe ->
+   India -> China -> Pacific -> Americas -> Atlantic; dragging the map turns it too.
+6. **Switch and save:** "Globe: flat map" -> `is_globe_view` false, zooming out stays flat (the
+   vanilla map). Autosave on 1 Feb, game restarted, Continue: `globe: 1 saved view choice(s) read`,
+   still flat although the mod's default is globe. "Globe: back to the globe" -> the planet again;
+   the status decision logs `GER sees the globe`.
+
+**Not done / open:** multiplayer; 2D icons are not moved (the game hides them at globe heights);
+lighting stays flat; edge panning at globe height is fast (the game pans by flat distances).

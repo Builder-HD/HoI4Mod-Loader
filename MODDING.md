@@ -51,6 +51,7 @@ Current features:
 | `engine_on_actions` | engine (needs `lifecycle`) | `hoi4_loader_plugin_engine_on_actions` | on_actions vanilla never fires: `on_construction_finished`, `on_technology_researched`, `on_battle_started`, `on_battle_won`, `on_battle_lost`, `on_division_trained`, `on_division_destroyed`, `on_naval_battle_won`, `on_naval_battle_lost`, `on_ship_sunk`, `on_decision_taken`, `on_province_captured`, `on_focus_completed`, and the data commands `constructed_building`, `researched_technology`, `taken_decision`, `completed_focus`, `constructed_province`, `battle_province`, `captured_province`, see below |
 | `map_adjacency` | engine (needs `lifecycle`) | `hoi4_loader_plugin_map_adjacency` | `set_province_adjacency`, `reset_province_adjacency`, `province_adjacency_passable`, `set_state_impassable`, `reset_state_impassable`: close and open borders between provinces and whole states at runtime (as `map/adjacencies.csv`'s and `history/states`' impassable), saved, see below |
 | `attention_area` | engine (needs `lifecycle`) | `hoi4_loader_plugin_attention_area` | `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area`: mark any set of provinces on the map (a line and a fill shader each, built-in or a mod's own) and move the camera to it; display only, not saved, see below |
+| `globe` | engine (needs `lifecycle`) | `hoi4_loader_plugin_globe` | the map as a planet when zoomed out, turned on by a mod's `common/hoi4_loader_globe/` file; `set_globe_view` (saved), `is_globe_view`; display only, DX11 only, see below |
 
 On an unknown build the file tier stays on, the engine tier is off, and `loader.log` lists the
 disabled features and prints the exact line to add to `loader_config.ini`. A feature whose init
@@ -164,6 +165,7 @@ when the loader is missing or a feature is off. Without them, using a loader tri
 | the engine on_actions, `constructed_building`, `researched_technology`, `taken_decision`, `completed_focus`, `constructed_province`, `battle_province`, `captured_province` | `scripted_triggers/hoi4_loader_feature_engine_on_actions.txt` |
 | `set_province_adjacency`, `reset_province_adjacency`, `province_adjacency_passable`, `set_state_impassable`, `reset_state_impassable` | `scripted_triggers/hoi4_loader_feature_map_adjacency.txt` |
 | `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area` | `scripted_triggers/hoi4_loader_feature_attention_area.txt` |
+| `set_globe_view`, `is_globe_view` | `scripted_triggers/hoi4_loader_feature_globe.txt` |
 
 - **Combinations:** a block that combines features needs each feature's stub and guard, e.g.
   `air_superiority` inside `strategic_region` needs both `region_control` and `region_scope`.
@@ -2211,3 +2213,78 @@ entries alike. It is drawn on this
 machine only, from the UI; nothing in the game state changes. It goes away a moment after the
 pointer leaves the entry. A right-click on the entry moves the camera to show the whole line (a line
 too long to fit is centred at the highest zoom) instead of the game's centring on its start.
+
+## Globe view (`globe`)
+
+The map as a planet: zoom out and the flat map curves into a sphere; zoom back in and it is the
+game's flat map again. The point the camera looks at stays on top, facing you, so panning turns the
+planet (east and west all the way round, north and south up to the poles) and zooming toward the
+cursor works as usual. The planet is built from the map as it is: the map's width is the equator,
+its north and south edges are the poles (stretched there, as on any flat world map wrapped round a
+ball).
+
+**A mod turns it on** with a file in `common/hoi4_loader_globe/` (any name; several files and
+blocks: later keys replace earlier ones):
+
+```
+globe = {
+	default = yes          # a game starts as a globe (no: flat until set_globe_view = yes)
+	flat_height = 800      # camera height up to which the map stays flat
+	globe_height = 2500    # camera height from which it is the whole planet; it curves in between
+	north = 90             # latitude of the map's north edge
+	south = -90            # latitude of the south edge (e.g. 66 / -65: the map's own proportions,
+	                       # with open caps at the poles)
+}
+```
+
+Without such a file in an enabled mod the loader leaves the map shaders alone and the map stays flat
+(`loader.log`: "no enabled mod has a common/hoi4_loader_globe file"). Vanilla's maximum camera
+height is 3000 (`NGraphics.CAMERA_MAX_HEIGHT`); a mod's defines can raise it.
+
+```
+set_globe_view = yes   # country scope: that country's players see the globe; no: the flat map
+is_globe_view = yes    # country scope: true if that country's view is the globe
+
+# guard (see "Native script commands")
+hoi4_loader_feature_globe = yes
+```
+
+- **Who sees it:** the view follows the local player's country: its `set_globe_view`, else the mod
+  file's `default`. Each player of a multiplayer game sees their own country's choice.
+- **Saved:** `set_globe_view` sets a global flag, `hoi4_globe_<TAG>_1` (globe) or `hoi4_globe_<TAG>_0`
+  (flat), and clears the other one, so a decision can turn a game into a globe for good. Loading a
+  save reads the flags (the later one if both are there). Without the loader they are unused flags.
+- **Display only:** nothing in the game state changes besides the flag; every machine sets the same
+  flag in the same effect, so multiplayer stays in sync whether or not other players have the loader.
+- **Tooltip:** "The map is shown as a globe." / "The map is shown flat." Translatable:
+  `HOI4_LOADER_SET_GLOBE_VIEW_ON`, `HOI4_LOADER_SET_GLOBE_VIEW_OFF`.
+
+**What curves:** everything the game draws on the map in 3D: terrain, water, borders, rivers, trees,
+state and country names, arrows, units, buildings, particles, and the shaders of mods that replace
+these files (the loader patches whichever copy is loaded, as for attention areas). Things beyond the
+map's edges (the frame with the logo, the filler water) sink below the surface. 2D icons (unit
+counters, victory points) are not moved: the game hides them at globe heights; between
+`flat_height` and about 1200 the map is still nearly flat.
+
+**Picking:** hovering, clicking a province (the state view), selecting and zoom to the cursor find
+what is under the cursor on the planet. Pointing past the planet's edge picks the nearest place on
+its rim.
+
+**Limits:**
+- DirectX 11 only (the Windows default). With the DX9 or OpenGL renderer the map stays flat
+  (`loader.log` names no device).
+- Lighting is the flat map's (the sun comes from the same side everywhere); day and night still
+  follow the longitude.
+- 3D models stand upright as on the flat map; they are only drawn close up, where the map is flat.
+- Edge panning at globe heights is fast (the game pans by the flat distance under the cursor).
+
+**Checks and messages** (`loader.log`):
+- At start: `Globe: map ... cameras +0x10/+0x230/+0x450 ...` (the resolved layout), `globe: on
+  (default globe, flat up to height 800, ...)`, `globe: Direct3D 11 device ..., constant buffer in
+  slot b13`, and one `globe: a map shader was patched (n position(s) bent)` per map shader loaded.
+- Problems in the settings files: `globe: <mod>/<file> line 3: unknown key 'wobble'`.
+- In a game: `globe: first bent frame (camera height 900, curvature 0.01, ...)`.
+
+**Test mod** (`common/hoi4_loader_globe/hoi4_loader_test_globe.txt`: default globe, 800 / 2500;
+decisions in `common/decisions/hoi4_loader_test_globe_decisions.txt`): "Globe: flat map", "Globe:
+back to the globe", "Globe: status (see game.log)".
