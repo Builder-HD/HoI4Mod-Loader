@@ -7852,10 +7852,15 @@ logged, feature off, map flat.
 - **D1, how it is turned on.**
   - a) A mod file `common/hoi4_loader_globe/*.txt` turns the feature on and sets its numbers (D3,
     D4, default on/off). Without such a file nothing is patched (as `attention_area`'s shader patch).
-  - b) An effect `set_globe_view = yes/no` for the player's own country (as `goto_state`): view
-    only, nothing in the game state, so multiplayer cannot desync; each player chooses.
-  - c) A trigger `is_globe_view`.
-  - Proposed: a + b + c.
+  - b) An effect `set_globe_view = yes/no` in a country scope. It is **saved**: it sets a country
+    flag on that country (`hoi4_loader_globe_on` / `hoi4_loader_globe_off`, the other one cleared),
+    so a decision can turn a game into a globe for good. The view follows the flags of the local
+    player's country: a set flag wins over the mod file's `default`. Checked on game entry (also
+    after loading a save) and when the flags change. Effects run on every machine, so the flags are
+    the same everywhere; only the view is local, so multiplayer cannot desync and each player's
+    country has its own setting. Without the loader the flags are ordinary unused country flags.
+  - c) A trigger `is_globe_view` (country scope: that country's setting as above).
+  - **Owner's choice (2026-11-24): a + b + c, with b saved in the savegame.**
 - **D2, rotation.** Camera-driven (S3.4) for now. A free tilt/roll (e.g. right-drag) would need
   input hooks and new picking maths; proposed later if wanted.
 - **D3, latitudes.** Proposed: the map's z range spans the full sphere (south edge = south pole,
