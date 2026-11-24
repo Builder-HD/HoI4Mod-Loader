@@ -12,7 +12,7 @@ bool Install(const std::wstring& backgroundPath);
 bool Ready();
 // The background image is on the device.
 bool HaveBackground();
-// The five float4 the shaders read (Globe::Params a..e, 20 floats). Any thread; uploaded on the next
+// The six float4 the shaders read (Globe::Params a..f, 24 floats). Any thread; uploaded on the next
 // vertex shader the game sets.
 void Publish(const float* data);
 

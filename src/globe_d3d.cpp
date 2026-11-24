@@ -40,7 +40,7 @@ std::atomic<bool> g_ready{false};
 std::wstring g_backgroundPath;  // set at init, read when the device is made
 
 SRWLOCK g_lock = SRWLOCK_INIT;
-float g_data[20] = {};
+float g_data[24] = {};
 std::atomic<long> g_version{0};
 long g_uploaded = -1;  // render thread only
 std::atomic<bool> g_bound{false};

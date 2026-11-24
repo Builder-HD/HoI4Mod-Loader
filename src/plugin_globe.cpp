@@ -154,7 +154,7 @@ void Publish(const Globe::Params& p) {
     AcquireSRWLockExclusive(&g_paramsLock);
     g_params = p;
     ReleaseSRWLockExclusive(&g_paramsLock);
-    static_assert(sizeof(Globe::Params) == 20 * sizeof(float), "the shader constants are 20 floats");
+    static_assert(sizeof(Globe::Params) == 24 * sizeof(float), "the shader constants are 24 floats");
     GlobeD3D::Publish(p.a);
 }
 
@@ -281,8 +281,8 @@ void ScreenRay(void* engineCamera, float dir[3], float origin[3], bool fromCamer
     float flat[2];
     bool hit = false;
     if (!Globe::Unbend(p, o, dir, g_mapW, g_mapH, flat, &hit)) return;
-    if (!hit || p.InCap(flat[1])) {
-        // Picking past the planet's rim or on a polar cap: a ray onto a point far off the map, which
+    if (!hit) {
+        // Picking past the planet's rim or on the polar seas: a ray onto a point far off the map, which
         // holds nothing.
         flat[0] = o[0], flat[1] = -100000.0f;
     } else {
@@ -429,9 +429,9 @@ bool GlobeInit() {
     }
     std::wstring background = FindBackground();
     Log("globe: on (default %s, flat below height %.0f, a globe from %.0f or once the view reaches past the map's edge, "
-        "folding in %.2f s, latitudes %.0f to %.0f, polar caps %s, background %s)",
+        "folding in %.2f s, latitudes %.0f to %.0f, ice from %.0f / %.0f, background %s)",
         g_settings.defaultOn ? "globe" : "flat", g_settings.flatHeight, g_settings.globeHeight, g_settings.transition, g_settings.south,
-        g_settings.north, g_settings.polarCap > 0 ? (std::to_string((int)g_settings.polarCap) + " degrees").c_str() : "none",
+        g_settings.north, g_settings.polarCapNorth, g_settings.polarCapSouth,
         background.empty() ? "the game's sky" : ModList::Narrow(background).c_str());
     if (!register_file_patch(L"gfx/FX/pdxmap.shader", &PatchTerrain)) {
         Log("globe: the shader patch for pdxmap.shader could not be registered; globe off");

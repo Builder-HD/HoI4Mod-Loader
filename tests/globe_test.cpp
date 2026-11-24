@@ -128,10 +128,21 @@ static void TestSettings() {
         Globe::Settings c;
         std::vector<Globe::Problem> pc;
         Globe::ParseFile("globe = { polar_cap = 70 polar_cap_color = { 0.5 0.6 0.7 } }", "t", &c, &pc);
-        Check(pc.empty() && c.polarCap == 70 && c.polarColor[0] == 0.5f && c.polarColor[2] == 0.7f, "polar caps read");
+        Check(pc.empty() && c.polarCapNorth == 70 && c.polarCapSouth == -70 && c.polarColor[0] == 0.5f && c.polarColor[2] == 0.7f,
+              "polar caps read");
         Globe::Params cp;
         Globe::MakeParams(c, 5632, 2048, 1.0f, 1000, 1024, &cp);
-        Check(cp.d[3] == 1.0f && cp.InCap(2040) && cp.InCap(5) && !cp.InCap(1024) && !cp.InCap(1800), "polar caps placed");
+        Check(cp.d[3] == 0.0f, "no polar seas while the map reaches both poles");
+        Globe::ParseFile("globe = { north = 80 south = -60 polar_cap_north = 84 polar_cap_south = -68 "
+                         "polar_sea_color = { 0.1 0.2 0.3 } }", "t", &c, &pc);
+        Check(pc.empty() && c.polarSeaColor[1] == 0.2f, "polar seas read");
+        Globe::MakeParams(c, 5632, 2048, 1.0f, 1000, 1024, &cp);
+        float zPerDeg = 2048.0f / 140.0f;
+        Check(cp.d[3] == 1.0f && Near(cp.d[0], 144 * zPerDeg, 0.5) && Near(cp.d[1], -8 * zPerDeg, 0.5) && cp.f[2] == 0.3f,
+              "polar seas and ice placed beyond the map's edges");
+        Globe::ParseFile("globe = { polar_cap_north = 75 polar_cap_south = -50 }", "t", &c, &pc);
+        Globe::MakeParams(c, 5632, 2048, 1.0f, 1000, 1024, &cp);
+        Check(cp.d[0] == 2048.0f && cp.d[1] == 0.0f, "ice never over the map");
         Globe::ParseFile("globe = { polar_cap_color = { 2 0 0 } }", "t", &c, &pc);
         Check(pc.size() == 1, "bad cap colour refused");
     }
@@ -251,7 +262,7 @@ static int TestCompilePixel(const std::string& dir) {
         water += n;
         size_t r = s.find("return float4( color, 1.0f );");
         if (s.find("VS_OUTPUT_SKY") != std::string::npos && r != std::string::npos) {
-            s.replace(r, strlen("return float4( color, 1.0f );"), "return float4( HL_GlobeSky( color, Input.pos ), 1.0f );");
+            s.replace(r, strlen("return float4( color, 1.0f );"), "return HL_GlobeSky( color, Input.pos );");
             ++sky;
         }
         ID3DBlob *code = nullptr, *msg = nullptr;
