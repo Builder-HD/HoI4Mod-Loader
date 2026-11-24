@@ -32,7 +32,7 @@ struct PatchedCopy {
 };
 struct FilePatch {
     std::wstring suffix;    // folded like VirtualFile::suffix
-    FilePatcher patcher;
+    std::vector<FilePatcher> patchers;  // applied in registration order (features sharing a file)
     std::vector<PatchedCopy> copies;  // under g_genLock
 };
 static std::vector<FilePatch> g_patches;
@@ -123,12 +123,12 @@ bool register_file_patch(const wchar_t* pathSuffix, FilePatcher patcher) {
             Log("ERROR: register_file_patch: '%ls' is already a virtual file", pathSuffix);
             return false;
         }
-    for (const FilePatch& p : g_patches)
-        if (p.suffix == s) {
-            Log("ERROR: register_file_patch: '%ls' is already patched", pathSuffix);
-            return false;
+    for (FilePatch& p : g_patches)
+        if (p.suffix == s) {  // a second feature patches the same file: runs after the first
+            p.patchers.push_back(patcher);
+            return true;
         }
-    g_patches.push_back({s, patcher, {}});
+    g_patches.push_back({s, {patcher}, {}});
     return true;
 }
 
@@ -250,12 +250,21 @@ static const wchar_t* FindPatchedFile(const Ch* name, DWORD access, DWORD dispos
             PatchedCopy copy{full, L""};
             std::string original, patched;
             bool read = ReadWholeFile(path, &original);
-            try {
-                patched = read ? p.patcher(original) : std::string();
-            } catch (...) {
-                patched.clear();
-                Log("ERROR: file patch for '%ls' threw; serving the original", p.suffix.c_str());
-            }
+            // Each patcher gets the previous one's result; one that declines ("") leaves it as it is.
+            std::string current = original;
+            bool changed = false;
+            if (read)
+                for (FilePatcher patcher : p.patchers) {
+                    std::string next;
+                    try {
+                        next = patcher(current);
+                    } catch (...) {
+                        next.clear();
+                        Log("ERROR: a file patch for '%ls' threw; that patch is skipped", p.suffix.c_str());
+                    }
+                    if (!next.empty()) current.swap(next), changed = true;
+                }
+            if (changed) patched.swap(current);
             if (!read) {
                 Log("ERROR: file patch: cannot read %ls; serving the original", path.c_str());
             } else if (patched.empty()) {

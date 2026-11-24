@@ -52,7 +52,8 @@ bool register_virtual_file(const wchar_t* pathSuffix, ContentGenerator generator
 // Patches existing files instead of replacing them: on the first read of each existing file whose
 // path ends with `pathSuffix` (vanilla's and every mod's copy separately), `patcher` gets that
 // file's bytes and returns the patched content, or an empty string to serve the original. Must be
-// called before VfsStart(). Runs on the thread that opens the file, under a lock.
+// called before VfsStart(). Runs on the thread that opens the file, under a lock. Several features
+// may patch the same file: their patchers run in registration order, each on the previous result.
 using FilePatcher = std::string (*)(const std::string& original);
 bool register_file_patch(const wchar_t* pathSuffix, FilePatcher patcher);
 
