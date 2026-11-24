@@ -217,6 +217,7 @@ def check(path, codes):
     results += check_engine_on_actions(img, codes, text_va, text)
     results += check_map_adjacency(img, codes, text_va, text)
     results += check_globe(img, codes, text_va, text)
+    results += check_large_map(img, codes, text_va, text)
     return results
 
 
@@ -963,6 +964,31 @@ def check_globe(img, codes, text_va, text):
     return [('kSigGlobe* / kCodeGlobeAreaStore (cameras +0x%x/+0x%x/+0x%x, in use +0x%x/+0x%x, eye +0x%x, look +0x%x, '
              'area +0x%x, planes +0x%x, map +0x%x/+0x%x, camera rays call it: %s)' % (cams[0], cams[1], cams[2], flags[0], flags[1], eye, lk, pts, planes, w, h, calls_ok),
              ok, hex(area))]
+
+
+def check_large_map(img, codes, text_va, text):
+    """large_map (NOTES.md Part T): the map scratch buffer's two sizes are 50 MB and the size field
+    lies 8 past the pointer field."""
+    hdr = pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h'
+    sigs, _ = cs.load_signatures(hdr)
+    sigs, k = dict(sigs), load_constants(hdr)
+    m = [text_va + x.start() for x in cs.compile_pattern(sigs['kSigMapScratchSize']).finditer(text)]
+    if len(m) != 1:
+        return [('kSigMapScratchSize', False, 'missing')]
+    at = m[0]
+    u32 = lambda va: struct.unpack_from('<I', img.d, img.va2off(va))[0]
+    size, ptr = u32(at + 2), u32(at + k['kSigMapScratchSizePtrDisp'])
+    a, b = u32(at + k['kSigMapScratchSizeImm1']), u32(at + k['kSigMapScratchSizeImm2'])
+    m = [text_va + x.start() for x in cs.compile_pattern(sigs['kSigTextureFileLimit']).finditer(text)]
+    lim = u32(m[0] + k['kSigTextureFileLimitImm']) if len(m) == 1 else None
+    return [('kSigMapScratchSize (size +0x%x, pointer +0x%x, %d / %d bytes)' % (size, ptr, a, b),
+             size == ptr + 8 and a == b == 0x3200000, hex(at)),
+            ('kSigTextureFileLimit (%s bytes)' % lim, lim == 0x1000000, hex(m[0]) if len(m) == 1 else 'missing')] + [
+            ('%s (shifts %s)' % (name, sh), sh == [8, 8], hex(va) if va else 'missing')
+            for name, va, sh in [(n, v, [img.d[img.va2off(v + k[n + s])] for s in ('Shift1', 'Shift2')] if v else None)
+                                 for n, v in [(n, (lambda mm: mm[0] if len(mm) == 1 else None)(
+                                     [text_va + x.start() for x in cs.compile_pattern(sigs[n]).finditer(text)]))
+                                     for n in ('kSigTerrainBlocksBuild', 'kSigTerrainBlocksCamera')]]]
 
 
 def check_province_terrain(img, codes, text_va, text):

@@ -1485,6 +1485,29 @@ static const size_t kSigGlobeCamPoint1Call = 0xf, kSigGlobeCamPoint2Call = 0x10;
 // engine camera that sees it; the icons compare their cutoffs (NGraphics *_CUTOFF) with its height.
 SIG(kSigGlobeIcons, "48 8B C4 48 89 58 18 48 89 50 10 55 56 57 41 54 41 55 41 56 41 57 48 8D A8 78 FD FF FF 48 81 EC 50 03 00 00 0F 29 70 B8 0F 29 78 A8 44 0F 29 40 98 44 0F 29 48 88 44 0F 29 90 78 FF FF FF 44 0F 29 98 68 FF FF FF 44 0F 28 C2 4C 8B E2 4C 8B F9")
 
+// --- large_map (NOTES.md Part T; addresses 1.20) -------------------------------------------------
+// The application's start (1.20 0x1422963aa, in FUN_142296360): the map scratch buffer, 50 MB, never
+// checked by the map texture builders (FUN_1412f2550 & co.): `mov dword [rdi+0x350], 0x3200000;
+// mov ecx, 0x3200000; call new; mov [rdi+0x348], rax`. The loader raises both immediates for a larger map.
+SIG(kSigMapScratchSize, "C7 87 ?? ?? 00 00 00 00 20 03 B9 00 00 20 03 E8 ?? ?? ?? ?? 48 89 87 ?? ?? 00 00")
+static const size_t kSigMapScratchSizeImm1 = 6, kSigMapScratchSizeImm2 = 11, kSigMapScratchSizePtrDisp = 23;
+// The texture file loader (1.20 FUN_14248da20, at 0x14248da47): refuses a file over 16 MB ("Failed to
+// load texture larger than MAX_TEXTURE_SIZE"): `mov rcx, r8; call size; cmp eax, 0x1000000; jbe ok`.
+// The file is read into a buffer grown to its size, so only the limit stands in the way.
+SIG(kSigTextureFileLimit, "49 8B C8 E8 ?? ?? ?? ?? 3D 00 00 00 01 0F 86 ?? ?? ?? ?? 80 3D")
+static const size_t kSigTextureFileLimitImm = 9;
+// The terrain is drawn in blocks of 256 x 256 map pixels; the renderer keeps one entry per block in a
+// fixed array of 256 (1.20 renderer +0x5348, 8 bytes each, filled by FUN_1413155d0) and each terrain
+// chunk stores its block as a byte (FUN_141bbc520 builds the chunks, keyed type * 256 + block). Both
+// count the blocks as (width >> 8) x (height >> 8); a map of more than 256 blocks overflows the array
+// into the renderer's texture pointers. The loader makes both use larger blocks (a larger shift).
+// The chunk builder: `cdq; movzx r10d, dl; add r10d, eax; sar r10d, 8` (width) and `... sar ecx, 8` (height).
+SIG(kSigTerrainBlocksBuild, "44 0F B6 D2 44 03 D0 41 C1 FA 08 44 89 54 24 ?? 44 8B 41 0C 41 8B C0 99 0F B6 CA 03 C8 C1 F9 08 41 8B C1 99 41 F7 FA")
+static const size_t kSigTerrainBlocksBuildShift1 = 10, kSigTerrainBlocksBuildShift2 = 31;
+// The per-block camera choice (FUN_1413155d0): `... sar r12d, 8` (width) and `... sar ecx, 8` (height).
+SIG(kSigTerrainBlocksCamera, "44 0F B6 E2 44 03 E0 41 8B 40 44 99 41 C1 FC 08 0F B6 CA 03 C8 41 8B 40 40 99 C1 F9 08 41 F7 FC")
+static const size_t kSigTerrainBlocksCameraShift1 = 15, kSigTerrainBlocksCameraShift2 = 28;
+
 #undef CODE
 #undef SIG
 #undef ANCHOR

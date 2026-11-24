@@ -83,6 +83,7 @@ add_library(hoi4_loader SHARED
     src/globe_d3d.cpp
     src/engine_globe.cpp
     src/plugin_globe.cpp
+    src/plugin_large_map.cpp
     src/engine_events.cpp
     src/plugin_engine_on_actions.cpp
     src/plugin_attention_area.cpp

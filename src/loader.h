@@ -161,3 +161,4 @@ bool MapAdjacencyInit();        // plugin_map_adjacency.cpp
 bool EquipmentConversionInit();  // plugin_equipment_conversion.cpp
 bool AttentionAreaInit();        // plugin_attention_area.cpp
 bool GlobeInit();                // plugin_globe.cpp
+bool LargeMapInit();             // plugin_large_map.cpp

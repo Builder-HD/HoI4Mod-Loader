@@ -29,4 +29,5 @@ hoi4_loader_init = {
 	clr_global_flag = hoi4_loader_plugin_equipment_conversion
 	clr_global_flag = hoi4_loader_plugin_attention_area
 	clr_global_flag = hoi4_loader_plugin_globe
+	clr_global_flag = hoi4_loader_plugin_large_map
 }
