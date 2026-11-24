@@ -307,9 +307,35 @@ int StateOwner(int stateId);                 // tag, 0 if unknown
 int StateObjectOwner(const void* state);     // the same for a state object
 bool ProvinceRect(int id, int rect[4]);      // map pixels {x, y, width, height}
 
+// --- Globe view (globe; engine_globe.cpp, NOTES.md Part S) -------------------------------------
+// The map camera ("map camera": the UI's, UiMapCamera()) holds three engine cameras (the main one
+// and two copies shifted by the map width for the wrap); each engine camera has its position,
+// matrices and frustum planes.
+void ResolveGlobe();
+bool HaveGlobe();  // every signature, offsets cross-checked
+struct GlobeHooks {
+    // After the map camera's per-frame update (main thread; any map camera, also the main menu's).
+    void (*afterUpdate)(void* mapCamera);
+    // After an engine camera made a screen ray; may replace it. Any thread the game calls it on.
+    void (*screenRay)(void* engineCamera, float dir[3], float origin[3]);
+    // True: skip the map camera's north/south edge clamp (the eye is passed through unchanged).
+    bool (*skipEdgeClamp)(void* mapCamera);
+};
+bool GlobeInstall(const GlobeHooks& hooks);  // queues the three hooks; init only
+void* GlobeEngineCamera(void* mapCamera, int which);  // 0 main, 1 and 2 the wrap copies
+bool GlobeMapSize(float* width, float* height);       // false before the map is loaded
+// The map camera's eye and look-at (x, y, z).
+bool GlobeCameraPose(void* mapCamera, float eye[3], float look[3]);
+void GlobeHideCopies(void* mapCamera);                // the two wrap copies off for this frame
+void GlobeShiftCamera(void* mapCamera, float dx);     // eye, look-at and their targets moved by dx in x
+void GlobeOpenFrustum(void* engineCamera);            // the six planes accept everything
+// The visible area's four corners pushed out from (cx, cz) by `factor`.
+void GlobeWidenArea(void* mapCamera, float cx, float cz, float factor);
+
 // --- Attention areas (attention_area; engine_attention.cpp, NOTES.md Part M) -------------------
 void ResolveAttention();     // after ResolveProvinceData
 bool HaveAttentionCamera();  // UI, camera, centre on province, look-at, target height
+void* UiMapCamera();         // the in-game UI's map camera (main thread), null if none
 // Stripes (NOTES.md M9): the diagonal stripes the map draws for occupation and battle-plan orders,
 // in a chosen colour per province set, in every map mode. Colour bytes b, g, r, a (a: stripe strength).
 struct StripeArea {

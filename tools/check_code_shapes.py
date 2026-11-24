@@ -216,6 +216,7 @@ def check(path, codes):
     results += check_province_terrain(img, codes, text_va, text)
     results += check_engine_on_actions(img, codes, text_va, text)
     results += check_map_adjacency(img, codes, text_va, text)
+    results += check_globe(img, codes, text_va, text)
     return results
 
 
@@ -920,6 +921,46 @@ def check_map_adjacency(img, codes, text_va, text):
     off = u32(sr + k['kSigAdjStateResistanceDisp'])
     r.append(('kSigAdjStateResistance (state +0x%x)' % off, 0 < off < 0x4000, hex(sr)))
     return r
+
+
+def check_globe(img, codes, text_va, text):
+    """globe (NOTES.md Part S): the map camera's layout as engine_globe.cpp resolves it, with its
+    cross-checks (main camera in the visible area and the picking, one map in both clamps, the
+    copies' stride, the targets after eye and look-at), and the visible area's first point
+    (kCodeGlobeAreaStore, first match from the area function's start)."""
+    hdr = pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h'
+    sigs, _ = cs.load_signatures(hdr)
+    sigs, k = dict(sigs), load_constants(hdr)
+    u8 = lambda va: img.d[img.va2off(va)]
+    u32 = lambda va: struct.unpack_from('<I', img.d, img.va2off(va))[0]
+
+    def one(name):
+        m = [text_va + x.start() for x in cs.compile_pattern(sigs[name]).finditer(text)]
+        return m[0] if len(m) == 1 else None
+
+    area, ray, clamp, fr = one('kSigGlobeArea'), one('kSigGlobeScreenRay'), one('kSigGlobeEdgeClamp'), one('kSigGlobeFrustum')
+    pick, cc, look = one('kSigGlobePickCams'), one('kSigGlobeCameraClamp'), one('kSigCameraLookAt')
+    if not (area and ray and clamp and fr and pick and cc and look):
+        return [('globe signatures', False, 'missing')]
+    store = find_in(img, area, 0x400, codes['kCodeGlobeAreaStore'])
+    if not store:
+        return [('kCodeGlobeAreaStore (in the visible area function)', False, hex(area))]
+    main = u8(area + k['kSigGlobeAreaMainCam'])
+    cams = [main, u32(pick + k['kSigGlobePickCopy1']), u32(pick + k['kSigGlobePickCopy2'])]
+    flags = [u32(pick + k['kSigGlobePickCopy1Flag']), u32(pick + k['kSigGlobePickCopy2Flag'])]
+    eye, lk = u32(cc + k['kSigGlobeClampEyeDisp']), u32(cc + k['kSigGlobeClampLookDisp'])
+    eyeT, lookT = u32(look + 21), u32(look + 45)
+    pts, planes, pos = u32(store + k['kCodeGlobeAreaStoreDisp']), u32(fr + k['kSigGlobeFrustumPlanesDisp']), u32(ray + k['kSigGlobeRayPosDisp'])
+    w, h = u8(cc + k['kSigGlobeClampWidthDisp']), u8(cc + k['kSigGlobeClampHeightDisp'])
+    mapA = clamp + k['kSigGlobeEdgeMapEnd'] + i32(img, clamp + k['kSigGlobeEdgeMapRel'])
+    mapB = cc + k['kSigGlobeClampMapRel'] + 4 + i32(img, cc + k['kSigGlobeClampMapRel'])
+    stride = cams[1] - cams[0]
+    ok = (main == u8(pick + k['kSigGlobePickMain']) and mapA == mapB and cams[2] - cams[1] == stride and stride > planes + 0x60 and
+          flags[1] == flags[0] + 1 and eye > flags[1] and lk == eye + 12 and eyeT == eye + 0x18 and lookT == lk + 0x18 and
+          pts > lk and planes > pos and h == w + 4)
+    return [('kSigGlobe* / kCodeGlobeAreaStore (cameras +0x%x/+0x%x/+0x%x, in use +0x%x/+0x%x, eye +0x%x, look +0x%x, '
+             'area +0x%x, planes +0x%x, map +0x%x/+0x%x)' % (cams[0], cams[1], cams[2], flags[0], flags[1], eye, lk, pts, planes, w, h),
+             ok, hex(area))]
 
 
 def check_province_terrain(img, codes, text_va, text):

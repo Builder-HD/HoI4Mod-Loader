@@ -78,6 +78,11 @@ add_library(hoi4_loader SHARED
     src/engine_adjacency.cpp
     src/plugin_province_terrain.cpp
     src/plugin_map_adjacency.cpp
+    src/globe.cpp
+    src/globe.h
+    src/globe_d3d.cpp
+    src/engine_globe.cpp
+    src/plugin_globe.cpp
     src/engine_events.cpp
     src/plugin_engine_on_actions.cpp
     src/plugin_attention_area.cpp
@@ -171,4 +176,10 @@ if(HOI4_LOADER_BUILD_TESTS)
     target_compile_features(shader_patterns_test PRIVATE cxx_std_17)
     target_compile_definitions(shader_patterns_test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX HL_SRC_DIR="${CMAKE_SOURCE_DIR}")
     set_target_properties(shader_patterns_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/$<0:>)
+
+    # Globe view: the bend maths, the settings file and the map shader patch (optionally the real files).
+    add_executable(globe_test tests/globe_test.cpp src/globe.cpp src/script_tree.cpp)
+    target_compile_features(globe_test PRIVATE cxx_std_17)
+    target_compile_definitions(globe_test PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+    set_target_properties(globe_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests/$<0:>)
 endif()

@@ -42,6 +42,7 @@ static Feature g_features[] = {
     {"map_adjacency", Tier::Engine, &MapAdjacencyInit, "lifecycle", false, 0},
     {"equipment_conversion", Tier::Engine, &EquipmentConversionInit, "lifecycle", false, 0},
     {"attention_area", Tier::Engine, &AttentionAreaInit, "lifecycle", false, 0},
+    {"globe", Tier::Engine, &GlobeInit, "lifecycle", false, 0},
 };
 static int g_presentToken = 0;
 

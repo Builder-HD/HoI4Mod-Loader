@@ -564,6 +564,17 @@ bool ShowHighlight(const std::vector<int>& provinces, int colourId) {
 
 bool HaveAttentionCamera() { return g_ppUi && g_centreSlot && g_cameraSlot && g_setHeight && g_lookAt && g_heightMin; }
 
+// The in-game UI's map camera (globe, NOTES.md Part S), null without a UI or on a fault.
+void* UiMapCamera() {
+    if (!g_ppUi || !g_cameraSlot) return nullptr;
+    __try {
+        void* ui = *g_ppUi;
+        return ui ? ((Camera_t)(*(void***)ui)[g_cameraSlot])(ui) : nullptr;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return nullptr;
+    }
+}
+
 // --- The UI's centre-on-province (right-click on a queue entry, goto_state, ...) -------------------
 namespace {
 using CentreObj_t = void(__fastcall*)(void* ui, void* province);

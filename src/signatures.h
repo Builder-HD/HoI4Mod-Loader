@@ -1436,6 +1436,39 @@ static const size_t kSigEvFocusCountryDisp = 0x38;
 SIG(kSigEvFocusName, "83 CE 03 49 8D 56 ?? 0F 57 C0 0F 11 44 24 50 66 0F 6F 15")
 static const size_t kSigEvFocusNameDisp = 6;
 
+// --- Globe view (globe, NOTES.md Part S; addresses 1.20) ----------------------------------------
+// The map camera's visible ground area, FUN_1412f3c90(mapCamera) (start): the last step of the
+// camera's per-frame update; the main engine camera is mapCamera + [imm8 +0x46] (add rcx, 0x10).
+SIG(kSigGlobeArea, "48 8B C4 48 89 58 08 48 89 78 10 55 48 8D 68 A1 48 81 EC B0 00 00 00 66 0F 6F 05 ?? ?? ?? ?? 4C 8D 4D D7 66 0F 6F 0D ?? ?? ?? ?? 4C 8D 45 C7 0F 29 70 E8 48 8D 55 E7 0F 29 78 D8 48 8B D9 44 0F 29 40 C8 48 83 C1 10")
+static const size_t kSigGlobeAreaMainCam = 0x46;
+// Inside it (the first match from its start, SigFindIn), the first of the five area points (four
+// screen corners and the centre, 12 bytes each): mapCamera + [disp32 +4]. (0x1412f3d9c)
+CODE(kCodeGlobeAreaStore, "F3 0F 11 83 ?? ?? ?? ?? F3 0F 10 05 ?? ?? ?? ?? F3 0F 11 83 ?? ?? ?? ?? F3 0F 11 8B ?? ?? ?? ?? E8")
+static const size_t kCodeGlobeAreaStoreDisp = 4;
+// Engine camera: screen pixel -> ray, FUN_142358dc0(camera, const int px[2], float depth, float dir[3]*,
+// float origin[3]*) (start); the camera's position camera + [disp32 +0x3d].
+SIG(kSigGlobeScreenRay, "48 8B C4 48 89 58 10 48 89 70 18 57 48 83 EC 70 0F 29 70 E8 48 8B DA 48 8B F9 0F 29 78 D8 48 8B 0D ?? ?? ?? ?? 48 8D 50 08 44 0F 29 40 C8 49 8B F1 0F 28 F2 E8 ?? ?? ?? ?? F2 0F 10 87 ?? ?? ?? ??")
+static const size_t kSigGlobeRayPosDisp = 0x3d;
+// The map camera's north/south edge clamp, FUN_1412f4550(mapCamera, float out[3]*, const float in[3]*)
+// (start): the map [rip rel32 +0x16, cmp ends +0x1b].
+SIG(kSigGlobeEdgeClamp, "4C 8B DC 49 89 5B 10 49 89 73 18 57 48 81 EC A0 00 00 00 48 83 3D ?? ?? ?? ?? 00 49 8B D8 48 8B FA 48 8B F1 0F 84 ?? ?? ?? ?? 80 3D ?? ?? ?? ?? 00 0F 84")
+static const size_t kSigGlobeEdgeMapRel = 0x16, kSigGlobeEdgeMapEnd = 0x1b;
+// Engine camera: the frustum planes rebuilt from the view-projection matrix, FUN_142359430(camera)
+// (start): six float4 planes at camera + [disp32 +0x28].
+SIG(kSigGlobeFrustum, "48 8B C4 48 89 58 08 48 89 68 10 48 89 70 18 48 89 78 20 41 55 41 56 41 57 48 83 EC 60 F3 0F 10 A1 ?? ?? ?? ?? 4C 8D B1 ?? ?? ?? ??")
+static const size_t kSigGlobeFrustumPlanesDisp = 0x28;
+// Map object picking tries the map camera's three engine cameras (0x141304a62): main = + [imm8 +3];
+// wrap flag [disp32 +0xc]; copy 1 in use [disp32 +0x16], copy 1 [disp32 +0x20]; copy 2 in use
+// [disp32 +0x40], copy 2 [imm32 +0x49].
+SIG(kSigGlobePickCams, "48 8D 50 ?? 48 89 54 24 ?? 0F B6 90 ?? ?? ?? ?? 84 D2 74 ?? 80 B8 ?? ?? ?? ?? 00 74 ?? 48 8D 88 ?? ?? ?? ?? 48 89 8C 24 ?? ?? ?? ?? EB ?? 48 C7 84 24 ?? ?? ?? ?? 00 00 00 00 84 D2 74 ?? 80 B8 ?? ?? ?? ?? 00 74 ?? 48 05 ?? ?? ?? ??")
+static const size_t kSigGlobePickMain = 3, kSigGlobePickWrap = 0xc, kSigGlobePickCopy1Flag = 0x16, kSigGlobePickCopy1 = 0x20,
+                    kSigGlobePickCopy2Flag = 0x40, kSigGlobePickCopy2 = 0x49;
+// The map camera's clamp to the map (0x1412f3a06): the map [rip rel32 +3, ends +7]; eye
+// mapCamera + [disp32 +0x21], look-at [disp32 +0x29]; the map's width [disp8 +0x34], height [disp8 +0x39].
+SIG(kSigGlobeCameraClamp, "48 8B 05 ?? ?? ?? ?? 48 8B D9 48 85 C0 0F 84 ?? ?? ?? ?? 80 78 ?? 00 0F 84 ?? ?? ?? ?? F2 0F 10 81 ?? ?? ?? ?? F2 0F 10 89 ?? ?? ?? ?? 0F 28 E0 66 0F 6E 58 ?? 66 0F 6E 50 ??")
+static const size_t kSigGlobeClampMapRel = 3, kSigGlobeClampEyeDisp = 0x21, kSigGlobeClampLookDisp = 0x29,
+                    kSigGlobeClampWidthDisp = 0x34, kSigGlobeClampHeightDisp = 0x39;
+
 #undef CODE
 #undef SIG
 #undef ANCHOR
