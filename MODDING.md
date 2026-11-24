@@ -2216,12 +2216,18 @@ too long to fit is centred at the highest zoom) instead of the game's centring o
 
 ## Globe view (`globe`)
 
-The map as a planet: zoom out and the flat map curves into a sphere; zoom back in and it is the
-game's flat map again. The point the camera looks at stays on top, facing you, so panning turns the
-planet (east and west all the way round, north and south up to the poles) and zooming toward the
-cursor works as usual. The planet is built from the map as it is: the map's width is the equator,
-its north and south edges are the poles (stretched there, as on any flat world map wrapped round a
-ball).
+The map as a planet: zoom out far enough and the flat map folds into a sphere in front of a
+background of the mod's choice; zoom back in and it is the game's flat map again. The point the camera
+looks at stays on top, facing you, so panning turns the planet (east and west all the way round,
+north and south up to the poles) and zooming toward the cursor works as usual. The planet is built
+from the map as it is: the map's width is the equator, its north and south edges are the poles
+(stretched there, as on any flat world map wrapped round a ball).
+
+**When it is a planet:** as soon as the flat view would reach past the map's north or south edge
+(where the game shows its frame and the Hearts of Iron logo), and always above `globe_height`; never
+below `flat_height`. It folds in over `transition` seconds and stays a planet until you zoom in below
+85% of the height it became one at, so it does not flicker at the threshold. In between, only the
+short fold shows a partly curved map.
 
 **A mod turns it on** with a file in `common/hoi4_loader_globe/` (any name; several files and
 blocks: later keys replace earlier ones):
@@ -2229,17 +2235,21 @@ blocks: later keys replace earlier ones):
 ```
 globe = {
 	default = yes          # a game starts as a globe (no: flat until set_globe_view = yes)
-	flat_height = 800      # camera height up to which the map stays flat
-	globe_height = 2500    # camera height from which it is the whole planet; it curves in between
+	flat_height = 400      # never a planet below this camera height
+	globe_height = 2500    # always a planet above it (vanilla's highest is 3000)
+	transition = 0.35      # seconds the map takes to fold in or out (0: at once)
 	north = 90             # latitude of the map's north edge
 	south = -90            # latitude of the south edge (e.g. 66 / -65: the map's own proportions,
 	                       # with open caps at the poles)
+	background = "gfx/my_mod/space.png"   # optional: drawn behind the planet (PNG, JPEG, BMP)
 }
 ```
 
 Without such a file in an enabled mod the loader leaves the map shaders alone and the map stays flat
-(`loader.log`: "no enabled mod has a common/hoi4_loader_globe file"). Vanilla's maximum camera
-height is 3000 (`NGraphics.CAMERA_MAX_HEIGHT`); a mod's defines can raise it.
+(`loader.log`: "no enabled mod has a common/hoi4_loader_globe file"). The `background` path is looked
+up as the game would: the last enabled mod that has the file, else the game folder. Without it the
+game's own sky (clouds) stays behind the planet. The image is laid over the screen behind the
+planet and drifts slowly as the planet turns; any size up to 8192 pixels, a dark starfield works well.
 
 ```
 set_globe_view = yes   # country scope: that country's players see the globe; no: the flat map
@@ -2259,16 +2269,20 @@ hoi4_loader_feature_globe = yes
 - **Tooltip:** "The map is shown as a globe." / "The map is shown flat." Translatable:
   `HOI4_LOADER_SET_GLOBE_VIEW_ON`, `HOI4_LOADER_SET_GLOBE_VIEW_OFF`.
 
-**What curves:** everything the game draws on the map in 3D: terrain, water, borders, rivers, trees,
-state and country names, arrows, units, buildings, particles, and the shaders of mods that replace
-these files (the loader patches whichever copy is loaded, as for attention areas). Things beyond the
-map's edges (the frame with the logo, the filler water) sink below the surface. 2D icons (unit
-counters, victory points) are not moved: the game hides them at globe heights; between
-`flat_height` and about 1200 the map is still nearly flat.
+**What curves:** everything the game draws on the map in 3D: terrain, borders, rivers, trees, state
+and country names, arrows, units, buildings, particles, and the shaders of mods that replace these
+files (the loader patches whichever copy is loaded, as for attention areas).
+- Names, arrows, routes and particles (drawn without a depth test) are dropped beyond the planet's
+  horizon, so nothing shows through it.
+- The sea: the game's water surface is a coarse grid that would sink under the curved seabed, so on
+  the planet it is not drawn; the seabed shows the sea in the colour map's sea tint, as dark as the
+  game's water. Map modes, sea zones and borders on the sea stay.
+- Things beyond the map's edges (the frame with the logo, the filler water) sink below the surface.
+- 2D icons (unit counters, victory points) are not moved: the game hides them at these heights.
 
 **Picking:** hovering, clicking a province (the state view), selecting and zoom to the cursor find
-what is under the cursor on the planet. Pointing past the planet's edge picks the nearest place on
-its rim.
+what is under the cursor on the planet. A click or hover in space, past the planet's rim, finds
+nothing. Edge panning still works with the cursor in space (it turns the planet toward that side).
 
 **Limits:**
 - DirectX 11 only (the Windows default). With the DX9 or OpenGL renderer the map stays flat
@@ -2276,15 +2290,19 @@ its rim.
 - Lighting is the flat map's (the sun comes from the same side everywhere); day and night still
   follow the longitude.
 - 3D models stand upright as on the flat map; they are only drawn close up, where the map is flat.
-- Edge panning at globe heights is fast (the game pans by the flat distance under the cursor).
+- Edge panning at planet heights is fast (the game pans by the flat distance under the cursor).
 
 **Checks and messages** (`loader.log`):
 - At start: `Globe: map ... cameras +0x10/+0x230/+0x450 ...` (the resolved layout), `globe: on
-  (default globe, flat up to height 800, ...)`, `globe: Direct3D 11 device ..., constant buffer in
-  slot b13`, and one `globe: a map shader was patched (n position(s) bent)` per map shader loaded.
-- Problems in the settings files: `globe: <mod>/<file> line 3: unknown key 'wobble'`.
-- In a game: `globe: first bent frame (camera height 900, curvature 0.01, ...)`.
+  (default globe, flat below height 400, a globe from 2500 or once the view reaches past the map's
+  edge, ...)`, `globe: Direct3D 11 device ..., constant buffer in slot b13`, `globe: background ...
+  (1024x1024) in slot t20`, and one line per map shader patched (also `standardfuncsgfx.fxh`,
+  `sky.shader`, `pdxwater.shader`).
+- Problems in the settings files: `globe: <mod>/<file> line 3: unknown key 'wobble'`; a background
+  no mod has: `globe: the background ... is in no enabled mod nor the game folder`.
+- In a game: `globe: first globe frame (camera height ..., background on)`.
 
-**Test mod** (`common/hoi4_loader_globe/hoi4_loader_test_globe.txt`: default globe, 800 / 2500;
-decisions in `common/decisions/hoi4_loader_test_globe_decisions.txt`): "Globe: flat map", "Globe:
-back to the globe", "Globe: status (see game.log)".
+**Test mod** (`common/hoi4_loader_globe/hoi4_loader_test_globe.txt`: default globe, 400 / 2500,
+0.35 s, background `gfx/hoi4_loader_test/space.png`, which is not in the repository: put any image
+there; decisions in `common/decisions/hoi4_loader_test_globe_decisions.txt`): "Globe: flat map",
+"Globe: back to the globe", "Globe: status (see game.log)".

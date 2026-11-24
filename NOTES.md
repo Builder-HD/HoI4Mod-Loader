@@ -7973,3 +7973,58 @@ Mouse and wheel through `SendInput`/`mouse_event` (keyboard still does not reach
 
 **Not done / open:** multiplayer; 2D icons are not moved (the game hides them at globe heights);
 lighting stays flat; edge panning at globe height is fast (the game pans by flat distances).
+
+## S9: owner's review and second round (2026-11-24)
+
+Owner's points after the first version, and what changed:
+
+1. **"The color of the water changes if you zoom out."** On the planet the oceans were light grey.
+   Not the refraction (painting it red changed nothing) and not the seabed showing through sagging
+   water (sinking the seabed changed nothing but made spiky coasts): the game's water surface was not
+   visible at all on the sphere. It is a coarse grid; bent only at its corners, its flat quads cut
+   deep under the curved surface. Now: the water (`pdxwater.shader`, new patch mode `kHide`) is not
+   drawn while bent, and the terrain's colour on the seabed becomes the sea (`HL_GlobeSea`: the colour
+   map's tint times the water shader's refraction lightness, darkened like its "darkness offset",
+   blended in at the coast), inserted before `gradient_border_apply( diffuse.rgb` so map modes and sea
+   borders stay. Oceans now match the flat map's dark blue.
+2. **"Names are sometimes visible through the globe."** Names, arrows, routes and particles are drawn
+   without a depth test. `HL_GlobeCull` (mode `kCull`, for `mapname`, `maparrow`, `strait`,
+   `traderoute`, `particle`): a vertex beyond the planet's horizon (dot(normal, camera - point) < 0)
+   is moved behind the camera and clipped.
+3. **"It looks really strange when you're not fully zoomed out", "you can see the inside of the globe
+   and how its geometry is cooked".** The owner's suggestion: be a sphere as soon as the view would
+   reach past the original edge / where the logo was. Now: no gradual curvature. `Globe::WantSphere`:
+   a sphere above `globe_height`, never below `flat_height`, in between when the flat view's visible
+   area (the game's own corner points, read right after its camera update, before the loader widens
+   them) reaches z < 0 or z > map height; once a sphere, it stays one down to 85% of the height it
+   became one at. `t` moves to 0 or 1 over `transition` seconds (per frame, main thread).
+4. **"Looking at the top of the globe it's missing a slice."** The earlier split of the planet between
+   the main camera and the game's wrap copies relied on the game switching the copies on, which it
+   only does near the seam: elsewhere a wedge was nobody's. Now the copies are off again while bent
+   and the main camera draws the whole planet (its frustum is open); a copy's pass, should one run,
+   draws nothing.
+5. **"I can click outside of the globe to select states."** The screen-ray hook now knows who asks:
+   the map camera's own two calls (pan direction `kSigGlobePanRay`, update path `kSigGlobeZoomRay`,
+   by return address) keep the rim point for a cursor in space, so edge panning still turns the
+   planet; every other caller (hover, clicks, object picking) gets a ray onto a point far off the map
+   (z = -100000), which holds nothing. Tested: no tooltip and no state view in space.
+6. **"Make the background of the world look like space", with space.png.** New key `background =
+   "<path>"` (looked up like a game file: last enabled mod that has it, else the game folder). The
+   image is loaded with WIC onto the game's device when it is created (slot t20) and bound to the
+   pixel stage with the constants (now also bound there, b13). `sky.shader` is patched: its colour goes
+   through `HL_GlobeSky`, which shows the image (screen-fixed, drifting with the longitude, mirrored
+   where it repeats, manual bilinear `Load`) while bent. The owner's `space.png` (1024x1024 starfield)
+   is in the installed test mod only, not in the repository.
+
+Also fixed: the frame callback widened the visible area again every frame (the factor compounded);
+the area is now widened and read only right after the game's own update. The distance fog
+(`standardfuncsgfx.fxh`, `CalculateDistanceFogFactor`) measures across the wrap line the short way
+round. New signatures: `kSigGlobePanRay`, `kSigGlobeZoomRay` (unique on 1.20, 1.19.5, 1.19.4.2; smoke
+`2/193`). Offline: all 42 cached vertex shaders and 56 cached pixel shaders (3 water, 2 terrain, 1 sky
+variants among them) compile with the patches.
+
+**In game (1.20, test mod):** zooming out over Germany stays flat until the view would reach the
+northern edge, then folds into a close planet; zoomed out fully it is a small planet on the starfield;
+oceans dark blue everywhere, also across the Pacific seam; no names through the planet; hovering and
+clicking in space find nothing; the view down on the north pole has no missing slice; panning east
+goes round with no seam.

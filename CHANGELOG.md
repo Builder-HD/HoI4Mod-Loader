@@ -7,17 +7,20 @@ A–F; NOTES.md has the findings and test results behind each.
 ## Unreleased
 
 - **New feature `globe`** (engine tier, needs `lifecycle`; guard `hoi4_loader_feature_globe`; NOTES.md
-  Part S, MODDING.md "Globe view"). The map as a planet: zooming out curves the flat map into a
-  sphere between two camera heights; the point the camera looks at stays on top, so panning turns
-  the planet (all the way round east-west, to the poles north-south); zooming in gives the flat map
-  back. Turned on by a mod's `common/hoi4_loader_globe/*.txt` (`default`, `flat_height`,
-  `globe_height`, `north`, `south`); without one the map shaders are left alone. `set_globe_view =
+  Part S, MODDING.md "Globe view"). The map as a planet: zoomed out far enough that the flat view
+  would reach past the map's north or south edge (or above `globe_height`), the flat map folds into a
+  sphere in front of the mod's background image; the point the camera looks at stays on top, so
+  panning turns the planet (all the way round east-west, to the poles north-south); zooming in gives
+  the flat map back. Turned on by a mod's `common/hoi4_loader_globe/*.txt` (`default`, `flat_height`,
+  `globe_height`, `transition`, `north`, `south`, `background`); without one the map shaders are left
+  alone. Clicks in space find nothing; names do not show through the planet; the sea keeps the flat
+  map's colour. `set_globe_view =
   yes/no` (country scope, saved as global flags `hoi4_globe_<TAG>_<0|1>`) and `is_globe_view`. Every
   3D map shader's vertex positions are bent (the loader patches the shader files as read, also mods'
   copies); the values reach them through the loader's own constant buffer on the game's DX11 device.
   While bent, the game's culling is opened, the camera's north/south clamp skipped and its screen
   rays aimed at the flat map point under the cursor, so hover, clicks and zoom to the cursor work on
-  the planet. Display only. DX11 only. 6 new signatures and 1 code shape (smoke `2/191`), checked on
+  the planet. Display only. DX11 only. 8 new signatures and 1 code shape (smoke `2/193`), checked on
   1.20, 1.19.5 and 1.19.4.2; tested in game on 1.20 (2026-11-24). The test mod starts every game as a
   globe and has decisions to switch.
 - **File patches can be shared:** several features may patch the same file (`register_file_patch`);
