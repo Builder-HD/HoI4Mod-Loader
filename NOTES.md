@@ -7729,3 +7729,160 @@ both states' resistance inactive (neither is occupied in that save, as expected)
 checked in game: resistance in an occupied state that opens or closes (needs a war; the owner's
 test). Seen on the way: between two impassable states (Libyan Desert and the French side) vanilla
 draws no red line, only the country border, as the type function says.
+
+# Part S: globe view (`globe`, investigation)
+
+Owner's request (2026-11-24): "an actual 3D planet": a sphere showing the HoI4 map, rotatable in all
+directions, built from the current map; strange edges are fine; as general as possible; tested in
+game by us. Branch `feature/globe`, from main at #33 (0.7.1-beta). Analysed on a copy of 1.20
+(`v1.20.0.0.8873`); addresses below are 1.20 and for orientation only.
+
+## S1: what vanilla has
+
+- A flat map, 5632 x 2048 world units (x east, z north, y up; heights in y). It wraps east-west.
+- Camera heights 50..3000 (`NGraphics CAMERA_MIN_HEIGHT / CAMERA_MAX_HEIGHT`), vertical FOV
+  0.785 rad (45 degrees), near plane 5, far plane 4000 (constants in the exe, see S2).
+- Nothing round anywhere. The main menu camera turns around a point (`CAMERA_LOOKAT_X/Y/Z`, "Rotation
+  point in main menu"), over the same flat map.
+
+## S2: engine findings
+
+### Map shaders (`gfx/FX`)
+
+- Every 3D map shader puts world positions on screen with `mul( ViewProjectionMatrix, worldPos )` in
+  its vertex shader: `pdxmap` (terrain), `pdxwater`, `border`, `river`, `tree`, `mapname`
+  (state/strategic names), `maparrow`, `strait`, `traderoute`, `pdxmesh` (units, buildings, the map
+  frame), `particle`. Five of them (`border`, `river`, `mapname`, `strait`, `traderoute`) also
+  compute a depth bias with `GetMatrixData( ViewProjectionMatrix, 2, i )` on a shifted copy of the
+  position.
+- The shadow-map effects (`*Shadow` in `pdxmesh`, `treeshadow`) use the same constant for the light's
+  matrix: they must stay flat (the pixel shaders read the shadow map with the flat position).
+- `ConstantBuffer( N, ... )` becomes `cbuffer dx11_cbN : register(bN)` (shader cache); vanilla uses
+  b0..b4. Every field of b0 (`ViewProjectionMatrix`, `vCamPos`, `vCamLookAtDir`, ...) is in use, so
+  there is no spare field for our parameters. The game compiles the assembled HLSL at runtime with
+  `D3DCompile` (import), so a source patched as read is compiled and used (M10).
+- The pixel shaders work on the flat world position (`prepos`, map UVs): textures, borders, fog of
+  war and the day/night terminator stay right if only the screen position is bent.
+
+### Graphics API
+
+- `hoi4.exe` imports `d3d11.dll!D3D11CreateDevice` (DX11 is the Windows default; d3d9 and OpenGL
+  paths exist too).
+
+### Map camera (`0x1412f3690` constructor; two instances: `0x140b8ef40`, `0x140e337b0`, most likely
+the main menu's and the game's)
+
+| Offset | Meaning |
+|---|---|
+| +0x10, +0x230, +0x450 | three engine cameras (S2 next table): the main one and two copies shifted by the map width, drawn when the view crosses the wrap line |
+| +0x670 / +0x671 | copy 1 / copy 2 in use |
+| +0x680 / +0x68c | eye / look-at (x, y, z); +0x698 / +0x6a4 their targets (M2) |
+| +0x6d0 / +0x6d4 | min / max height (int) |
+| +0x6f8 | map wraps (x is not clamped when set) |
+| +0x6fc..+0x734 | the visible ground area: 5 points (4 screen corners and the centre) cast onto y = 0 |
+
+- Per-frame update `0x1412f4ea0` (input, then the three engine cameras' update, then
+  `0x1412f3c90` = the visible-area points). A second update path `0x1412f5a10` ends the same way.
+- `0x1412f4550`: the north/south edge clamp, also from screen rays.
+
+### Engine camera (constructor `0x142358c50(cam, fov, aspect, near, far)`, update `0x142359cd0`)
+
+| Offset | Meaning |
+|---|---|
+| +0x00 / +0x40 / +0x80 | view / projection / view-projection (4x4 float) |
+| +0xc0 / +0x100 / +0x140 | inverse view / inverse projection / their product |
+| +0x180 / +0x18c / +0x198 | position / look-at / up |
+| +0x1a4 / +0x1a8 / +0x1ac / +0x1b0 | FOV / aspect / near / far |
+| +0x1b4 | a margin subtracted from the four side planes (0 here) |
+| +0x1b8..+0x217 | six frustum planes (float4 each), rebuilt from +0x80 by the update and by `0x142359430` |
+
+- Screen to ray: `0x142358dc0(cam, const int px[2], float depth, float dir[3]*, float origin[3]*)`
+  (11 callers; e.g. `0x141304a10` picks map objects with it and tries all three cameras), and
+  `0x142359040(cam, const float ndc[3], dir*, origin*)` (only the visible area and the edge clamp).
+
+### Not found yet
+
+- The world-to-screen projection of the 2D map icons (unit counters are GUI objects,
+  `CUnitCounterItem`, `CTinyUnitCounter`, the `NMapIcons` priorities). The exe has no name for it; a
+  heuristic scan over the screen-size getter's callers found nothing. To find at runtime.
+- Which systems test against the frustum planes and which against the visible-area points
+  (terrain chunks, trees, names, icons). To see at runtime with culling switched off.
+
+## S3: approach
+
+1. **Shape (shader patch, generic).** Each map shader file is patched as read (vanilla or a mod's copy,
+   plus any mod `.shader` that uses the expression): in vertex shader code (not the shadow effects)
+   `mul( ViewProjectionMatrix, P )` becomes `mul( ViewProjectionMatrix, HL_Globe( P ) )`, and the
+   depth-bias rows get the bent position as well. `HL_Globe` (in `standardfuncsgfx.fxh`'s code) bends a
+   world position onto the sphere and returns it unchanged when the globe is off (one branch on a
+   constant).
+2. **The bend.** L = the ground point the camera looks at. A point's longitude comes from x, latitude
+   from z (S4 D3). The sphere is turned so L is on top, under the camera; heights go outward along
+   the radius. A curvature t (0..1) blends flat (t = 0: identity) into the globe (t = 1: radius
+   W / 2pi = 896 units). t comes from the camera height (S4 D4), so zooming out rounds the map
+   smoothly into the planet and zooming in brings back the vanilla flat map exactly. Longitude is
+   taken relative to L modulo the map width, so the wrap copies land on the same points; the seam is
+   on the far side, hidden by depth.
+3. **Parameters.** The loader's own constant buffer (`register(b13)`, declared in raw HLSL inside
+   the patched code) holding t, the radius, L and the latitude mapping. It is created on the game's
+   device (hook of `D3D11CreateDevice`), bound to the vertex stage whenever the game binds vertex
+   constant buffers (hook of the context's `VSSetConstantBuffers`), and updated once per frame on the
+   render thread. These are API hooks, no game signature. No DX11 device (DX9/OpenGL): feature off.
+4. **Rotation.** The globe follows the camera: panning turns the planet under it (east-west all the
+   way round; north-south up to the pole at the map's edge), zooming changes the distance. "All
+   directions" without new controls; the game's own camera code, input and edge clamps stay vanilla.
+5. **Culling.** After the map camera's update (`0x1412f4ea0`, hooked) and only while t > 0: the
+   three engine cameras' frustum planes become "accept everything", the visible-area points cover the
+   visible half of the globe (its flat footprint). Without this the edges of the globe would be
+   missing (the game only draws what the flat camera sees).
+6. **Picking.** `0x142358dc0` hooked for the map camera's three engine cameras only, while t > 0: the
+   ray is intersected with the sphere, the hit turned back into the flat map point, and the function
+   returns a straight-down ray onto that point. The game's own map hit test then finds the right
+   province, unit or building unchanged. A ray that misses the planet gets a ray onto a point off the
+   map (no province).
+7. **2D map icons** (unit counters, victory points, building icons): the projection (S2 "not found
+   yet") hooked to put them on the bent position and hide them on the far side. Fallback if it
+   cannot be found or hooked safely: the icons are hidden while t is above a threshold.
+
+Fail safe as usual: any pattern missing, no DX11 device, a failed shader patch or compile check ->
+logged, feature off, map flat.
+
+## S4: decisions for the owner
+
+- **D1, how it is turned on.**
+  - a) A mod file `common/hoi4_loader_globe/*.txt` turns the feature on and sets its numbers (D3,
+    D4, default on/off). Without such a file nothing is patched (as `attention_area`'s shader patch).
+  - b) An effect `set_globe_view = yes/no` for the player's own country (as `goto_state`): view
+    only, nothing in the game state, so multiplayer cannot desync; each player chooses.
+  - c) A trigger `is_globe_view`.
+  - Proposed: a + b + c.
+- **D2, rotation.** Camera-driven (S3.4) for now. A free tilt/roll (e.g. right-drag) would need
+  input hooks and new picking maths; proposed later if wanted.
+- **D3, latitudes.** Proposed: the map's z range spans the full sphere (south edge = south pole,
+  north edge = north pole: closed, poles stretched), with `north = 90 south = -90` in the mod file
+  so a mod can choose a true-aspect band (about +-65 degrees, open caps) instead.
+- **D4, zoom.** Proposed: flat below `flat_height = 800`, full globe from `globe_height = 2500`
+  (mod file), vanilla `CAMERA_MAX_HEIGHT` (3000; a mod's defines can raise it, the far plane is
+  raised with it while the globe is on).
+- **D5, main menu.** Proposed: in a game only (the main menu's camera is the other instance).
+
+## S5: risks and limits
+
+- Performance: at globe zoom the whole map is drawn (culling off); at that height trees and units are
+  hidden by the game anyway. To measure.
+- Lighting stays the flat map's (same sun direction everywhere); day/night by longitude still works.
+- 3D units and buildings stand upright in the flat frame (tilted far from L); only drawn close up,
+  where t is about 0.
+- The 2D map icons (S3.7) are the least known part.
+- Checked on 1.20 only; 1.19.x is unchecked (copies of 1.19.4.2 / 1.19.5 exist, to scan).
+
+## S6: test plan (run by us in game, 1.20)
+
+1. Without the test mod's globe file: no shader patched (loader.log), map vanilla.
+2. With it: zoom out step by step; screenshots flat -> curved -> planet.
+3. Pan east, west, north, south at globe zoom: the planet turns, wraps east-west, reaches both poles.
+4. Click provinces at the centre and near the planet's edge: the right province opens; select and
+   move a division close up.
+5. Map modes, names, borders, rivers, weather, fog of war on the globe.
+6. `set_globe_view = no` / `yes` from the test mod's decisions; save, load, second game.
+7. Frame rate flat vs globe.
