@@ -3,6 +3,7 @@
 // Everything found by signatures; the offsets come from the code and are cross-checked where two
 // places use them.
 #include <windows.h>
+#include <intrin.h>
 #include <string.h>
 
 #include "engine.h"
@@ -35,6 +36,7 @@ Update_t g_areaOrig = nullptr;
 Ray_t g_rayOrig = nullptr;
 Clamp_t g_clampOrig = nullptr;
 GlobeHooks g_hooks = {};
+void* g_cameraRayReturns[2] = {nullptr, nullptr};  // the map camera's own calls of the screen ray
 
 void** g_ppMap = nullptr;                      // the map (width, height)
 uint32_t g_mapW = 0, g_mapH = 0;               // int offsets in the map
@@ -60,16 +62,18 @@ void __fastcall HookArea(void* mapCamera) {
     if (g_hooks.afterUpdate) CallAfterUpdate(mapCamera);
 }
 
-void CallScreenRay(void* camera, float* dir, float* origin) {
+void CallScreenRay(void* camera, float* dir, float* origin, bool fromCamera) {
     __try {
-        g_hooks.screenRay(camera, dir, origin);
+        g_hooks.screenRay(camera, dir, origin, fromCamera);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
     }
 }
 
 void __fastcall HookRay(void* camera, const int* px, float depth, float* dir, float* origin) {
     g_rayOrig(camera, px, depth, dir, origin);
-    if (g_hooks.screenRay && dir && origin) CallScreenRay(camera, dir, origin);
+    void* ret = _ReturnAddress();
+    if (g_hooks.screenRay && dir && origin)
+        CallScreenRay(camera, dir, origin, ret == g_cameraRayReturns[0] || ret == g_cameraRayReturns[1]);
 }
 
 bool CallSkipClamp(void* mapCamera) {
@@ -104,7 +108,15 @@ void ResolveGlobe() {
     uint8_t* pick = SigFindUnique("globe_pick_cams", kSigGlobePickCams);
     uint8_t* camClamp = SigFindUnique("globe_camera_clamp", kSigGlobeCameraClamp);
     uint8_t* lookAt = SigFindUnique("camera_look_at", kSigCameraLookAt);  // attention_area's: the targets
-    if (!g_area || !g_ray || !g_clamp || !frustum || !pick || !camClamp || !lookAt) return;
+    uint8_t* panRay = SigFindUnique("globe_pan_ray", kSigGlobePanRay);
+    uint8_t* zoomRay = SigFindUnique("globe_zoom_ray", kSigGlobeZoomRay);
+    if (!g_area || !g_ray || !g_clamp || !frustum || !pick || !camClamp || !lookAt || !panRay || !zoomRay) return;
+    if (SigFollowRel32(panRay + kSigGlobePanRayCall) != g_ray || SigFollowRel32(zoomRay + kSigGlobeZoomRayCall) != g_ray) {
+        Fail("the map camera's own screen rays do not call the screen ray function");
+        return;
+    }
+    g_cameraRayReturns[0] = panRay + kSigGlobePanRayCall + 5;
+    g_cameraRayReturns[1] = zoomRay + kSigGlobeZoomRayCall + 5;
     uint8_t* store = SigFindIn(g_area, 0x400, kCodeGlobeAreaStore);
     if (!store) {
         Fail("the visible area's points were not found in its function");
@@ -205,6 +217,15 @@ void GlobeOpenFrustum(void* engineCamera) {
     // zero normal with a very negative d keeps everything inside.
     const float open[4] = {0.0f, 0.0f, 0.0f, -1.0e30f};
     for (int k = 0; k < 6; ++k) memcpy((uint8_t*)engineCamera + g_planes + 16 * k, open, 16);
+}
+
+void GlobeAreaZRange(void* mapCamera, float* zmin, float* zmax) {
+    *zmin = 1e30f, *zmax = -1e30f;
+    for (int k = 0; k < 4; ++k) {
+        float z = Rd<float>(mapCamera, g_areaPts + 12 * k + 8);
+        *zmin = z < *zmin ? z : *zmin;
+        *zmax = z > *zmax ? z : *zmax;
+    }
 }
 
 void GlobeWidenArea(void* mapCamera, float cx, float cz, float factor) {

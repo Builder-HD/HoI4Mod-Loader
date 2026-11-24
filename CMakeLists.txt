@@ -107,7 +107,7 @@ set_target_properties(hoi4_loader PROPERTIES OUTPUT_NAME "version")
 target_compile_features(hoi4_loader PRIVATE cxx_std_17)
 target_compile_definitions(hoi4_loader PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_options(hoi4_loader PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/W4>)
-target_link_libraries(hoi4_loader PRIVATE minhook)
+target_link_libraries(hoi4_loader PRIVATE minhook windowscodecs ole32)
 
 # Keep the config next to the built DLL so the output folder is drop-in ready.
 add_custom_command(TARGET hoi4_loader POST_BUILD

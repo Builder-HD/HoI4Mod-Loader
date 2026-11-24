@@ -45,9 +45,13 @@ void ParseFile(const std::string& text, const std::string& shown, Settings* s, s
             if (ScriptTree::EqualsNoCase(n.key, "default")) ok = ScriptTree::BoolOf(n, &s->defaultOn);
             else if (ScriptTree::EqualsNoCase(n.key, "flat_height")) ok = NumberOf(n, 0, 100000, &s->flatHeight);
             else if (ScriptTree::EqualsNoCase(n.key, "globe_height")) ok = NumberOf(n, 0, 100000, &s->globeHeight);
+            else if (ScriptTree::EqualsNoCase(n.key, "transition")) ok = NumberOf(n, 0, 10, &s->transition);
             else if (ScriptTree::EqualsNoCase(n.key, "north")) ok = NumberOf(n, -90, 90, &s->north);
             else if (ScriptTree::EqualsNoCase(n.key, "south")) ok = NumberOf(n, -90, 90, &s->south);
-            else {
+            else if (ScriptTree::EqualsNoCase(n.key, "background")) {
+                ok = !n.block && !n.value.empty() && n.value.find("..") == std::string::npos && n.value.find(':') == std::string::npos;
+                if (ok) s->background = n.value, s->backgroundFrom = shown;
+            } else {
                 problems->push_back({shown, n.line, "unknown key '" + ScriptTree::Label(n) + "'"});
                 continue;
             }
@@ -60,11 +64,14 @@ void ParseFile(const std::string& text, const std::string& shown, Settings* s, s
     }
 }
 
-float Curvature(const Settings& s, float height) {
-    if (height <= s.flatHeight) return 0.0f;
-    if (s.globeHeight <= s.flatHeight || height >= s.globeHeight) return 1.0f;
-    float x = (height - s.flatHeight) / (s.globeHeight - s.flatHeight);
-    return x * x * (3.0f - 2.0f * x);
+bool WantSphere(const Settings& s, float height, bool edgeInView, SphereState* st) {
+    bool want;
+    if (height < s.flatHeight) want = false;
+    else if (height >= s.globeHeight) want = true;
+    else want = edgeInView || (st->sphere && height >= st->enterHeight * 0.85f);
+    if (want && !st->sphere) st->enterHeight = height;
+    st->sphere = want;
+    return want;
 }
 
 bool MakeParams(const Settings& s, float w, float h, float t, float lx, float lz, Params* out) {
@@ -146,8 +153,9 @@ bool Unbend(const Params& p, const float o[3], const float dir[3], float w, floa
 
 namespace {
 
-// Put in front of each patched vertex shader's code (MainCode blocks are global HLSL scope). The
-// guard keeps one copy if two such blocks ever share a compile. Not DX11: the identity.
+// Put in front of each patched code block (MainCode and Code blocks are global HLSL scope, after the
+// game's constant buffers, so vCamPos and vCamLookAtDir are known). The guard keeps one copy per
+// compile. Not DX11: the identity.
 const char kHlsl[] =
     "\n#ifndef HL_GLOBE_DEFINED\n"
     "#define HL_GLOBE_DEFINED\n"
@@ -156,37 +164,115 @@ const char kHlsl[] =
     "{\n"
     "\tfloat4 HL_GlobeA;\t// curvature (0 = flat), radius, map width, 1 / map width\n"
     "\tfloat4 HL_GlobeB;\t// look-at x, look-at z, cos and sin of its latitude\n"
-    "\tfloat4 HL_GlobeC;\t// z of the equator, radians per z unit, map height\n"
+    "\tfloat4 HL_GlobeC;\t// z of the equator, radians per z unit, map height, background on\n"
     "};\n"
-    "float4 HL_Globe( float4 vPos )\n"
+    "Texture2D HL_GlobeSpace : register( t20 );\n"
+    "// The bent position of flat point p and the sphere's centre, in this pass's frame. The wrap copies'\n"
+    "// passes (their camera a map width away) draw nothing: the main camera draws the whole planet.\n"
+    "float3 HL_GlobePoint( float3 p, out float3 vCentre )\n"
     "{\n"
-    "\tif ( HL_GlobeA.x <= 0.0f || vPos.w == 0.0f )\n"
-    "\t\treturn vPos;\n"
-    "\tfloat3 p = vPos.xyz / vPos.w;\n"
+    "\tfloat fPass = round( ( vCamPos.x - HL_GlobeB.x ) * HL_GlobeA.w );\n"
     "\tfloat dx = p.x - HL_GlobeB.x;\n"
     "\tdx -= HL_GlobeA.z * round( dx * HL_GlobeA.w );\n"
     "\tfloat fLon = dx / HL_GlobeA.y;\n"
     "\tfloat fLat = clamp( ( p.z - HL_GlobeC.x ) * HL_GlobeC.y, -1.5707963f, 1.5707963f );\n"
     "\tfloat3 d = float3( cos( fLat ) * sin( fLon ), cos( fLat ) * cos( fLon ), sin( fLat ) );\n"
     "\tfloat3 r = float3( d.x, d.y * HL_GlobeB.z + d.z * HL_GlobeB.w, d.z * HL_GlobeB.z - d.y * HL_GlobeB.w );\n"
-    "\tfloat fBeyond = max( -p.z, 0.0f ) + max( p.z - HL_GlobeC.z, 0.0f ) + max( -p.x, 0.0f ) + max( p.x - HL_GlobeA.z, 0.0f );\t// beyond the map's edges sinks\n"
-    "\tfloat3 q = float3( HL_GlobeB.x, -HL_GlobeA.y, HL_GlobeB.y ) + r * ( HL_GlobeA.y + p.y - fBeyond * 4.0f * HL_GlobeA.x );\n"
-    "\t// The wrap copies draw the map again a map width away: each point belongs to one pass (the copy\n"
-    "\t// whose offset matches how far the point is from the camera); in the others it sinks, so nothing\n"
-    "\t// is drawn twice (twice-blended water and borders would wash the planet out). The boundary is the\n"
-    "\t// far side's middle meridian. The copy's pass draws the planet in its own frame.\n"
-    "\tfloat fPass = round( ( vCamPos.x - HL_GlobeB.x ) * HL_GlobeA.w );\n"
-    "\tif ( round( ( p.x - HL_GlobeB.x ) * HL_GlobeA.w ) != fPass )\n"
-    "\t\tq = float3( HL_GlobeB.x, -HL_GlobeA.y, HL_GlobeB.y ) + r * ( HL_GlobeA.y * 0.5f );\n"
-    "\tq.x += HL_GlobeA.z * fPass;\n"
+    "\t// Beyond the map's edges (frame, logo, filler water) sinks into the planet.\n"
+    "\tfloat fBeyond = max( -p.z, 0.0f ) + max( p.z - HL_GlobeC.z, 0.0f ) + max( -p.x, 0.0f ) + max( p.x - HL_GlobeA.z, 0.0f );\n"
+    "\tfloat fLen = HL_GlobeA.y + p.y - fBeyond * 4.0f * HL_GlobeA.x;\n"
+    "\tif ( fPass != 0.0f )\n"
+    "\t\tfLen = HL_GlobeA.y * 0.5f;\n"
+    "\tvCentre = float3( HL_GlobeB.x + HL_GlobeA.z * fPass, -HL_GlobeA.y, HL_GlobeB.y );\n"
+    "\treturn vCentre + r * fLen;\n"
+    "}\n"
+    "float4 HL_Globe( float4 vPos )\n"
+    "{\n"
+    "\tif ( HL_GlobeA.x <= 0.0f || vPos.w == 0.0f )\n"
+    "\t\treturn vPos;\n"
+    "\tfloat3 vCentre;\n"
+    "\tfloat3 q = HL_GlobePoint( vPos.xyz / vPos.w, vCentre );\n"
     "\treturn float4( q * vPos.w, vPos.w );\n"
+    "}\n"
+    "// Also drops what lies beyond the planet's horizon (behind the camera, so it is clipped): for things\n"
+    "// drawn without a depth test, such as the names.\n"
+    "float4 HL_GlobeCull( float4 vPos )\n"
+    "{\n"
+    "\tif ( HL_GlobeA.x <= 0.0f || vPos.w == 0.0f )\n"
+    "\t\treturn vPos;\n"
+    "\tfloat3 vCentre;\n"
+    "\tfloat3 q = HL_GlobePoint( vPos.xyz / vPos.w, vCentre );\n"
+    "\tif ( dot( q - vCentre, vCamPos - q ) < 0.0f )\n"
+    "\t\tq = vCamPos - vCamLookAtDir * 100.0f;\n"
+    "\treturn float4( q * vPos.w, vPos.w );\n"
+    "}\n"
+    "// Nothing of it is drawn while bent (every vertex in one point): the game's water, whose coarse grid\n"
+    "// would sink under the curved seabed; the seabed shows the sea instead (HL_GlobeSea).\n"
+    "float4 HL_GlobeHide( float4 vPos )\n"
+    "{\n"
+    "\tif ( HL_GlobeA.x <= 0.0f )\n"
+    "\t\treturn vPos;\n"
+    "\treturn float4( HL_GlobeB.x, -HL_GlobeA.y, HL_GlobeB.y, 1.0f );\n"
+    "}\n"
+    "// Distance fog: across the wrap line the short way round.\n"
+    "float3 HL_GlobeFogDiff( float3 vDiff )\n"
+    "{\n"
+    "\tif ( HL_GlobeA.x > 0.0f )\n"
+    "\t\tvDiff.x -= HL_GlobeA.z * round( vDiff.x * HL_GlobeA.w );\n"
+    "\treturn vDiff;\n"
+    "}\n"
+    "// Water: the refraction texture would show what lies behind the planet (the sky); the game's own\n"
+    "// colour for water without refractions instead.\n"
+    "float3 HL_GlobeWater( float3 vColor )\n"
+    "{\n"
+    "\treturn HL_GlobeA.x > 0.0f ? lerp( vColor, float3( 0.0f, 0.1f, 0.2f ), saturate( HL_GlobeA.x ) ) : vColor;\n"
+    "}\n"
+    "// The sea: on the sphere the game's water (a coarse grid) sinks under the curved seabed, so the\n"
+    "// seabed takes the water's colour instead: the colour map's sea tint, as the water shader shows it\n"
+    "// (its refraction lightness, darkened), blended in at the coast.\n"
+    "float3 HL_GlobeSea( float3 vDiffuse, float3 vTint, float fHeight )\n"
+    "{\n"
+    "\tif ( HL_GlobeA.x <= 0.0f )\n"
+    "\t\treturn vDiffuse;\n"
+    "\tfloat fSea = saturate( ( WATER_HEIGHT - fHeight ) * 1.5f ) * saturate( HL_GlobeA.x );\n"
+    "\treturn lerp( vDiffuse, vTint * WATER_COLOR_LIGHTNESS * 0.8f, fSea );\n"
+    "}\n"
+    "float3 HL_GlobeSpaceTexel( int2 i, int2 vSize )\n"
+    "{\n"
+    "\treturn HL_GlobeSpace.Load( int3( clamp( i, int2( 0, 0 ), vSize - 1 ), 0 ) ).rgb;\n"
+    "}\n"
+    "// The background behind the planet: the mod's image, fixed to the screen (the camera looks almost\n"
+    "// straight down), drifting a little as the planet turns, mirrored where it repeats.\n"
+    "float3 HL_GlobeSky( float3 vColor, float3 vPos )\n"
+    "{\n"
+    "\tif ( HL_GlobeA.x <= 0.0f || HL_GlobeC.w <= 0.5f )\n"
+    "\t\treturn vColor;\n"
+    "\tuint w, h;\n"
+    "\tHL_GlobeSpace.GetDimensions( w, h );\n"
+    "\tif ( w == 0 || h == 0 )\n"
+    "\t\treturn vColor;\n"
+    "\tfloat3 d = normalize( vPos - vCamPos );\n"
+    "\tfloat2 uv = d.xz / max( -d.y, 0.05f ) * 0.68f;\n"
+    "\tuv = float2( 0.5f + uv.x + HL_GlobeB.x * HL_GlobeA.w * 0.5f, 0.5f - uv.y );\n"
+    "\tuv = 1.0f - abs( frac( uv * 0.5f ) * 2.0f - 1.0f );\n"
+    "\tfloat2 p = uv * float2( w, h ) - 0.5f;\n"
+    "\tint2 i = int2( floor( p ) );\n"
+    "\tfloat2 f = p - floor( p );\n"
+    "\tint2 vSize = int2( w, h );\n"
+    "\tfloat3 c = lerp( lerp( HL_GlobeSpaceTexel( i, vSize ), HL_GlobeSpaceTexel( i + int2( 1, 0 ), vSize ), f.x ),\n"
+    "\t                 lerp( HL_GlobeSpaceTexel( i + int2( 0, 1 ), vSize ), HL_GlobeSpaceTexel( i + int2( 1, 1 ), vSize ), f.x ), f.y );\n"
+    "\treturn lerp( vColor, c, saturate( HL_GlobeA.x ) );\n"
     "}\n"
     "#else\n"
     "float4 HL_Globe( float4 vPos ) { return vPos; }\n"
+    "float4 HL_GlobeCull( float4 vPos ) { return vPos; }\n"
+    "float4 HL_GlobeHide( float4 vPos ) { return vPos; }\n"
+    "float3 HL_GlobeFogDiff( float3 vDiff ) { return vDiff; }\n"
+    "float3 HL_GlobeWater( float3 vColor ) { return vColor; }\n"
+    "float3 HL_GlobeSky( float3 vColor, float3 vPos ) { return vColor; }\n"
+    "float3 HL_GlobeSea( float3 vDiffuse, float3 vTint, float fHeight ) { return vDiffuse; }\n"
     "#endif\n"
     "#endif\n";
-
-bool IsIdentChar(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'; }
 
 // Index just past the ')' closing the expression that starts at `from`, or npos.
 size_t ExpressionEnd(const std::string& s, size_t from) {
@@ -204,8 +290,9 @@ size_t ExpressionEnd(const std::string& s, size_t from) {
     return std::string::npos;
 }
 
-std::string PatchCode(const std::string& code, int* count) {
+std::string PatchCode(const std::string& code, int mode, int* count) {
     std::string out = code;
+    const char* fn = mode == 2 ? "HL_GlobeHide( " : (mode == 1 ? "HL_GlobeCull( " : "HL_Globe( ");
     static const std::regex mulRx(R"(mul\s*\(\s*ViewProjectionMatrix\s*,\s*)");
     // mul( ViewProjectionMatrix, X ) -> mul( ViewProjectionMatrix, HL_Globe( X ) ), from the back so
     // earlier positions stay valid.
@@ -221,7 +308,7 @@ std::string PatchCode(const std::string& code, int* count) {
     }
     for (auto k = spans.rbegin(); k != spans.rend(); ++k) {
         out.insert(k->second, " )");
-        out.insert(k->first, "HL_Globe( ");
+        out.insert(k->first, fn);
         ++*count;
     }
     // Depth bias rows: dot( P, float4( GetMatrixData( ViewProjectionMatrix, 2, 0 ), ... ) )
@@ -239,6 +326,33 @@ std::string PatchCode(const std::string& code, int* count) {
     return res;
 }
 
+// Pixel shader code: `X = tex2D( WaterRefraction, ... ).rgb;` gets `X = HL_GlobeWater( X );` after it.
+std::string PixelCode(const std::string& code, int* count) {
+    static const std::regex rx(R"((?:float3\s+)?([A-Za-z_]\w*)\s*=\s*tex2D\s*\(\s*WaterRefraction\s*,[^;]*;)");
+    std::string res;
+    size_t pos = 0;
+    for (auto it = std::sregex_iterator(code.begin(), code.end(), rx); it != std::sregex_iterator(); ++it) {
+        const std::smatch& m = *it;
+        size_t end = (size_t)m.position() + (size_t)m.length();
+        res.append(code, pos, end - pos);
+        res += " " + m[1].str() + " = HL_GlobeWater( " + m[1].str() + " );";
+        pos = end;
+        ++*count;
+    }
+    res.append(code, pos, std::string::npos);
+    // The terrain's colour before the map modes are laid over it: the seabed gets the sea's colour on
+    // the sphere (`diffuse.rgb = HL_GlobeSea( diffuse.rgb, TerrainColor.rgb, Input.prepos.y );`).
+    static const std::regex gbRx(R"(\n([ \t]*)gradient_border_apply\s*\(\s*diffuse\.rgb)");
+    std::smatch g;
+    if (res.find("TerrainColor") != std::string::npos && res.find("Input.prepos") != std::string::npos &&
+        std::regex_search(res, g, gbRx)) {
+        size_t at = (size_t)g.position() + 1;
+        res.insert(at, g[1].str() + "diffuse.rgb = HL_GlobeSea( diffuse.rgb, TerrainColor.rgb, Input.prepos.y );\n");
+        ++*count;
+    }
+    return res;
+}
+
 // Top-level section starts: (position, true for VertexShader).
 std::vector<std::pair<size_t, bool>> Sections(const std::string& s) {
     std::vector<std::pair<size_t, bool>> out;
@@ -248,16 +362,36 @@ std::vector<std::pair<size_t, bool>> Sections(const std::string& s) {
     return out;
 }
 
+// Inserts the helpers right before `anchor` (the first match) and replaces `from` with `to` after
+// it; "" if either is missing or the file has the helpers already.
+std::string InsertAndReplace(const std::string& text, const std::string& anchor, const std::string& from, const std::string& to) {
+    if (text.find("HL_GLOBE_DEFINED") != std::string::npos) return "";
+    size_t a = text.find(anchor);
+    if (a == std::string::npos) return "";
+    size_t f = text.find(from, a);
+    if (f == std::string::npos) return "";
+    std::string out = text.substr(0, f) + to + text.substr(f + from.size());
+    // The helpers go at the start of the anchor's line (global scope inside the Code block).
+    size_t line = out.rfind('\n', a);
+    line = line == std::string::npos ? 0 : line + 1;
+    return out.substr(0, line) + kHlsl + out.substr(line);
+}
+
 }  // namespace
 
 const char* HlslCode() { return kHlsl; }
 
-std::string PatchVertexCode(const std::string& code, int* count) {
+std::string PatchVertexCode(const std::string& code, int mode, int* count) {
     *count = 0;
-    return PatchCode(code, count);
+    return PatchCode(code, mode, count);
 }
 
-std::string PatchMapShader(const std::string& shader, int* count) {
+std::string PatchPixelCode(const std::string& code, int* count) {
+    *count = 0;
+    return PixelCode(code, count);
+}
+
+std::string PatchMapShader(const std::string& shader, int mode, int* count) {
     *count = 0;
     if (shader.find("HL_GLOBE_DEFINED") != std::string::npos) return "";
     std::vector<std::pair<size_t, bool>> sections = Sections(shader);
@@ -273,9 +407,10 @@ std::string PatchMapShader(const std::string& shader, int* count) {
         size_t codeStart = at + (size_t)it->length();
         size_t codeEnd = shader.find("]]", codeStart);
         if (codeEnd == std::string::npos) break;
-        if (!vertex || name.find("Shadow") != std::string::npos) continue;
+        if (vertex && name.find("Shadow") != std::string::npos) continue;
         int n = 0;
-        std::string code = PatchCode(shader.substr(codeStart, codeEnd - codeStart), &n);
+        std::string block = shader.substr(codeStart, codeEnd - codeStart);
+        std::string code = vertex ? PatchCode(block, mode, &n) : PixelCode(block, &n);
         if (n == 0) continue;
         out.append(shader, pos, codeStart - pos);
         out += kHlsl;
@@ -286,6 +421,17 @@ std::string PatchMapShader(const std::string& shader, int* count) {
     if (*count == 0) return "";
     out.append(shader, pos, std::string::npos);
     return out;
+}
+
+std::string PatchSharedCode(const std::string& fxh) {
+    return InsertAndReplace(fxh, "float CalculateDistanceFogFactor", "float3 vDiff = vCamPos - vPos;",
+                            "float3 vDiff = HL_GlobeFogDiff( vCamPos - vPos );");
+}
+
+std::string PatchSkyShader(const std::string& sky) {
+    // The sky's pixel shader main: its colour goes through HL_GlobeSky before it is returned.
+    return InsertAndReplace(sky, "float4 main( VS_OUTPUT_SKY Input ) : PDX_COLOR", "return float4( color, 1.0f );",
+                            "return float4( HL_GlobeSky( color, Input.pos ), 1.0f );");
 }
 
 }  // namespace Globe

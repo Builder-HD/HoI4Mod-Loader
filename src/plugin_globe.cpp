@@ -1,12 +1,13 @@
 // globe (engine tier): the map as a planet (NOTES.md Part S).
 //
 //   # in a mod: common/hoi4_loader_globe/*.txt (turns the feature on; see globe.h for the keys)
-//   globe = { default = yes flat_height = 800 globe_height = 2500 north = 90 south = -90 }
+//   globe = { default = yes flat_height = 400 globe_height = 2500 transition = 0.35 background = "gfx/x/space.png" }
 //
 //   set_globe_view = yes      # country scope: that country's players see the globe (no: flat map)
 //   is_globe_view = yes       # country scope: true if that country's view is the globe
 //
-// Zooming out bends the flat map into a sphere between flat_height and globe_height; the point the
+// Zoomed out far enough that the flat view would reach past the map's north or south edge (where
+// the frame and logo are), or above globe_height, the flat map folds into a sphere; the point the
 // camera looks at stays on top, so panning turns the planet. The vertex shaders of the map are
 // patched to bend every world position (globe.cpp); the values reach them through the loader's own
 // constant buffer (globe_d3d.cpp). While the map is bent, the game's culling is opened (it only
@@ -140,18 +141,14 @@ bool EvalIs(const Args& a, const Scope& s) {
 }
 
 // --- Per frame ------------------------------------------------------------------------------------
+// The game updates its camera only while it moves (the area hook); the frame callback runs every
+// frame. Both end in Apply. Main thread.
 
-void AfterUpdate(void* mapCamera);
-
-void Frame() {
-    void* cam = Engine::GameState() ? Engine::UiMapCamera() : nullptr;
-    g_gameCam.store(cam);
-    int player = cam ? Engine::PlayerCountryTag() : 0;
-    g_wanted.store(cam && g_settings.present && GlobeD3D::Ready() && (player > 0 ? ViewOf(player) : g_settings.defaultOn));
-    // The game updates its camera only while it moves: refresh here too, so a set_globe_view (or a
-    // loaded save) shows at once and the culling stays open while the camera rests.
-    if (cam) AfterUpdate(cam);
-}
+Globe::SphereState g_sphere;
+float g_t = 0.0f;              // 0 flat .. 1 sphere, moved toward the target over `transition`
+bool g_edgeInView = false;     // the flat view reaches past the north or south edge (last fresh area)
+float g_height = 0.0f;         // the camera's height (eye y)
+ULONGLONG g_lastTick = 0;
 
 void Publish(const Globe::Params& p) {
     AcquireSRWLockExclusive(&g_paramsLock);
@@ -167,16 +164,18 @@ Globe::Params Current() {
     return p;
 }
 
-void AfterUpdate(void* mapCamera) {
-    void* game = g_gameCam.load();
-    if (mapCamera != game || !g_wanted.load()) {
-        if (mapCamera == game || !game) Publish(Globe::Params());
-        return;
-    }
+// fresh: right after the game's camera update (the visible area is the game's own, for the flat map).
+void Apply(void* mapCamera, bool fresh) {
     float eye[3], look[3], w = 0, h = 0;
     if (!Engine::GlobeCameraPose(mapCamera, eye, look) || !Engine::GlobeMapSize(&w, &h)) {
         Publish(Globe::Params());
         return;
+    }
+    g_height = eye[1];
+    if (fresh) {
+        float zmin, zmax;
+        Engine::GlobeAreaZRange(mapCamera, &zmin, &zmax);
+        g_edgeInView = zmin < 0.0f || zmax > h;
     }
     // The ground point the camera looks at (y = 0).
     float d[3] = {look[0] - eye[0], look[1] - eye[1], look[2] - eye[2]};
@@ -187,26 +186,75 @@ void AfterUpdate(void* mapCamera) {
     }
     lz = lz < 0 ? 0 : (lz > h ? h : lz);
     Globe::Params p;
-    float t = Globe::Curvature(g_settings, eye[1]);
-    if (!Globe::MakeParams(g_settings, w, h, t, lx, lz, &p)) {
+    if (!Globe::MakeParams(g_settings, w, h, g_t, lx, lz, &p)) {
         Publish(Globe::Params());
         return;
     }
+    p.c[3] = GlobeD3D::HaveBackground() ? 1.0f : 0.0f;
     g_mapW = w, g_mapH = h;
     Publish(p);
+    // The main camera draws the whole planet: the wrap copies are off, every frustum plane open.
+    Engine::GlobeHideCopies(mapCamera);
     for (int k = 0; k < 3; ++k) Engine::GlobeOpenFrustum(Engine::GlobeEngineCamera(mapCamera, k));
-    Engine::GlobeWidenArea(mapCamera, lx, lz, 50.0f);
+    if (fresh) Engine::GlobeWidenArea(mapCamera, lx, lz, 50.0f);
     // Panning turns the planet without end; keep the camera over the map (whole map widths, the
     // planet looks the same) so zooming back in finds the flat map under it. From the next frame on:
     // this frame's matrices are made already.
     if (lx < 0.0f || lx >= w) Engine::GlobeShiftCamera(mapCamera, -w * floorf(lx / w));
     if (!g_loggedActive) {
         g_loggedActive = true;
-        Log("globe: first bent frame (camera height %.0f, curvature %.2f, map %.0f x %.0f)", eye[1], t, w, h);
+        Log("globe: first globe frame (camera height %.0f, map %.0f x %.0f, background %s)", eye[1], w, h,
+            p.c[3] > 0.5f ? "on" : "the game's sky");
     }
 }
 
-void ScreenRay(void* engineCamera, float dir[3], float origin[3]) {
+void AfterUpdate(void* mapCamera) {
+    void* game = g_gameCam.load();
+    if (mapCamera != game) {
+        if (!game) Publish(Globe::Params());  // the main menu's camera: flat
+        return;
+    }
+    if (!g_wanted.load() && g_t <= 0.0f) {
+        Publish(Globe::Params());
+        float zmin, zmax;  // keep the edge state current for the moment the view is wanted
+        float w = 0, h = 0;
+        if (Engine::GlobeMapSize(&w, &h)) {
+            Engine::GlobeAreaZRange(mapCamera, &zmin, &zmax);
+            g_edgeInView = zmin < 0.0f || zmax > h;
+        }
+        return;
+    }
+    Apply(mapCamera, true);
+}
+
+void Frame() {
+    void* cam = Engine::GameState() ? Engine::UiMapCamera() : nullptr;
+    g_gameCam.store(cam);
+    int player = cam ? Engine::PlayerCountryTag() : 0;
+    bool wanted = cam && g_settings.present && GlobeD3D::Ready() && (player > 0 ? ViewOf(player) : g_settings.defaultOn);
+    g_wanted.store(wanted);
+    ULONGLONG now = GetTickCount64();
+    float dt = g_lastTick ? (float)(now - g_lastTick) / 1000.0f : 0.0f;
+    g_lastTick = now;
+    if (!cam) {
+        g_t = 0.0f, g_sphere = Globe::SphereState();
+        return;
+    }
+    float eye[3], look[3];
+    if (Engine::GlobeCameraPose(cam, eye, look)) g_height = eye[1];
+    bool sphere = wanted && Globe::WantSphere(g_settings, g_height, g_edgeInView, &g_sphere);
+    if (!wanted) g_sphere = Globe::SphereState();
+    float target = sphere ? 1.0f : 0.0f;
+    float step = g_settings.transition > 0.0f ? dt / g_settings.transition : 1.0f;
+    g_t = g_t < target ? (g_t + step > target ? target : g_t + step) : (g_t - step < target ? target : g_t - step);
+    if (g_t <= 0.0f) {
+        Publish(Globe::Params());
+        return;
+    }
+    Apply(cam, false);
+}
+
+void ScreenRay(void* engineCamera, float dir[3], float origin[3], bool fromCamera) {
     void* game = g_gameCam.load();
     if (!game) return;
     bool ours = false;
@@ -221,13 +269,18 @@ void ScreenRay(void* engineCamera, float dir[3], float origin[3]) {
     float flat[2];
     bool hit = false;
     if (!Globe::Unbend(p, o, dir, g_mapW, g_mapH, flat, &hit)) return;
-    // The copy of the point on the camera's side of the wrap line (5832, not 200, for a camera at
-    // 5620): the direction must point the way the cursor is; the game's wrap copies find the province.
-    flat[0] += g_mapW * roundf((o[0] - flat[0]) / g_mapW);
+    if (!hit && !fromCamera) {
+        // Picking past the planet's rim: a ray onto a point far off the map, which holds nothing.
+        flat[0] = o[0], flat[1] = -100000.0f;
+    } else {
+        // The copy of the point on the camera's side of the wrap line (5832, not 200, for a camera at
+        // 5620): the direction must point the way the cursor is; the game's wrap copies find the province.
+        flat[0] += g_mapW * roundf((o[0] - flat[0]) / g_mapW);
+    }
     flat[0] += shift;
-    // From the camera onto the flat point (y = 0): the game's own hit test finds what lies there,
-    // and code that uses the ray's direction (edge panning, zoom to the cursor) still gets one that
-    // points the way the cursor is.
+    // From the camera onto the flat point (y = 0): the game's own hit test finds what lies there, and
+    // the camera's own rays (edge panning, zoom to the cursor) keep a direction that points the way the
+    // cursor is (on the rim for a cursor past it).
     float d[3] = {flat[0] - origin[0], -origin[1], flat[1] - origin[2]};
     float len = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
     if (!(len > 1e-3f) || !(origin[1] > 1.0f)) return;
@@ -236,10 +289,39 @@ void ScreenRay(void* engineCamera, float dir[3], float origin[3]) {
 
 bool SkipEdgeClamp(void* mapCamera) { return mapCamera == g_gameCam.load() && Current().t() > 0.0f; }
 
+// Things drawn without a depth test (names, arrows, routes, particles) drop what lies beyond the
+// planet's horizon; the rest is hidden by the planet itself.
+std::string PatchCulled(const std::string& original) {
+    int n = 0;
+    std::string out = Globe::PatchMapShader(original, Globe::kCull, &n);
+    Log("globe: a map shader %s (%d position(s) bent, beyond the horizon dropped)", out.empty() ? "had nothing to bend" : "was patched", n);
+    return out;
+}
+
 std::string PatchShader(const std::string& original) {
     int n = 0;
-    std::string out = Globe::PatchMapShader(original, &n);
-    Log("globe: a map shader %s (%d position(s) bent)", out.empty() ? "had nothing to bend" : "was patched", n);
+    std::string out = Globe::PatchMapShader(original, Globe::kBend, &n);
+    Log("globe: a map shader %s (%d replacement(s))", out.empty() ? "had nothing to bend" : "was patched", n);
+    return out;
+}
+
+// The game's water: not drawn while bent (its coarse grid would sink under the curved seabed).
+std::string PatchWater(const std::string& original) {
+    int n = 0;
+    std::string out = Globe::PatchMapShader(original, Globe::kHide, &n);
+    Log("globe: pdxwater.shader %s", out.empty() ? "NOT patched: the water may cover the sea oddly on the planet" : "patched (hidden while bent; the seabed shows the sea)");
+    return out;
+}
+
+std::string PatchShared(const std::string& original) {
+    std::string out = Globe::PatchSharedCode(original);
+    Log("globe: standardfuncsgfx.fxh %s", out.empty() ? "NOT patched (the distance fog was not found as expected)" : "patched (distance fog across the wrap line)");
+    return out;
+}
+
+std::string PatchSky(const std::string& original) {
+    std::string out = Globe::PatchSkyShader(original);
+    Log("globe: sky.shader %s", out.empty() ? "NOT patched (its main was not found as expected): the game's sky stays" : "patched (background behind the planet)");
     return out;
 }
 
@@ -257,6 +339,27 @@ void LoadSettings() {
         Globe::ParseFile(text, f.shown, &g_settings, &problems);
         for (const Globe::Problem& p : problems) Log("globe: %s line %d: %s", p.file.c_str(), p.line, p.message.c_str());
     }
+}
+
+// The background named in the settings, as the game would find it: the last enabled mod that has the
+// file, else the game folder. "" if none has it.
+std::wstring FindBackground() {
+    if (g_settings.background.empty()) return L"";
+    std::wstring rel = ModList::Wide(g_settings.background);
+    for (wchar_t& c : rel)
+        if (c == L'/') c = L'\\';
+    std::vector<ModList::EnabledMod> mods;
+    ModList::Enabled(UserFolder(), &mods);
+    for (auto it = mods.rbegin(); it != mods.rend(); ++it) {
+        if (it->status != ModList::EnabledMod::Status::Ok) continue;
+        std::wstring p = it->root + L"\\" + rel;
+        if (GetFileAttributesW(p.c_str()) != INVALID_FILE_ATTRIBUTES) return p;
+    }
+    std::wstring p = GameFolder() + L"\\" + rel;
+    if (GetFileAttributesW(p.c_str()) != INVALID_FILE_ATTRIBUTES) return p;
+    Log("globe: the background %s (named in %s) is in no enabled mod nor the game folder; the game's sky stays",
+        g_settings.background.c_str(), g_settings.backgroundFrom.c_str());
+    return L"";
 }
 
 }  // namespace
@@ -300,18 +403,34 @@ bool GlobeInit() {
         Log("globe: no enabled mod has a %s file: the map shaders are left alone and the map stays flat", kFolder);
         return true;
     }
-    Log("globe: on (default %s, flat up to height %.0f, globe from %.0f, latitudes %.0f to %.0f)", g_settings.defaultOn ? "globe" : "flat",
-        g_settings.flatHeight, g_settings.globeHeight, g_settings.south, g_settings.north);
-    static const wchar_t* const kShaders[] = {L"gfx/FX/pdxmap.shader",   L"gfx/FX/pdxwater.shader", L"gfx/FX/border.shader",
-                                              L"gfx/FX/river.shader",    L"gfx/FX/tree.shader",     L"gfx/FX/mapname.shader",
-                                              L"gfx/FX/maparrow.shader", L"gfx/FX/strait.shader",   L"gfx/FX/traderoute.shader",
-                                              L"gfx/FX/pdxmesh.shader",  L"gfx/FX/particle.shader"};
+    std::wstring background = FindBackground();
+    Log("globe: on (default %s, flat below height %.0f, a globe from %.0f or once the view reaches past the map's edge, "
+        "folding in %.2f s, latitudes %.0f to %.0f, background %s)",
+        g_settings.defaultOn ? "globe" : "flat", g_settings.flatHeight, g_settings.globeHeight, g_settings.transition, g_settings.south,
+        g_settings.north, background.empty() ? "the game's sky" : ModList::Narrow(background).c_str());
+    static const wchar_t* const kShaders[] = {L"gfx/FX/pdxmap.shader", L"gfx/FX/border.shader",
+                                              L"gfx/FX/river.shader",  L"gfx/FX/tree.shader",     L"gfx/FX/pdxmesh.shader"};
+    static const wchar_t* const kCulled[] = {L"gfx/FX/mapname.shader", L"gfx/FX/maparrow.shader", L"gfx/FX/strait.shader",
+                                             L"gfx/FX/traderoute.shader", L"gfx/FX/particle.shader"};
     for (const wchar_t* f : kShaders)
         if (!register_file_patch(f, &PatchShader)) {
             Log("globe: the shader patch for %ls could not be registered; globe off", f);
             return false;
         }
-    if (!GlobeD3D::Install() || !Engine::GlobeInstall({&AfterUpdate, &ScreenRay, &SkipEdgeClamp})) {
+    for (const wchar_t* f : kCulled)
+        if (!register_file_patch(f, &PatchCulled)) {
+            Log("globe: the shader patch for %ls could not be registered; globe off", f);
+            return false;
+        }
+    if (!register_file_patch(L"gfx/FX/pdxwater.shader", &PatchWater)) {
+        Log("globe: the shader patch for pdxwater.shader could not be registered; globe off");
+        return false;
+    }
+    if (!register_file_patch(L"gfx/FX/standardfuncsgfx.fxh", &PatchShared) || !register_file_patch(L"gfx/FX/sky.shader", &PatchSky)) {
+        Log("globe: the fog or sky patch could not be registered; globe off");
+        return false;
+    }
+    if (!GlobeD3D::Install(background) || !Engine::GlobeInstall({&AfterUpdate, &ScreenRay, &SkipEdgeClamp})) {
         Log("globe: hooks could not be queued; globe off");
         return false;
     }

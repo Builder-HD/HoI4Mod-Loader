@@ -1,16 +1,21 @@
-// globe (NOTES.md Part S): the shader constants' channel. The loader's own constant buffer (register
-// b13; vanilla uses b0..b4) on the game's Direct3D 11 device, bound to the vertex stage whenever the
-// game sets a vertex shader and refreshed there when the values changed. API hooks only
-// (d3d11.dll's D3D11CreateDevice and the context's VSSetShader), no game code. Without a DX11 device
-// (DX9 or OpenGL renderer) Ready() stays false and the globe stays off.
+// globe (NOTES.md Part S): the shaders' channel. The loader's own constant buffer (register b13;
+// vanilla uses b0..b4) and, when a mod names one, the background image (t20; vanilla's samplers use
+// t0..t15) on the game's Direct3D 11 device, bound to the vertex and pixel stages whenever the game
+// sets a vertex shader, the constants refreshed there when they changed. API hooks only (d3d11.dll's
+// D3D11CreateDevice and the context's VSSetShader), no game code. Without a DX11 device (DX9 or
+// OpenGL renderer) Ready() stays false and the globe stays off.
 #include <windows.h>
 #include <d3d11.h>
 #include <string.h>
+#include <wincodec.h>
 
 #include <atomic>
+#include <string>
+#include <vector>
 
 #include "MinHook.h"
 #include "engine.h"
+#include "globe_d3d.h"
 #include "loader.h"
 
 namespace GlobeD3D {
@@ -21,7 +26,8 @@ using Create_t = HRESULT(WINAPI*)(IDXGIAdapter*, D3D_DRIVER_TYPE, HMODULE, UINT,
                                   ID3D11Device**, D3D_FEATURE_LEVEL*, ID3D11DeviceContext**);
 using VSSetShader_t = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*, ID3D11VertexShader*, ID3D11ClassInstance* const*, UINT);
 
-const UINT kSlot = 13;
+const UINT kSlot = 13;          // constant buffer
+const UINT kTextureSlot = 20;   // background image
 const size_t kVSSetShaderSlot = 11;  // ID3D11DeviceContext vtable: IUnknown (3), DeviceChild (4), VSSetConstantBuffers, PSSetShaderResources, PSSetShader, PSSetSamplers, VSSetShader
 
 Create_t g_create = nullptr;
@@ -29,7 +35,9 @@ VSSetShader_t g_vsSetShader = nullptr;
 void* g_vsSetShaderTarget = nullptr;
 std::atomic<ID3D11DeviceContext*> g_ctx{nullptr};
 std::atomic<ID3D11Buffer*> g_buf{nullptr};
+std::atomic<ID3D11ShaderResourceView*> g_background{nullptr};
 std::atomic<bool> g_ready{false};
+std::wstring g_backgroundPath;  // set at init, read when the device is made
 
 SRWLOCK g_lock = SRWLOCK_INIT;
 float g_data[12] = {};
@@ -50,15 +58,67 @@ void Upload(ID3D11DeviceContext* ctx, ID3D11Buffer* buf) {
         }
     }
     ctx->VSSetConstantBuffers(kSlot, 1, &buf);
+    ctx->PSSetConstantBuffers(kSlot, 1, &buf);
+    ID3D11ShaderResourceView* srv = g_background.load();
+    if (srv) ctx->PSSetShaderResources(kTextureSlot, 1, &srv);
 }
 
 void STDMETHODCALLTYPE HookVSSetShader(ID3D11DeviceContext* ctx, ID3D11VertexShader* vs, ID3D11ClassInstance* const* ci, UINT n) {
     g_vsSetShader(ctx, vs, ci, n);
     ID3D11Buffer* buf = g_buf.load();
     // Until the first values are published nothing is bound: an unbound buffer reads as zeros, which
-    // the shader takes as "flat".
+    // the shaders take as "flat".
     if (ctx != g_ctx.load() || !buf || !g_bound.load()) return;
     Upload(ctx, buf);
+}
+
+// The background image as an RGBA texture (WIC: PNG, JPEG, BMP, ...). Null (logged) on any failure.
+ID3D11ShaderResourceView* LoadBackground(ID3D11Device* dev) {
+    if (g_backgroundPath.empty()) return nullptr;
+    HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);  // the game's thread may have COM already
+    IWICImagingFactory* f = nullptr;
+    IWICBitmapDecoder* dec = nullptr;
+    IWICBitmapFrameDecode* frame = nullptr;
+    IWICFormatConverter* conv = nullptr;
+    ID3D11Texture2D* tex = nullptr;
+    ID3D11ShaderResourceView* srv = nullptr;
+    UINT w = 0, h = 0;
+    std::vector<uint8_t> px;
+    HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f));
+    if (SUCCEEDED(hr)) hr = f->CreateDecoderFromFilename(g_backgroundPath.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnLoad, &dec);
+    if (SUCCEEDED(hr)) hr = dec->GetFrame(0, &frame);
+    if (SUCCEEDED(hr)) hr = f->CreateFormatConverter(&conv);
+    if (SUCCEEDED(hr))
+        hr = conv->Initialize(frame, GUID_WICPixelFormat32bppRGBA, WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom);
+    if (SUCCEEDED(hr)) hr = conv->GetSize(&w, &h);
+    if (SUCCEEDED(hr) && (w == 0 || h == 0 || w > 8192 || h > 8192)) hr = E_INVALIDARG;
+    if (SUCCEEDED(hr)) {
+        px.resize((size_t)w * h * 4);
+        hr = conv->CopyPixels(nullptr, w * 4, (UINT)px.size(), px.data());
+    }
+    if (SUCCEEDED(hr)) {
+        D3D11_TEXTURE2D_DESC d = {};
+        d.Width = w, d.Height = h, d.MipLevels = 1, d.ArraySize = 1;
+        d.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        d.SampleDesc.Count = 1;
+        d.Usage = D3D11_USAGE_IMMUTABLE;
+        d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        D3D11_SUBRESOURCE_DATA init = {px.data(), w * 4, 0};
+        hr = dev->CreateTexture2D(&d, &init, &tex);
+    }
+    if (SUCCEEDED(hr)) hr = dev->CreateShaderResourceView(tex, nullptr, &srv);
+    if (tex) tex->Release();
+    if (conv) conv->Release();
+    if (frame) frame->Release();
+    if (dec) dec->Release();
+    if (f) f->Release();
+    if (SUCCEEDED(co)) CoUninitialize();
+    if (FAILED(hr)) {
+        Log("globe: the background %ls could not be loaded (0x%08lX); the game's sky stays", g_backgroundPath.c_str(), hr);
+        return nullptr;
+    }
+    Log("globe: background %ls (%ux%u) in slot t%u", g_backgroundPath.c_str(), w, h, kTextureSlot);
+    return srv;
 }
 
 void Capture(ID3D11Device* dev) {
@@ -88,10 +148,13 @@ void Capture(ID3D11Device* dev) {
         g_vsSetShaderTarget = target;
         Log("globe: device context hooked (%s)", DescribeAddress(target).c_str());
     }
+    ID3D11ShaderResourceView* srv = LoadBackground(dev);
     g_uploaded = -1;
     ID3D11Buffer* old = g_buf.exchange(buf);
+    ID3D11ShaderResourceView* oldSrv = g_background.exchange(srv);
     g_ctx.store(ctx);
     if (old) old->Release();
+    if (oldSrv) oldSrv->Release();
     g_ready.store(true);
     Log("globe: Direct3D 11 device %p, constant buffer in slot b%u", (void*)dev, kSlot);
 }
@@ -105,7 +168,8 @@ HRESULT WINAPI HookCreate(IDXGIAdapter* a, D3D_DRIVER_TYPE t, HMODULE sw, UINT f
 
 }  // namespace
 
-bool Install() {
+bool Install(const std::wstring& backgroundPath) {
+    g_backgroundPath = backgroundPath;
     HMODULE m = GetModuleHandleW(L"d3d11.dll");
     if (!m) m = LoadLibraryW(L"d3d11.dll");
     void* create = m ? (void*)GetProcAddress(m, "D3D11CreateDevice") : nullptr;
@@ -117,6 +181,8 @@ bool Install() {
 }
 
 bool Ready() { return g_ready.load(); }
+
+bool HaveBackground() { return g_background.load() != nullptr; }
 
 void Publish(const float a[4], const float b[4], const float c[4]) {
     AcquireSRWLockExclusive(&g_lock);

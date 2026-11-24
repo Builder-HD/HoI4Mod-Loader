@@ -940,8 +940,10 @@ def check_globe(img, codes, text_va, text):
 
     area, ray, clamp, fr = one('kSigGlobeArea'), one('kSigGlobeScreenRay'), one('kSigGlobeEdgeClamp'), one('kSigGlobeFrustum')
     pick, cc, look = one('kSigGlobePickCams'), one('kSigGlobeCameraClamp'), one('kSigCameraLookAt')
-    if not (area and ray and clamp and fr and pick and cc and look):
+    pan, zoom = one('kSigGlobePanRay'), one('kSigGlobeZoomRay')
+    if not (area and ray and clamp and fr and pick and cc and look and pan and zoom):
         return [('globe signatures', False, 'missing')]
+    calls_ok = rel32(img, pan + k['kSigGlobePanRayCall']) == ray and rel32(img, zoom + k['kSigGlobeZoomRayCall']) == ray
     store = find_in(img, area, 0x400, codes['kCodeGlobeAreaStore'])
     if not store:
         return [('kCodeGlobeAreaStore (in the visible area function)', False, hex(area))]
@@ -957,9 +959,9 @@ def check_globe(img, codes, text_va, text):
     stride = cams[1] - cams[0]
     ok = (main == u8(pick + k['kSigGlobePickMain']) and mapA == mapB and cams[2] - cams[1] == stride and stride > planes + 0x60 and
           flags[1] == flags[0] + 1 and eye > flags[1] and lk == eye + 12 and eyeT == eye + 0x18 and lookT == lk + 0x18 and
-          pts > lk and planes > pos and h == w + 4)
+          pts > lk and planes > pos and h == w + 4 and calls_ok)
     return [('kSigGlobe* / kCodeGlobeAreaStore (cameras +0x%x/+0x%x/+0x%x, in use +0x%x/+0x%x, eye +0x%x, look +0x%x, '
-             'area +0x%x, planes +0x%x, map +0x%x/+0x%x)' % (cams[0], cams[1], cams[2], flags[0], flags[1], eye, lk, pts, planes, w, h),
+             'area +0x%x, planes +0x%x, map +0x%x/+0x%x, camera rays call it: %s)' % (cams[0], cams[1], cams[2], flags[0], flags[1], eye, lk, pts, planes, w, h, calls_ok),
              ok, hex(area))]
 
 

@@ -6,6 +6,7 @@
 #include <d3dcompiler.h>
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 
 #include <fstream>
 #include <sstream>
@@ -53,9 +54,16 @@ static const char kShader[] =
 static void TestMaths() {
     Globe::Settings s;
     s.present = true;
-    Check(Globe::Curvature(s, 100) == 0.0f && Globe::Curvature(s, 3000) == 1.0f, "curvature ends");
-    float mid = Globe::Curvature(s, (s.flatHeight + s.globeHeight) / 2);
-    Check(Near(mid, 0.5f, 1e-4f), "curvature middle");
+    {
+        Globe::SphereState st;
+        Check(!Globe::WantSphere(s, 300, true, &st), "below flat_height: flat even with the edge in view");
+        Check(Globe::WantSphere(s, 2600, false, &st), "above globe_height: a sphere");
+        st = Globe::SphereState();
+        Check(!Globe::WantSphere(s, 1000, false, &st), "edge out of view: flat");
+        Check(Globe::WantSphere(s, 1000, true, &st) && st.enterHeight == 1000, "edge in view: a sphere");
+        Check(Globe::WantSphere(s, 900, false, &st), "zoomed in a little: stays a sphere");
+        Check(!Globe::WantSphere(s, 800, false, &st), "below 85% of where it became one: flat");
+    }
     Globe::Params p;
     Check(!Globe::MakeParams(s, 5632, 2048, 0.0f, 100, 100, &p) && p.t() == 0.0f, "t = 0: flat");
     float in[3] = {1234, 5, 777}, out[3];
@@ -110,8 +118,10 @@ static void TestMaths() {
 static void TestSettings() {
     Globe::Settings s;
     std::vector<Globe::Problem> pr;
-    Globe::ParseFile("globe = { default = yes flat_height = 600 globe_height = 2000.5 north = 70 south = -60 }", "t", &s, &pr);
-    Check(pr.empty() && s.present && s.defaultOn && s.flatHeight == 600 && s.globeHeight == 2000.5f && s.north == 70 && s.south == -60,
+    Globe::ParseFile("globe = { default = yes flat_height = 600 globe_height = 2000.5 north = 70 south = -60 transition = 0 "
+                     "background = \"gfx/test/space.png\" }", "t", &s, &pr);
+    Check(pr.empty() && s.present && s.defaultOn && s.flatHeight == 600 && s.globeHeight == 2000.5f && s.north == 70 && s.south == -60 &&
+              s.transition == 0 && s.background == "gfx/test/space.png",
           "settings read");
     Globe::ParseFile("globe = { default = no wobble = 3 north = 100 }\nfoo = 1", "t", &s, &pr);
     Check(!s.defaultOn && pr.size() == 3 && s.north == 70, "settings problems, later keys replace");
@@ -119,7 +129,7 @@ static void TestSettings() {
 
 static void TestPatch() {
     int n = 0;
-    std::string out = Globe::PatchMapShader(kShader, &n);
+    std::string out = Globe::PatchMapShader(kShader, false, &n);
     Check(n == 3, "three replacements (two mul, one dot)");
     Check(out.find("pos = mul( ViewProjectionMatrix, HL_Globe( pos ) );") != std::string::npos, "mul wrapped");
     Check(out.find("mul( ViewProjectionMatrix, HL_Globe( float4( Get( a, b ), 1.0f ) ) )") != std::string::npos, "nested parens");
@@ -127,9 +137,21 @@ static void TestPatch() {
     Check(Count(out, "HL_Globe( pos )") == 1, "shadow and pixel blocks untouched");
     Check(Count(out, "#define HL_GLOBE_DEFINED") == 1, "helper once, in the patched block");
     int again = 0;
-    Check(Globe::PatchMapShader(out, &again).empty(), "no second patch");
-    Check(Globe::PatchMapShader("PixelShader = { MainCode P [[ x = mul( ViewProjectionMatrix, y ); ]] }", &again).empty(),
+    Check(Globe::PatchMapShader(out, false, &again).empty(), "no second patch");
+    Check(Globe::PatchMapShader("PixelShader = { MainCode P [[ x = mul( ViewProjectionMatrix, y ); ]] }", false, &again).empty(),
           "nothing to do -> empty");
+    std::string culled = Globe::PatchMapShader(kShader, true, &n);
+    Check(culled.find("mul( ViewProjectionMatrix, HL_GlobeCull( pos ) )") != std::string::npos, "cull variant");
+    std::string water = Globe::PatchMapShader(
+        "PixelShader =\n{\n\tMainCode P\n\t[[\n\t\tfloat3 refractiveColor = tex2D( WaterRefraction, uv - d ).rgb;\n\t]]\n}\n", false, &n);
+    Check(n == 1 && water.find("tex2D( WaterRefraction, uv - d ).rgb; refractiveColor = HL_GlobeWater( refractiveColor );") != std::string::npos,
+          "water refraction replaced");
+    std::string fx = Globe::PatchSharedCode(
+        "PixelShader =\n{\n\tCode\n\t[[\n\tfloat CalculateDistanceFogFactor(float3 vPos)\n\t{\n\t\tfloat3 vDiff = vCamPos - vPos;\n\t}\n\t]]\n}\n");
+    Check(fx.find("float3 vDiff = HL_GlobeFogDiff( vCamPos - vPos );") != std::string::npos &&
+              fx.find("#define HL_GLOBE_DEFINED") < fx.find("float CalculateDistanceFogFactor"),
+          "fog patched, helpers before it");
+    Check(Globe::PatchSharedCode("nothing here").empty(), "fog: no anchor, no patch");
 }
 
 static void TestRealFiles(const std::string& dir) {
@@ -143,7 +165,9 @@ static void TestRealFiles(const std::string& dir) {
             continue;
         }
         int n = 0;
-        std::string out = Globe::PatchMapShader(text, &n);
+        bool cull = std::string(f) == "mapname" || std::string(f) == "maparrow" || std::string(f) == "strait" ||
+                    std::string(f) == "traderoute" || std::string(f) == "particle";
+        std::string out = Globe::PatchMapShader(text, cull, &n);
         printf("%-12s %d replacement(s)\n", f, n);
         Check(n > 0 && !out.empty(), f);
         Check(Count(out, "HL_Globe(") >= (size_t)n, "every replacement calls HL_Globe");
@@ -167,7 +191,8 @@ static int TestCompile(const std::string& dir) {
         if (mainAt == std::string::npos) continue;
         mainAt = src.rfind('\n', mainAt);
         int n = 0;
-        std::string out = src.substr(0, mainAt) + Globe::HlslCode() + Globe::PatchVertexCode(src.substr(mainAt), &n);
+        bool cull = (compiled % 2) == 1;  // both variants get compiled across the files
+        std::string out = src.substr(0, mainAt) + Globe::HlslCode() + Globe::PatchVertexCode(src.substr(mainAt), cull, &n);
         ID3DBlob *code = nullptr, *msg = nullptr;
         HRESULT hr = compile(out.data(), out.size(), fd.cFileName, nullptr, nullptr, "main", "vs_5_0", 0, 0, &code, &msg);
         if (FAILED(hr)) {
@@ -185,12 +210,57 @@ static int TestCompile(const std::string& dir) {
     return compiled;
 }
 
+// The pixel side as the game assembles it: the helpers in front of the fog function (standardfuncsgfx),
+// the fog, the water refraction and the sky's return patched; ps_5_0.
+static int TestCompilePixel(const std::string& dir) {
+    HMODULE m = LoadLibraryW(L"d3dcompiler_47.dll");
+    pD3DCompile compile = m ? (pD3DCompile)GetProcAddress(m, "D3DCompile") : nullptr;
+    if (!compile) return 0;
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA((dir + "\\*.scache").c_str(), &fd);
+    int compiled = 0, water = 0, sky = 0;
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    do {
+        std::string s;
+        if (!ReadFile(dir + "\\" + fd.cFileName, &s) || s.find("HL_") != std::string::npos) continue;
+        size_t a = s.find("float CalculateDistanceFogFactor");
+        size_t f = s.find("float3 vDiff = vCamPos - vPos;");
+        if (a == std::string::npos || f == std::string::npos) continue;
+        s.replace(f, strlen("float3 vDiff = vCamPos - vPos;"), "float3 vDiff = HL_GlobeFogDiff( vCamPos - vPos );");
+        size_t line = s.rfind('\n', a);
+        s.insert(line == std::string::npos ? 0 : line + 1, Globe::HlslCode());
+        int n = 0;
+        s = Globe::PatchPixelCode(s, &n);
+        water += n;
+        size_t r = s.find("return float4( color, 1.0f );");
+        if (s.find("VS_OUTPUT_SKY") != std::string::npos && r != std::string::npos) {
+            s.replace(r, strlen("return float4( color, 1.0f );"), "return float4( HL_GlobeSky( color, Input.pos ), 1.0f );");
+            ++sky;
+        }
+        ID3DBlob *code = nullptr, *msg = nullptr;
+        HRESULT hr = compile(s.data(), s.size(), fd.cFileName, nullptr, nullptr, "main", "ps_5_0", 0, 0, &code, &msg);
+        ++g_checks;
+        if (FAILED(hr)) {
+            printf("FAIL: %s does not compile:\n%s\n", fd.cFileName, msg ? (const char*)msg->GetBufferPointer() : "");
+            ++g_failed;
+        } else {
+            ++compiled;
+        }
+        if (code) code->Release();
+        if (msg) msg->Release();
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    printf("%d cached pixel shader(s) compiled with the fog patch (%d water, %d sky)\n", compiled, water, sky);
+    return compiled;
+}
+
 int main(int argc, char** argv) {
     TestMaths();
     TestSettings();
     TestPatch();
     if (argc >= 2) TestRealFiles(argv[1]);
     if (argc >= 3) TestCompile(argv[2]);
+    if (argc >= 4) TestCompilePixel(argv[3]);
     printf("%d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;
 }

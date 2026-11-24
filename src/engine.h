@@ -317,7 +317,8 @@ struct GlobeHooks {
     // After the map camera's per-frame update (main thread; any map camera, also the main menu's).
     void (*afterUpdate)(void* mapCamera);
     // After an engine camera made a screen ray; may replace it. Any thread the game calls it on.
-    void (*screenRay)(void* engineCamera, float dir[3], float origin[3]);
+    // fromCamera: asked by the map camera itself (pan direction, zoom), not by picking.
+    void (*screenRay)(void* engineCamera, float dir[3], float origin[3], bool fromCamera);
     // True: skip the map camera's north/south edge clamp (the eye is passed through unchanged).
     bool (*skipEdgeClamp)(void* mapCamera);
 };
@@ -331,6 +332,9 @@ void GlobeShiftCamera(void* mapCamera, float dx);     // eye, look-at and their 
 void GlobeOpenFrustum(void* engineCamera);            // the six planes accept everything
 // The visible area's four corners pushed out from (cx, cz) by `factor`.
 void GlobeWidenArea(void* mapCamera, float cx, float cz, float factor);
+// The lowest and highest z of the visible area's four corners (as the game computed them for the
+// flat map: read before GlobeWidenArea).
+void GlobeAreaZRange(void* mapCamera, float* zmin, float* zmax);
 
 // --- Attention areas (attention_area; engine_attention.cpp, NOTES.md Part M) -------------------
 void ResolveAttention();     // after ResolveProvinceData

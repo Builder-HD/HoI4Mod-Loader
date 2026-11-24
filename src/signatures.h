@@ -1468,6 +1468,13 @@ static const size_t kSigGlobePickMain = 3, kSigGlobePickWrap = 0xc, kSigGlobePic
 SIG(kSigGlobeCameraClamp, "48 8B 05 ?? ?? ?? ?? 48 8B D9 48 85 C0 0F 84 ?? ?? ?? ?? 80 78 ?? 00 0F 84 ?? ?? ?? ?? F2 0F 10 81 ?? ?? ?? ?? F2 0F 10 89 ?? ?? ?? ?? 0F 28 E0 66 0F 6E 58 ?? 66 0F 6E 50 ??")
 static const size_t kSigGlobeClampMapRel = 3, kSigGlobeClampEyeDisp = 0x21, kSigGlobeClampLookDisp = 0x29,
                     kSigGlobeClampWidthDisp = 0x34, kSigGlobeClampHeightDisp = 0x39;
+// The map camera's own screen rays (the screen-ray hook tells them from picking by their return
+// address): the pan direction under the cursor, FUN_1412f4810 (call at +0xe, 0x1412f4897), and the
+// second update path's ray, FUN_1412f5a10 (call at +0x1d, 0x1412f5b44). Both calls must reach
+// kSigGlobeScreenRay.
+SIG(kSigGlobePanRay, "89 44 24 48 48 8D 44 24 40 48 89 44 24 20 E8 ?? ?? ?? ?? 0F 28 FE 41 0F 28 E8 F3 0F 59 6C 24 30")
+SIG(kSigGlobeZoomRay, "48 8D 4E 10 48 8D 44 24 40 48 89 44 24 20 4C 8D 4C 24 50 0F 57 D2 48 8D 95 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B 4E 08 48 8B 01 FF 50 78")
+static const size_t kSigGlobePanRayCall = 0xe, kSigGlobeZoomRayCall = 0x1d;
 
 #undef CODE
 #undef SIG
