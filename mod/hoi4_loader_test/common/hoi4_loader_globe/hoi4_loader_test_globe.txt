@@ -1,9 +1,14 @@
 # Test settings for hoi4_loader's globe view (MODDING.md "Globe view", NOTES.md Part S).
-# Zoom out: flat up to camera height 800, a whole planet from 2500 (vanilla's maximum is 3000).
+# Flat below camera height 400; a planet from 2500 (vanilla's maximum is 3000) or as soon as the flat
+# view would reach past the map's north or south edge; folding takes 0.35 s.
+# The background image is not in the repository (put any PNG there to see it); without it the game's
+# sky stays behind the planet.
 globe = {
 	default = yes
-	flat_height = 800
+	flat_height = 400
 	globe_height = 2500
+	transition = 0.35
 	north = 90
 	south = -90
+	background = "gfx/hoi4_loader_test/space.png"
 }
