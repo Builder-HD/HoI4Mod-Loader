@@ -7868,8 +7868,10 @@ logged, feature off, map flat.
   so a mod can choose a true-aspect band (about +-65 degrees, open caps) instead.
 - **D4, zoom.** Proposed: flat below `flat_height = 800`, full globe from `globe_height = 2500`
   (mod file), vanilla `CAMERA_MAX_HEIGHT` (3000; a mod's defines can raise it, the far plane is
-  raised with it while the globe is on).
+  raised with it while the globe is on). The defaults get tuned in the in-game test.
 - **D5, main menu.** Proposed: in a game only (the main menu's camera is the other instance).
+- **Owner's choices (2026-11-24):** D1 as above; D2 camera-driven; D3 full sphere, configurable;
+  D5 in a game only.
 
 ## S5: risks and limits
 
