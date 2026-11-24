@@ -37,6 +37,15 @@ Ray_t g_rayOrig = nullptr;
 Clamp_t g_clampOrig = nullptr;
 GlobeHooks g_hooks = {};
 void* g_cameraRayReturns[2] = {nullptr, nullptr};  // the map camera's own calls of the screen ray
+void* g_cameraPointReturns[2] = {nullptr, nullptr};  // its calls of the screen-to-map helper (drag, zoom)
+thread_local int t_cameraPoint = 0;                   // inside one of those
+uint8_t* g_point = nullptr;                           // the screen-to-map helper
+uint8_t* g_icons = nullptr;                           // the map icons' update
+using Point_t = void*(__fastcall*)(void* a, void* out, void* screen, char flag);
+using Icons_t = void(__fastcall*)(void* manager, void* ui, float x, void* r9);
+Point_t g_pointOrig = nullptr;
+Icons_t g_iconsOrig = nullptr;
+uint32_t g_camPos = 0;                                // engine camera position (x, y, z)
 
 void** g_ppMap = nullptr;                      // the map (width, height)
 uint32_t g_mapW = 0, g_mapH = 0;               // int offsets in the map
@@ -72,8 +81,43 @@ void CallScreenRay(void* camera, float* dir, float* origin, bool fromCamera) {
 void __fastcall HookRay(void* camera, const int* px, float depth, float* dir, float* origin) {
     g_rayOrig(camera, px, depth, dir, origin);
     void* ret = _ReturnAddress();
-    if (g_hooks.screenRay && dir && origin)
-        CallScreenRay(camera, dir, origin, ret == g_cameraRayReturns[0] || ret == g_cameraRayReturns[1]);
+    bool fromCamera = ret == g_cameraRayReturns[0] || ret == g_cameraRayReturns[1] || t_cameraPoint > 0;
+    if (g_hooks.screenRay && dir && origin) CallScreenRay(camera, dir, origin, fromCamera);
+}
+
+void* __fastcall HookPoint(void* a, void* out, void* screen, char flag) {
+    void* ret = _ReturnAddress();
+    bool camera = ret == g_cameraPointReturns[0] || ret == g_cameraPointReturns[1];
+    if (camera) ++t_cameraPoint;
+    void* r = g_pointOrig(a, out, screen, flag);
+    if (camera) --t_cameraPoint;
+    return r;
+}
+
+bool CallHideIcons() {
+    __try {
+        return g_hooks.hideIcons();
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// While bent: the icons see their camera(s) far up for the length of their update, so each hides by
+// its own cutoff; the heights are put back right after (the matrices were made already).
+void __fastcall HookIcons(void* manager, void* ui, float x, void* r9) {
+    void* mapCamera = g_hooks.hideIcons && CallHideIcons() ? UiMapCamera() : nullptr;
+    if (!mapCamera) {
+        g_iconsOrig(manager, ui, x, r9);
+        return;
+    }
+    float saved[3];
+    for (int k = 0; k < 3; ++k) {
+        uint8_t* cam = (uint8_t*)mapCamera + g_cam[k];
+        saved[k] = Rd<float>(cam, g_camPos + 4);
+        Wr<float>(cam, g_camPos + 4, 1.0e7f);
+    }
+    g_iconsOrig(manager, ui, x, r9);
+    for (int k = 0; k < 3; ++k) Wr<float>((uint8_t*)mapCamera + g_cam[k], g_camPos + 4, saved[k]);
 }
 
 bool CallSkipClamp(void* mapCamera) {
@@ -110,7 +154,19 @@ void ResolveGlobe() {
     uint8_t* lookAt = SigFindUnique("camera_look_at", kSigCameraLookAt);  // attention_area's: the targets
     uint8_t* panRay = SigFindUnique("globe_pan_ray", kSigGlobePanRay);
     uint8_t* zoomRay = SigFindUnique("globe_zoom_ray", kSigGlobeZoomRay);
-    if (!g_area || !g_ray || !g_clamp || !frustum || !pick || !camClamp || !lookAt || !panRay || !zoomRay) return;
+    uint8_t* camPoint1 = SigFindUnique("globe_camera_point_1", kSigGlobeCamPoint1);
+    uint8_t* camPoint2 = SigFindUnique("globe_camera_point_2", kSigGlobeCamPoint2);
+    g_icons = SigFindUnique("globe_icons", kSigGlobeIcons);
+    if (!g_area || !g_ray || !g_clamp || !frustum || !pick || !camClamp || !lookAt || !panRay || !zoomRay || !camPoint1 ||
+        !camPoint2 || !g_icons)
+        return;
+    g_point = SigFollowRel32(camPoint1 + kSigGlobeCamPoint1Call);
+    if (g_point != SigFollowRel32(camPoint2 + kSigGlobeCamPoint2Call)) {
+        Fail("the map camera's two map-point calls reach different functions");
+        return;
+    }
+    g_cameraPointReturns[0] = camPoint1 + kSigGlobeCamPoint1Call + 5;
+    g_cameraPointReturns[1] = camPoint2 + kSigGlobeCamPoint2Call + 5;
     if (SigFollowRel32(panRay + kSigGlobePanRayCall) != g_ray || SigFollowRel32(zoomRay + kSigGlobeZoomRayCall) != g_ray) {
         Fail("the map camera's own screen rays do not call the screen ray function");
         return;
@@ -148,6 +204,7 @@ void ResolveGlobe() {
     g_lookTarget = Rd<uint32_t>(lookAt, 45);  // movsd [rcx+0x6a4], the look-at target
     g_planes = Rd<uint32_t>(frustum, kSigGlobeFrustumPlanesDisp);
     uint32_t pos = Rd<uint32_t>(g_ray, kSigGlobeRayPosDisp);
+    g_camPos = pos;
     // Shape checks: the copies follow each other at the main camera's stride; the flags, eye, look-at
     // and area lie past the three cameras; the planes past the camera's position.
     uint32_t stride = g_cam[1] - g_cam[0];
@@ -175,10 +232,14 @@ bool GlobeInstall(const GlobeHooks& hooks) {
     bool ok = HookQueue(g_area, (void*)&HookArea, (void**)&g_areaOrig, "globe_area");
     ok = ok && HookQueue(g_ray, (void*)&HookRay, (void**)&g_rayOrig, "globe_screen_ray");
     ok = ok && HookQueue(g_clamp, (void*)&HookClamp, (void**)&g_clampOrig, "globe_edge_clamp");
+    ok = ok && HookQueue(g_point, (void*)&HookPoint, (void**)&g_pointOrig, "globe_map_point");
+    ok = ok && HookQueue(g_icons, (void*)&HookIcons, (void**)&g_iconsOrig, "globe_icons");
     if (!ok) {
         HookUnqueue(g_area);
         HookUnqueue(g_ray);
         HookUnqueue(g_clamp);
+        HookUnqueue(g_point);
+        HookUnqueue(g_icons);
     }
     return ok;
 }

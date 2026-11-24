@@ -40,7 +40,7 @@ std::atomic<bool> g_ready{false};
 std::wstring g_backgroundPath;  // set at init, read when the device is made
 
 SRWLOCK g_lock = SRWLOCK_INIT;
-float g_data[12] = {};
+float g_data[20] = {};
 std::atomic<long> g_version{0};
 long g_uploaded = -1;  // render thread only
 std::atomic<bool> g_bound{false};
@@ -126,7 +126,7 @@ void Capture(ID3D11Device* dev) {
     dev->GetImmediateContext(&ctx);  // the reference is kept: the device lives as long as the game
     if (!ctx) return;
     D3D11_BUFFER_DESC d = {};
-    d.ByteWidth = 48;
+    d.ByteWidth = sizeof g_data;
     d.Usage = D3D11_USAGE_DYNAMIC;
     d.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     d.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
@@ -184,14 +184,10 @@ bool Ready() { return g_ready.load(); }
 
 bool HaveBackground() { return g_background.load() != nullptr; }
 
-void Publish(const float a[4], const float b[4], const float c[4]) {
+void Publish(const float* data) {
     AcquireSRWLockExclusive(&g_lock);
-    bool same = memcmp(g_data, a, 16) == 0 && memcmp(g_data + 4, b, 16) == 0 && memcmp(g_data + 8, c, 16) == 0;
-    if (!same) {
-        memcpy(g_data, a, 16);
-        memcpy(g_data + 4, b, 16);
-        memcpy(g_data + 8, c, 16);
-    }
+    bool same = memcmp(g_data, data, sizeof g_data) == 0;
+    if (!same) memcpy(g_data, data, sizeof g_data);
     ReleaseSRWLockExclusive(&g_lock);
     if (!same) {
         g_version.fetch_add(1);

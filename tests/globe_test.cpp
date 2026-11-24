@@ -124,12 +124,23 @@ static void TestSettings() {
               s.transition == 0 && s.background == "gfx/test/space.png",
           "settings read");
     Globe::ParseFile("globe = { default = no wobble = 3 north = 100 }\nfoo = 1", "t", &s, &pr);
+    {
+        Globe::Settings c;
+        std::vector<Globe::Problem> pc;
+        Globe::ParseFile("globe = { polar_cap = 70 polar_cap_color = { 0.5 0.6 0.7 } }", "t", &c, &pc);
+        Check(pc.empty() && c.polarCap == 70 && c.polarColor[0] == 0.5f && c.polarColor[2] == 0.7f, "polar caps read");
+        Globe::Params cp;
+        Globe::MakeParams(c, 5632, 2048, 1.0f, 1000, 1024, &cp);
+        Check(cp.d[3] == 1.0f && cp.InCap(2040) && cp.InCap(5) && !cp.InCap(1024) && !cp.InCap(1800), "polar caps placed");
+        Globe::ParseFile("globe = { polar_cap_color = { 2 0 0 } }", "t", &c, &pc);
+        Check(pc.size() == 1, "bad cap colour refused");
+    }
     Check(!s.defaultOn && pr.size() == 3 && s.north == 70, "settings problems, later keys replace");
 }
 
 static void TestPatch() {
     int n = 0;
-    std::string out = Globe::PatchMapShader(kShader, false, &n);
+    std::string out = Globe::PatchMapShader(kShader, Globe::kTerrain, &n);
     Check(n == 3, "three replacements (two mul, one dot)");
     Check(out.find("pos = mul( ViewProjectionMatrix, HL_Globe( pos ) );") != std::string::npos, "mul wrapped");
     Check(out.find("mul( ViewProjectionMatrix, HL_Globe( float4( Get( a, b ), 1.0f ) ) )") != std::string::npos, "nested parens");
@@ -137,11 +148,17 @@ static void TestPatch() {
     Check(Count(out, "HL_Globe( pos )") == 1, "shadow and pixel blocks untouched");
     Check(Count(out, "#define HL_GLOBE_DEFINED") == 1, "helper once, in the patched block");
     int again = 0;
-    Check(Globe::PatchMapShader(out, false, &again).empty(), "no second patch");
-    Check(Globe::PatchMapShader("PixelShader = { MainCode P [[ x = mul( ViewProjectionMatrix, y ); ]] }", false, &again).empty(),
+    Check(Globe::PatchMapShader(out, Globe::kTerrain, &again).empty(), "no second patch");
+    Check(Globe::PatchMapShader("PixelShader = { MainCode P [[ x = mul( ViewProjectionMatrix, y ); ]] }", Globe::kBend, &again).empty(),
           "nothing to do -> empty");
-    std::string culled = Globe::PatchMapShader(kShader, true, &n);
-    Check(culled.find("mul( ViewProjectionMatrix, HL_GlobeCull( pos ) )") != std::string::npos, "cull variant");
+    std::string culled = Globe::PatchMapShader(kShader, Globe::kCull, &n);
+    Check(culled.find("mul( ViewProjectionMatrix, HL_GlobeCull( pos ) )") != std::string::npos &&
+              culled.find("dot( HL_GlobeCull( vDistortedPos )") != std::string::npos,
+          "cull variant (the depth bias uses the same position)");
+    std::string surface = Globe::PatchMapShader(kShader, Globe::kBend, &n);
+    Check(surface.find("mul( ViewProjectionMatrix, HL_GlobeSurface( pos ) )") != std::string::npos, "surface variant");
+    std::string hidden = Globe::PatchMapShader(kShader, Globe::kHide, &n);
+    Check(hidden.find("mul( ViewProjectionMatrix, HL_GlobeHide( pos ) )") != std::string::npos, "hide variant");
     std::string water = Globe::PatchMapShader(
         "PixelShader =\n{\n\tMainCode P\n\t[[\n\t\tfloat3 refractiveColor = tex2D( WaterRefraction, uv - d ).rgb;\n\t]]\n}\n", false, &n);
     Check(n == 1 && water.find("tex2D( WaterRefraction, uv - d ).rgb; refractiveColor = HL_GlobeWater( refractiveColor );") != std::string::npos,
@@ -167,7 +184,7 @@ static void TestRealFiles(const std::string& dir) {
         int n = 0;
         bool cull = std::string(f) == "mapname" || std::string(f) == "maparrow" || std::string(f) == "strait" ||
                     std::string(f) == "traderoute" || std::string(f) == "particle";
-        std::string out = Globe::PatchMapShader(text, cull, &n);
+        std::string out = Globe::PatchMapShader(text, std::string(f) == "pdxmap" ? Globe::kTerrain : std::string(f) == "pdxwater" ? Globe::kHide : cull ? Globe::kCull : Globe::kBend, &n);
         printf("%-12s %d replacement(s)\n", f, n);
         Check(n > 0 && !out.empty(), f);
         Check(Count(out, "HL_Globe(") >= (size_t)n, "every replacement calls HL_Globe");
@@ -191,8 +208,8 @@ static int TestCompile(const std::string& dir) {
         if (mainAt == std::string::npos) continue;
         mainAt = src.rfind('\n', mainAt);
         int n = 0;
-        bool cull = (compiled % 2) == 1;  // both variants get compiled across the files
-        std::string out = src.substr(0, mainAt) + Globe::HlslCode() + Globe::PatchVertexCode(src.substr(mainAt), cull, &n);
+        int mode = compiled % 4;  // every variant gets compiled across the files
+        std::string out = src.substr(0, mainAt) + Globe::HlslCode() + Globe::PatchVertexCode(src.substr(mainAt), mode, &n);
         ID3DBlob *code = nullptr, *msg = nullptr;
         HRESULT hr = compile(out.data(), out.size(), fd.cFileName, nullptr, nullptr, "main", "vs_5_0", 0, 0, &code, &msg);
         if (FAILED(hr)) {

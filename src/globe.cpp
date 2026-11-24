@@ -48,7 +48,20 @@ void ParseFile(const std::string& text, const std::string& shown, Settings* s, s
             else if (ScriptTree::EqualsNoCase(n.key, "transition")) ok = NumberOf(n, 0, 10, &s->transition);
             else if (ScriptTree::EqualsNoCase(n.key, "north")) ok = NumberOf(n, -90, 90, &s->north);
             else if (ScriptTree::EqualsNoCase(n.key, "south")) ok = NumberOf(n, -90, 90, &s->south);
-            else if (ScriptTree::EqualsNoCase(n.key, "background")) {
+            else if (ScriptTree::EqualsNoCase(n.key, "polar_cap")) ok = NumberOf(n, 0, 89, &s->polarCap);
+            else if (ScriptTree::EqualsNoCase(n.key, "polar_cap_color")) {
+                std::vector<std::string> v;
+                std::string why;
+                ok = ScriptTree::ListOf(n, &v, &why) && v.size() == 3;
+                float c[3];
+                for (size_t k = 0; ok && k < 3; ++k) {
+                    char* end = nullptr;
+                    double x = strtod(v[k].c_str(), &end);
+                    ok = end && !*end && x >= 0 && x <= 1;
+                    c[k] = (float)x;
+                }
+                if (ok) s->polarColor[0] = c[0], s->polarColor[1] = c[1], s->polarColor[2] = c[2];
+            } else if (ScriptTree::EqualsNoCase(n.key, "background")) {
                 ok = !n.block && !n.value.empty() && n.value.find("..") == std::string::npos && n.value.find(':') == std::string::npos;
                 if (ok) s->background = n.value, s->backgroundFrom = shown;
             } else {
@@ -88,6 +101,13 @@ bool MakeParams(const Settings& s, float w, float h, float t, float lx, float lz
     out->a[0] = t, out->a[1] = r, out->a[2] = w, out->a[3] = 1.0f / w;
     out->b[0] = lx, out->b[1] = lz, out->b[2] = cosf(latL), out->b[3] = sinf(latL);
     out->c[0] = zEq, out->c[1] = radPerZ, out->c[2] = h;
+    if (s.polarCap > 0.0f) {
+        // Where the caps start, in flat z (the whole planet's latitude mapping), and a soft edge of 2 degrees.
+        float zPerDeg = h / (s.north - s.south);
+        out->d[0] = (s.polarCap - s.south) * zPerDeg, out->d[1] = (-s.polarCap - s.south) * zPerDeg;
+        out->d[2] = 2.0f * zPerDeg, out->d[3] = 1.0f;
+        out->e[0] = s.polarColor[0], out->e[1] = s.polarColor[1], out->e[2] = s.polarColor[2];
+    }
     return true;
 }
 
@@ -165,6 +185,8 @@ const char kHlsl[] =
     "\tfloat4 HL_GlobeA;\t// curvature (0 = flat), radius, map width, 1 / map width\n"
     "\tfloat4 HL_GlobeB;\t// look-at x, look-at z, cos and sin of its latitude\n"
     "\tfloat4 HL_GlobeC;\t// z of the equator, radians per z unit, map height, background on\n"
+    "\tfloat4 HL_GlobeD;\t// z where the north / south polar caps start, their edge's width, caps on\n"
+    "\tfloat4 HL_GlobeE;\t// the caps' colour\n"
     "};\n"
     "Texture2D HL_GlobeSpace : register( t20 );\n"
     "// The bent position of flat point p and the sphere's centre, in this pass's frame. The wrap copies'\n"
@@ -194,16 +216,40 @@ const char kHlsl[] =
     "\tfloat3 q = HL_GlobePoint( vPos.xyz / vPos.w, vCentre );\n"
     "\treturn float4( q * vPos.w, vPos.w );\n"
     "}\n"
-    "// Also drops what lies beyond the planet's horizon (behind the camera, so it is clipped): for things\n"
-    "// drawn without a depth test, such as the names.\n"
+    "// Under a polar cap (flat z)?\n"
+    "bool HL_GlobeInCap( float z )\n"
+    "{\n"
+    "\treturn HL_GlobeD.w > 0.5f && ( z > HL_GlobeD.x || z < HL_GlobeD.y );\n"
+    "}\n"
+    "// A point to drop: pushed along its view ray past the far plane, so it is clipped where it was seen\n"
+    "// (a triangle partly dropped is cut there instead of smeared across the screen).\n"
+    "float3 HL_GlobeAway( float3 q )\n"
+    "{\n"
+    "\treturn vCamPos + normalize( q - vCamPos ) * 1000000.0f;\n"
+    "}\n"
+    "// What lies on the ground (borders, rivers, trees, units): bent, and dropped under the polar caps.\n"
+    "float4 HL_GlobeSurface( float4 vPos )\n"
+    "{\n"
+    "\tif ( HL_GlobeA.x <= 0.0f || vPos.w == 0.0f )\n"
+    "\t\treturn vPos;\n"
+    "\tfloat3 vCentre;\n"
+    "\tfloat3 p = vPos.xyz / vPos.w;\n"
+    "\tfloat3 q = HL_GlobePoint( p, vCentre );\n"
+    "\tif ( HL_GlobeInCap( p.z ) )\n"
+    "\t\tq = HL_GlobeAway( q );\n"
+    "\treturn float4( q * vPos.w, vPos.w );\n"
+    "}\n"
+    "// Also drops what lies beyond the planet's horizon: for things drawn without a depth test, such as\n"
+    "// the names.\n"
     "float4 HL_GlobeCull( float4 vPos )\n"
     "{\n"
     "\tif ( HL_GlobeA.x <= 0.0f || vPos.w == 0.0f )\n"
     "\t\treturn vPos;\n"
     "\tfloat3 vCentre;\n"
-    "\tfloat3 q = HL_GlobePoint( vPos.xyz / vPos.w, vCentre );\n"
-    "\tif ( dot( q - vCentre, vCamPos - q ) < 0.0f )\n"
-    "\t\tq = vCamPos - vCamLookAtDir * 100.0f;\n"
+    "\tfloat3 p = vPos.xyz / vPos.w;\n"
+    "\tfloat3 q = HL_GlobePoint( p, vCentre );\n"
+    "\tif ( dot( q - vCentre, vCamPos - q ) < 0.0f || HL_GlobeInCap( p.z ) )\n"
+    "\t\tq = HL_GlobeAway( q );\n"
     "\treturn float4( q * vPos.w, vPos.w );\n"
     "}\n"
     "// Nothing of it is drawn while bent (every vertex in one point): the game's water, whose coarse grid\n"
@@ -237,6 +283,27 @@ const char kHlsl[] =
     "\tfloat fSea = saturate( ( WATER_HEIGHT - fHeight ) * 1.5f ) * saturate( HL_GlobeA.x );\n"
     "\treturn lerp( vDiffuse, vTint * WATER_COLOR_LIGHTNESS * 0.8f, fSea );\n"
     "}\n"
+    "// How much of a polar cap covers flat point p: from the cap latitude to the pole, with a soft edge\n"
+    "// that wanders a little with the longitude (whole waves round the planet).\n"
+    "float HL_GlobeCapAmount( float3 vPrepos )\n"
+    "{\n"
+    "\tif ( HL_GlobeA.x <= 0.0f || HL_GlobeD.w <= 0.5f )\n"
+    "\t\treturn 0.0f;\n"
+    "\tfloat fTurn = vPrepos.x * HL_GlobeA.w * 6.2831853f;\n"
+    "\tfloat fWander = ( sin( fTurn * 5.0f ) * 0.6f + sin( fTurn * 9.0f + 1.3f ) * 0.4f ) * HL_GlobeD.z * 0.6f;\n"
+    "\tfloat fNorth = saturate( ( vPrepos.z - HL_GlobeD.x - fWander ) / HL_GlobeD.z + 0.5f );\n"
+    "\tfloat fSouth = saturate( ( HL_GlobeD.y - fWander - vPrepos.z ) / HL_GlobeD.z + 0.5f );\n"
+    "\treturn max( fNorth, fSouth ) * saturate( HL_GlobeA.x );\n"
+    "}\n"
+    "// The caps over the terrain's final output; its alpha is the glow (bloom, city lights), which they\n"
+    "// clear. The output is the lit, high-range colour: the given colour is scaled to about what the\n"
+    "// sun makes of a terrain of that colour (else it glows).\n"
+    "float4 HL_GlobeCapOut( float4 vOut, float3 vPrepos )\n"
+    "{\n"
+    "\tfloat fCap = HL_GlobeCapAmount( vPrepos );\n"
+    "\tfloat3 vIce = HL_GlobeE.rgb * ( 0.35f + 0.02f * sin( vPrepos.z * 0.05f ) );\n"
+    "\treturn float4( lerp( vOut.rgb, vIce, fCap ), vOut.a * ( 1.0f - fCap ) );\n"
+    "}\n"
     "float3 HL_GlobeSpaceTexel( int2 i, int2 vSize )\n"
     "{\n"
     "\treturn HL_GlobeSpace.Load( int3( clamp( i, int2( 0, 0 ), vSize - 1 ), 0 ) ).rgb;\n"
@@ -266,6 +333,8 @@ const char kHlsl[] =
     "#else\n"
     "float4 HL_Globe( float4 vPos ) { return vPos; }\n"
     "float4 HL_GlobeCull( float4 vPos ) { return vPos; }\n"
+    "float4 HL_GlobeSurface( float4 vPos ) { return vPos; }\n"
+    "float4 HL_GlobeCapOut( float4 vOut, float3 vPrepos ) { return vOut; }\n"
     "float4 HL_GlobeHide( float4 vPos ) { return vPos; }\n"
     "float3 HL_GlobeFogDiff( float3 vDiff ) { return vDiff; }\n"
     "float3 HL_GlobeWater( float3 vColor ) { return vColor; }\n"
@@ -292,7 +361,7 @@ size_t ExpressionEnd(const std::string& s, size_t from) {
 
 std::string PatchCode(const std::string& code, int mode, int* count) {
     std::string out = code;
-    const char* fn = mode == 2 ? "HL_GlobeHide( " : (mode == 1 ? "HL_GlobeCull( " : "HL_Globe( ");
+    const char* fn = mode == kHide ? "HL_GlobeHide( " : mode == kCull ? "HL_GlobeCull( " : mode == kBend ? "HL_GlobeSurface( " : "HL_Globe( ";
     static const std::regex mulRx(R"(mul\s*\(\s*ViewProjectionMatrix\s*,\s*)");
     // mul( ViewProjectionMatrix, X ) -> mul( ViewProjectionMatrix, HL_Globe( X ) ), from the back so
     // earlier positions stay valid.
@@ -318,7 +387,7 @@ std::string PatchCode(const std::string& code, int mode, int* count) {
     for (auto it = std::sregex_iterator(out.begin(), out.end(), dotRx); it != std::sregex_iterator(); ++it) {
         const std::smatch& m = *it;
         res.append(out, pos, (size_t)m.position() - pos);
-        res += "dot( HL_Globe( " + m[1].str() + " )" + m[2].str();
+        res += std::string("dot( ") + fn + m[1].str() + " )" + m[2].str();  // the same position as the mul's
         pos = (size_t)m.position() + (size_t)m.length();
         ++*count;
     }
@@ -349,6 +418,21 @@ std::string PixelCode(const std::string& code, int* count) {
         size_t at = (size_t)g.position() + 1;
         res.insert(at, g[1].str() + "diffuse.rgb = HL_GlobeSea( diffuse.rgb, TerrainColor.rgb, Input.prepos.y );\n");
         ++*count;
+        // The polar caps over its final output: `return float4( vOut, ... );` becomes
+        // `return HL_GlobeCapOut( float4( vOut, ... ), Input.prepos );`.
+        static const std::regex retRx(R"(return\s+(float4\(\s*vOut\s*,))");
+        std::string capped;
+        size_t from = 0;
+        for (auto it = std::sregex_iterator(res.begin(), res.end(), retRx); it != std::sregex_iterator(); ++it) {
+            size_t open = (size_t)it->position(1);
+            size_t close = ExpressionEnd(res, open + 7);  // past "float4("
+            if (close == std::string::npos) continue;
+            capped.append(res, from, open - from);
+            capped += "HL_GlobeCapOut( " + res.substr(open, close + 1 - open) + ", Input.prepos )";
+            from = close + 1;
+            ++*count;
+        }
+        if (from) res = capped + res.substr(from);
     }
     return res;
 }

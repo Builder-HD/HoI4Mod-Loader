@@ -12,8 +12,8 @@ bool Install(const std::wstring& backgroundPath);
 bool Ready();
 // The background image is on the device.
 bool HaveBackground();
-// The three float4 the shaders read (Globe::Params). Any thread; uploaded on the next vertex shader
-// the game sets.
-void Publish(const float a[4], const float b[4], const float c[4]);
+// The five float4 the shaders read (Globe::Params a..e, 20 floats). Any thread; uploaded on the next
+// vertex shader the game sets.
+void Publish(const float* data);
 
 }  // namespace GlobeD3D

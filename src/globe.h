@@ -18,6 +18,9 @@ namespace Globe {
 //       north = 90             # latitude of the map's north edge (z = map height)
 //       south = -90            # latitude of the south edge (z = 0)
 //       background = "gfx/my_mod/space.png"   # optional: drawn behind the planet instead of the sky
+//       polar_cap = 70         # optional: caps from this latitude (degrees) to both poles, hiding the
+//                              # stretched map there (borders, names and units in them too)
+//       polar_cap_color = { 0.72 0.77 0.82 }   # the caps' colour (red green blue, 0..1)
 //   }
 // Several files and blocks: later keys replace earlier ones.
 struct Settings {
@@ -30,6 +33,8 @@ struct Settings {
     float south = -90.0f;
     std::string background;  // path inside the game or a mod; "" = the game's sky
     std::string backgroundFrom;  // the file that named it (for messages)
+    float polarCap = 0.0f;   // degrees; 0 = no caps
+    float polarColor[3] = {0.72f, 0.77f, 0.82f};
 };
 struct Problem {
     std::string file;
@@ -48,16 +53,21 @@ struct SphereState {
 };
 bool WantSphere(const Settings& s, float height, bool edgeInView, SphereState* state);
 
-// The shader's constants (three float4, register b13): A = (t, radius, map width, 1 / width),
+// The shader's constants (five float4, register b13): A = (t, radius, map width, 1 / width),
 // B = (look-at x, look-at z, cos(lat of look-at), sin(...)), C = (z of the equator, radians per z
-// unit, map height, background on). t = 0 leaves every position as it is; 1 is the whole planet
+// unit, map height, background on), D = (z where the north cap starts, z where the south cap starts,
+// the edge's width in z, caps on), E = (cap colour, 0). t = 0 leaves every position as it is; 1 is the whole planet
 // (in between only while it folds). Positions beyond the map's edges (frame, logo, filler water)
 // sink into the planet.
 struct Params {
     float a[4] = {0, 0, 0, 0};
     float b[4] = {0, 0, 1, 0};
     float c[4] = {0, 0, 0, 0};
+    float d[4] = {0, 0, 0, 0};
+    float e[4] = {0, 0, 0, 0};
     float t() const { return a[0]; }
+    // The flat point (x, z) lies under a polar cap.
+    bool InCap(float z) const { return d[3] > 0.5f && (z > d[0] || z < d[1]); }
 };
 // t: 0..1; (lx, lz): the ground point the camera looks at. False (and t = 0) for t <= 0 or bad map
 // sizes.
@@ -82,7 +92,9 @@ bool Unbend(const Params& p, const float origin[3], const float dir[3], float ma
 // WaterRefraction, ... ).rgb;` is followed by `X = HL_GlobeWater( X );`, and the terrain's colour
 // before `gradient_border_apply( diffuse.rgb` gets the sea's colour on the seabed (HL_GlobeSea).
 // *count: replacements made.
-enum : int { kBend = 0, kCull = 1, kHide = 2 };
+// kTerrain: the ground (HL_Globe); kBend: what lies on it (HL_GlobeSurface: also hidden under the
+// polar caps); kCull: also dropped beyond the horizon; kHide: not drawn while bent.
+enum : int { kBend = 0, kCull = 1, kHide = 2, kTerrain = 3 };
 std::string PatchMapShader(const std::string& shader, int mode, int* count);
 // standardfuncsgfx.fxh: the distance fog measures across the wrap line the short way round.
 std::string PatchSharedCode(const std::string& fxh);

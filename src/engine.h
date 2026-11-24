@@ -321,6 +321,8 @@ struct GlobeHooks {
     void (*screenRay)(void* engineCamera, float dir[3], float origin[3], bool fromCamera);
     // True: skip the map camera's north/south edge clamp (the eye is passed through unchanged).
     bool (*skipEdgeClamp)(void* mapCamera);
+    // True: the map icons' update sees the cameras far up (every icon hides by its own cutoff).
+    bool (*hideIcons)();
 };
 bool GlobeInstall(const GlobeHooks& hooks);  // queues the three hooks; init only
 void* GlobeEngineCamera(void* mapCamera, int which);  // 0 main, 1 and 2 the wrap copies

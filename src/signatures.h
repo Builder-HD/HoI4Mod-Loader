@@ -1475,6 +1475,15 @@ static const size_t kSigGlobeClampMapRel = 3, kSigGlobeClampEyeDisp = 0x21, kSig
 SIG(kSigGlobePanRay, "89 44 24 48 48 8D 44 24 40 48 89 44 24 20 E8 ?? ?? ?? ?? 0F 28 FE 41 0F 28 E8 F3 0F 59 6C 24 30")
 SIG(kSigGlobeZoomRay, "48 8D 4E 10 48 8D 44 24 40 48 89 44 24 20 4C 8D 4C 24 50 0F 57 D2 48 8D 95 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B 4E 08 48 8B 01 FF 50 78")
 static const size_t kSigGlobePanRayCall = 0xe, kSigGlobeZoomRayCall = 0x1d;
+// The map camera's second update path asks the screen-to-map helper (FUN_140ba89e0, its point under
+// the cursor; also used by hover and clicks) twice: drag and zoom (0x1412f5b82, 0x1412f5f34; calls at
+// +0xf and +0x10). Both calls must reach the same helper.
+SIG(kSigGlobeCamPoint1, "41 B1 01 4C 8D 45 70 48 8D 54 24 30 48 8B C8 E8 ?? ?? ?? ?? F2 0F 10 8E ?? ?? ?? ?? F2 0F 10 10")
+SIG(kSigGlobeCamPoint2, "41 B1 01 4C 8D 44 24 40 48 8D 54 24 70 48 8B C8 E8 ?? ?? ?? ?? F2 0F 10 9E ?? ?? ?? ??")
+static const size_t kSigGlobeCamPoint1Call = 0xf, kSigGlobeCamPoint2Call = 0x10;
+// The map icons' update, FUN_140bb03c0(manager, ui, float) (start): hands each province's icons the
+// engine camera that sees it; the icons compare their cutoffs (NGraphics *_CUTOFF) with its height.
+SIG(kSigGlobeIcons, "48 8B C4 48 89 58 18 48 89 50 10 55 56 57 41 54 41 55 41 56 41 57 48 8D A8 78 FD FF FF 48 81 EC 50 03 00 00 0F 29 70 B8 0F 29 78 A8 44 0F 29 40 98 44 0F 29 48 88 44 0F 29 90 78 FF FF FF 44 0F 29 98 68 FF FF FF 44 0F 28 C2 4C 8B E2 4C 8B F9")
 
 #undef CODE
 #undef SIG
