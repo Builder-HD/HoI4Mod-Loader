@@ -1,0 +1,42 @@
+# Test decisions for hoi4_loader's globe view (MODDING.md "Globe view", NOTES.md Part S).
+# The test mod's common/hoi4_loader_globe file starts every game as a globe (default = yes).
+# 1. Zoom out: the map curves from camera height 800 and is a planet from 2500. Pan to turn it.
+# 2. "Globe: flat map": the player's country gets set_globe_view = no; zooming out stays flat.
+# 3. "Globe: back to the globe": set_globe_view = yes.
+# 4. "Globe: status (see game.log)": logs is_globe_view ("hoi4_loader_test globe").
+# Save, load: the choice comes back (global flag hoi4_globe_<TAG>_<0|1>).
+hoi4_loader_test_category = {
+	hoi4_loader_globe_flat = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_globe = yes is_globe_view = yes }
+		complete_effect = {
+			set_globe_view = no
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_globe_on = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_globe = yes is_globe_view = no }
+		complete_effect = {
+			set_globe_view = yes
+		}
+		ai_will_do = { base = 0 }
+	}
+	hoi4_loader_globe_status = {
+		icon = generic_research
+		cost = 0
+		visible = { hoi4_loader_feature_globe = yes }
+		complete_effect = {
+			if = {
+				limit = { is_globe_view = yes }
+				log = "hoi4_loader_test globe: [ROOT.GetTag] sees the globe"
+			}
+			else = {
+				log = "hoi4_loader_test globe: [ROOT.GetTag] sees the flat map"
+			}
+		}
+		ai_will_do = { base = 0 }
+	}
+}

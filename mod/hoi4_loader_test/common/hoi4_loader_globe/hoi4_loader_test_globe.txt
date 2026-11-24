@@ -1,0 +1,9 @@
+# Test settings for hoi4_loader's globe view (MODDING.md "Globe view", NOTES.md Part S).
+# Zoom out: flat up to camera height 800, a whole planet from 2500 (vanilla's maximum is 3000).
+globe = {
+	default = yes
+	flat_height = 800
+	globe_height = 2500
+	north = 90
+	south = -90
+}
