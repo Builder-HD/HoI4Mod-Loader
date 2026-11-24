@@ -1,6 +1,7 @@
 # Test settings for hoi4_loader's globe view (MODDING.md "Globe view", NOTES.md Part S).
 # Flat below camera height 400; a planet from 2500 (vanilla's maximum is 3000) or as soon as the flat
-# view would reach past the map's north or south edge; folding takes 0.35 s. Polar caps from 70 degrees.
+# view would reach past the map's north or south edge; folding takes 0.35 s. The map covers 82 N to 60 S;
+# beyond it polar seas, with ice from 85 N and 68 S.
 # The background image is not in the repository (put any PNG there to see it); without it the game's
 # sky stays behind the planet.
 globe = {
@@ -8,9 +9,11 @@ globe = {
 	flat_height = 400
 	globe_height = 2500
 	transition = 0.35
-	north = 90
-	south = -90
+	north = 82
+	south = -60
 	background = "gfx/hoi4_loader_test/space.png"
-	polar_cap = 70
+	polar_cap_north = 85
+	polar_cap_south = -68
 	polar_cap_color = { 0.72 0.77 0.82 }
+	polar_sea_color = { 0.14 0.19 0.27 }
 }
