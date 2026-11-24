@@ -8208,3 +8208,47 @@ A trigger `is_on_planet = PLANET_EARTH_A` (state / province scope) for script fo
 3. Blocking across planets (T5 Q4), with signatures and fail-safe (without them: logged, and the
    feature says that planes can still cross).
 4. Docs (MODDING, CHANGELOG, DEVELOPING), the test decisions (zoom to each planet, status).
+
+## T8: step 1, the twin map (2026-11-24)
+
+`tools/make_planets_map.py --game <HoI4> --out <Documents>/mod/hoi4_loader_planets_test` writes the
+twin map in about a minute: 5632 x 4352 (Earth A at z 0..2047 with vanilla's ids, a 256-row gap of 22
+lake provinces in one strategic region, Earth B at z 2304..4351), 26,848 provinces (B's = A's + 13,413,
+colours remapped by a per-byte table chosen so no colour collides), 2,162 states (+ 1,081), 609
+strategic regions (+ 304, and the gap's), buildings / unitstacks / weather positions / railways / supply
+nodes / adjacencies (rules renamed `<NAME>_PLB`) copied with ids and z moved. Tags `PLA` / `PLB` own
+their whole copy (capital state 64 / 1145, 12 infantry divisions in Berlin each), a single bookmark;
+vanilla's countries keep only their capital line, so they own nothing and do not exist.
+
+Three engine limits, each a crash, all found and lifted by the new feature `large_map`:
+
+1. **Map scratch buffer (crash at "Executing History").** The map texture builders write 4 bytes per
+   map pixel into `app+0x348`, allocated once at start with a fixed 50 MB (1.20 `0x1422963aa` in
+   FUN_142296360: `mov dword [rdi+0x350], 0x3200000; mov ecx, 0x3200000; call new; mov [rdi+0x348],
+   rax`), never checked. Found from the minidump: the write pointer (R12, at the crash `0x1412f2921` in
+   FUN_1412f2550, the terrain type texture) was exactly 50.00 MB past the buffer's start saved on the
+   stack. Vanilla needs 44 MB; a width-5632 map can be at most 2,327 rows. The loader runs in DllMain,
+   before that code: it patches both immediates to width x height x 4 (whole MB), read from the
+   provinces bitmap the game will load (`map/default.map`'s `provinces`, last enabled mod first).
+   `kSigMapScratchSize` (shape: the size field = the pointer field + 8, both immediates 50 MB).
+2. **Texture file limit ("Failed to load texture larger than MAX_TEXTURE_SIZE: map/heightmap.bmp",
+   world_normal.bmp, the colour map; then a crash).** FUN_14248da20 refuses files over 16 MB
+   (`cmp eax, 0x1000000` after the file size); the file is read into a buffer grown to its size, so
+   only the limit is in the way. Raised to the scratch size + 1 MB. `kSigTextureFileLimit`.
+3. **Terrain blocks (crash at the game's start in the texture binding, FUN_14249b270 from the terrain
+   draw FUN_14130d210).** The first three texture pointers in the draw's list (renderer `+0x5c50`,
+   `+0x5ba0`, `+0x5bd0`) had their upper half replaced by 0x7f7fffff (FLT_MAX) and their low byte by
+   0. FUN_1413155d0 fills a per-block array at renderer `+0x5348` (8 bytes: a camera-copy byte, a float
+   distance initialised to FLT_MAX), one entry per 256 x 256 block, counted as (width >> 8) x (height >>
+   8): 176 on vanilla, 374 on the twin map; the next renderer field is `+0x5b48`, so the array holds
+   256. The terrain chunks store their block as a byte (FUN_141bbc520, keyed type * 256 + block). Both
+   count with `sar reg, 8` (two each); the readers only use the stored byte. The loader sets the four
+   shifts to the smallest value that keeps the map within 256 blocks (twin map: 9, 512 pixels, 11 x 8
+   = 88). `kSigTerrainBlocksBuild`, `kSigTerrainBlocksCamera`.
+
+All four signatures unique on 1.20, 1.19.5, 1.19.4.2 (shapes 102/102). **In game (1.20):** main menu,
+the bookmark offers Earth A and Earth B, the game starts as Earth A (Berlin, 12 divisions, "Plains
+province in Moravia, owner Earth A"); zoomed out, Earth A below and Earth B above the gap (vanilla's
+"Hearts of Iron IV" frame drawn at the bands' edges), each with its country name. error.log: only
+vanilla scripts for countries that do not exist here, and missing character names for the new tags
+(the generator now writes `common/names`).

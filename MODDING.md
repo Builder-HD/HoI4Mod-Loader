@@ -52,6 +52,7 @@ Current features:
 | `map_adjacency` | engine (needs `lifecycle`) | `hoi4_loader_plugin_map_adjacency` | `set_province_adjacency`, `reset_province_adjacency`, `province_adjacency_passable`, `set_state_impassable`, `reset_state_impassable`: close and open borders between provinces and whole states at runtime (as `map/adjacencies.csv`'s and `history/states`' impassable), saved, see below |
 | `attention_area` | engine (needs `lifecycle`) | `hoi4_loader_plugin_attention_area` | `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area`: mark any set of provinces on the map (a line and a fill shader each, built-in or a mod's own) and move the camera to it; display only, not saved, see below |
 | `globe` | engine (needs `lifecycle`) | `hoi4_loader_plugin_globe` | the map as a planet when zoomed out, turned on by a mod's `common/hoi4_loader_globe/` file; `set_globe_view` (saved), `is_globe_view`; display only, DX11 only, see below |
+| `large_map` | engine | `hoi4_loader_plugin_large_map` | maps with more pixels than vanilla's (more than about 5632 x 2327): the engine's 50 MB map scratch buffer is sized to the map, see below |
 
 On an unknown build the file tier stays on, the engine tier is off, and `loader.log` lists the
 disabled features and prints the exact line to add to `loader_config.ini`. A feature whose init
@@ -166,6 +167,7 @@ when the loader is missing or a feature is off. Without them, using a loader tri
 | `set_province_adjacency`, `reset_province_adjacency`, `province_adjacency_passable`, `set_state_impassable`, `reset_state_impassable` | `scripted_triggers/hoi4_loader_feature_map_adjacency.txt` |
 | `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area` | `scripted_triggers/hoi4_loader_feature_attention_area.txt` |
 | `set_globe_view`, `is_globe_view` | `scripted_triggers/hoi4_loader_feature_globe.txt` |
+| `large_map` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_large_map.txt` |
 
 - **Combinations:** a block that combines features needs each feature's stub and guard, e.g.
   `air_superiority` inside `strategic_region` needs both `region_control` and `region_scope`.
@@ -2329,3 +2331,24 @@ the planet it lands near, not exactly on, the place under the cursor.
 `gfx/hoi4_loader_test/space.png`, which is not in the
 repository: put any image there; decisions in `common/decisions/hoi4_loader_test_globe_decisions.txt`): "Globe: flat map",
 "Globe: back to the globe", "Globe: status (see game.log)".
+
+## Large maps (`large_map`)
+
+Vanilla's engine has fixed room for a map of about vanilla's size: a map with more pixels than about
+5632 x 2327 crashes while the game starts. With the loader such a map works; nothing to turn on, the
+loader reads the size of the map the game will load (`map/provinces.bmp`, or the name in
+`map/default.map`, from the last enabled mod that has it, else the game) before the game starts:
+
+- **The map scratch buffer** (where the engine builds its map textures, 4 bytes per map pixel) is
+  allocated with the map's size instead of 50 MB.
+- **Texture files** over 16 MB load (vanilla refuses them: "Failed to load texture larger than
+  MAX_TEXTURE_SIZE"; a larger map's heightmap, `world_normal.bmp` and colour map are bigger).
+- **Terrain blocks:** the terrain is drawn in blocks of 256 x 256 pixels, at most 256 of them; a larger
+  map gets larger blocks (512, 1024, ...), so that the count stays within 256.
+
+A map of vanilla's size is left alone (`loader.log`: `large_map: map 5632 x 2048 fits ...`). Otherwise
+`loader.log` shows the sizes it set, e.g. `large_map: map 5632 x 4352 (...): the engine's map scratch
+buffer is 94 MB instead of 50 MB`, `terrain blocks of 512 pixels (11 x 8 = 88 blocks ...)`, `texture
+files up to 95 MB load`. Map sizes stay multiples of 256 as in vanilla. Tested on 1.20 with 5632 x 4352
+(two copies of the world, 26,848 provinces, `tools/make_planets_map.py`). Without the loader such a map
+crashes the game.

@@ -6,6 +6,14 @@ A–F; NOTES.md has the findings and test results behind each.
 
 ## Unreleased
 
+- **New feature `large_map`** (engine tier; guard `hoi4_loader_feature_large_map`; NOTES.md Part T,
+  MODDING.md "Large maps"). Maps larger than vanilla's: the engine's fixed 50 MB map scratch buffer,
+  its 16 MB texture file limit and its 256 terrain blocks are sized to the map the game will load
+  (read from its provinces bitmap before the game starts). Vanilla-sized maps are left alone. 4 new
+  signatures, checked on 1.20, 1.19.5 and 1.19.4.2; tested in game on 1.20 with a 5632 x 4352 map.
+- **`tools/make_planets_map.py`**: builds a test mod with several copies of the vanilla map stacked
+  north to south, lake gaps between them, one new country owning each copy (NOTES.md Part T). Reads
+  the owner's own game install; the generated files are game data and stay out of the repository.
 - **New feature `globe`** (engine tier, needs `lifecycle`; guard `hoi4_loader_feature_globe`; NOTES.md
   Part S, MODDING.md "Globe view"). The map as a planet: zoomed out far enough that the flat view
   would reach past the map's north or south edge (or above `globe_height`), the flat map folds into a
