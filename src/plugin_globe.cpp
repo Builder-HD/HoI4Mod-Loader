@@ -25,6 +25,7 @@
 #include <string.h>
 
 #include <atomic>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -161,15 +162,13 @@ std::vector<Globe::Planet> g_planets;  // resolved once the map is loaded
 int g_cur = 0;                         // the planet the camera is on
 std::vector<float> g_lastLook;         // per planet x, z
 float g_focus[2] = {0, 0};             // the overview layout point under the camera
-bool g_rotate = false;                 // turning the current planet to bring g_rotGoal on top
-float g_rotGoal[2] = {0, 0};
+bool g_othersVisible = false;          // in the overview, another planet is on screen
+float g_aspect = 16.0f / 9.0f;         // the view's, last frame
 bool g_namesBuilt = false;
 std::vector<int> g_imageIndex;         // per planet: its index in the images given to GlobeD3D, -1 none
 // Hover (the game's pointer ray, main thread, each frame): the planet under the cursor and the
 // layout point there (for zooming in from the overview).
 int g_hoverPlanet = -1;
-float g_hoverFlat[2] = {0, 0};
-bool g_hoverFlatOk = false;
 float g_hoverLayout[2] = {0, 0};
 bool g_hoverLayoutOk = false;
 ULONGLONG g_hoverTick = 0;
@@ -205,90 +204,8 @@ bool LookAt(void* mapCamera, float* lx, float* lz, float* height) {
     return true;
 }
 
-// The names of the planets, written with GDI into one texture: a row of 128 pixels per planet, the
-// text centred, upper case, bold serif, the fill in red, an outline (the fill widened) in green.
-void BuildNames() {
-    g_namesBuilt = true;
-    const int W = 2048, RH = 128;
-    int n = (int)g_planets.size();
-    if (n < 1) return;
-    int H = RH * n;
-    BITMAPINFO bi = {};
-    bi.bmiHeader.biSize = sizeof bi.bmiHeader;
-    bi.bmiHeader.biWidth = W, bi.bmiHeader.biHeight = -H, bi.bmiHeader.biPlanes = 1, bi.bmiHeader.biBitCount = 32;
-    void* bits = nullptr;
-    HDC dc = CreateCompatibleDC(nullptr);
-    HBITMAP bmp = dc ? CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0) : nullptr;
-    if (!bmp || !bits) {
-        if (dc) DeleteDC(dc);
-        Log("globe: the planet names could not be drawn (GDI)");
-        return;
-    }
-    HGDIOBJ oldBmp = SelectObject(dc, bmp);
-    memset(bits, 0, (size_t)W * H * 4);
-    SetBkMode(dc, TRANSPARENT);
-    SetTextColor(dc, RGB(255, 255, 255));
-    int named = 0;
-    for (int i = 0; i < n; ++i) {
-        Globe::Planet& pl = g_planets[i];
-        if (pl.name.empty()) continue;
-        std::string text = native_localize_key(pl.name.c_str());
-        int len = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), (int)text.size(), nullptr, 0);
-        if (len <= 0) continue;
-        std::wstring wide(len, L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, text.c_str(), (int)text.size(), &wide[0], len);
-        CharUpperBuffW(&wide[0], (DWORD)wide.size());
-        SIZE sz = {};
-        HFONT font = nullptr;
-        for (int px = 96; px >= 24; px -= 8) {  // the largest that fits the row's width
-            if (font) DeleteObject(font);
-            font = CreateFontW(-px, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
-                               ANTIALIASED_QUALITY, VARIABLE_PITCH | FF_ROMAN, L"Georgia");
-            SelectObject(dc, font);
-            SetTextCharacterExtra(dc, px / 6);
-            GetTextExtentPoint32W(dc, wide.c_str(), (int)wide.size(), &sz);
-            if (sz.cx <= W - 32) break;
-        }
-        TextOutW(dc, (W - sz.cx) / 2, i * RH + (RH - sz.cy) / 2, wide.c_str(), (int)wide.size());
-        SelectObject(dc, GetStockObject(SYSTEM_FONT));
-        if (font) DeleteObject(font);
-        float textW = (float)(sz.cx + 16);  // with the outline
-        pl.nameRow[0] = (float)(i * RH) / H, pl.nameRow[1] = (float)RH / H;
-        pl.nameAspect = textW / RH, pl.nameFrac = textW / W;
-        ++named;
-    }
-    GdiFlush();
-    // Fill (red) and outline (green: the fill widened by 5 pixels).
-    const uint8_t* src = (const uint8_t*)bits;
-    std::vector<uint8_t> fill((size_t)W * H), wide1((size_t)W * H), outline((size_t)W * H);
-    for (size_t k = 0; k < fill.size(); ++k) fill[k] = src[k * 4 + 1];
-    const int r = 5;
-    for (int y = 0; y < H; ++y)
-        for (int x = 0; x < W; ++x) {
-            uint8_t m = 0;
-            for (int dx = -r; dx <= r; ++dx) {
-                int xx = x + dx;
-                if (xx >= 0 && xx < W && fill[(size_t)y * W + xx] > m) m = fill[(size_t)y * W + xx];
-            }
-            wide1[(size_t)y * W + x] = m;
-        }
-    for (int y = 0; y < H; ++y)
-        for (int x = 0; x < W; ++x) {
-            uint8_t m = 0;
-            int row = y / RH;
-            for (int dy = -r; dy <= r; ++dy) {
-                int yy = y + dy;
-                if (yy >= row * RH && yy < (row + 1) * RH && wide1[(size_t)yy * W + x] > m) m = wide1[(size_t)yy * W + x];
-            }
-            outline[(size_t)y * W + x] = m;
-        }
-    std::vector<uint8_t> rgba((size_t)W * H * 4);
-    for (size_t k = 0; k < fill.size(); ++k) rgba[k * 4] = fill[k], rgba[k * 4 + 1] = outline[k], rgba[k * 4 + 3] = 255;
-    SelectObject(dc, oldBmp);
-    DeleteObject(bmp);
-    DeleteDC(dc);
-    if (named && GlobeD3D::SetNames(rgba.data(), W, H)) Log("globe: %d planet name(s) drawn", named);
-}
+void BuildNames();
+void BuildOutline(const std::vector<uint8_t>& fill, int W, int H, int RH, std::vector<uint8_t>* rgba);
 
 // The planets on the loaded map (once), with their images' cells.
 bool EnsurePlanets() {
@@ -356,7 +273,8 @@ void Apply(void* mapCamera, bool fresh) {
     v.background = GlobeD3D::HaveBackground();
     RECT rc;
     HWND wnd = GetForegroundWindow();
-    if (wnd && GetClientRect(wnd, &rc) && rc.bottom > 0) v.aspect = (float)rc.right / (float)rc.bottom;
+    if (wnd && GetClientRect(wnd, &rc) && rc.bottom > 0) g_aspect = (float)rc.right / (float)rc.bottom;
+    v.aspect = g_aspect;
     Globe::Params p;
     if (!Globe::MakeParams(g_settings, g_planets, w, v, &p)) {
         Publish(Globe::Params());
@@ -428,7 +346,7 @@ void Frame() {
     if (dt > 0.25f) dt = 0.25f;
     g_lastTick = now;
     if (!cam || !EnsurePlanets()) {
-        g_t = 0.0f, g_p = 0.0f, g_sphere = Globe::SphereState(), g_rotate = false;
+        g_t = 0.0f, g_p = 0.0f, g_sphere = Globe::SphereState(), g_othersVisible = false;
         return;
     }
     if (!g_namesBuilt && g_settings.overviewHeight > 0 && GlobeD3D::Ready()) BuildNames();
@@ -453,53 +371,42 @@ void Frame() {
     } else if (p <= 0.0f) {
         Confine(cam, lx, lz, false);  // the globe: north-south within the planet
     }
+    g_othersVisible = false;
     if (p > 0.0f) {
         const Globe::Planet& c0 = g_planets[g_cur];
         if (g_p <= 0.0f) g_focus[0] = c0.ox, g_focus[1] = c0.oy;  // entering: the current planet under the camera
         if (height < g_prevHeight - 0.5f) {
-            // Zooming in: to the planet under the cursor (or the closest), landing where it points.
+            // Zooming in: to the planet under the cursor (or the closest). It is shown as it was last
+            // looked at, and the camera goes there: nothing turns or jumps.
             int j = ZoomTarget();
-            bool overPlanet = GetTickCount64() - g_hoverTick < 500 && g_hoverPlanet == j && g_hoverFlatOk;
             if (j != g_cur) {
                 g_lastLook[g_cur * 2] = lx, g_lastLook[g_cur * 2 + 1] = lz;
                 float tx = g_lastLook[j * 2], tz = g_lastLook[j * 2 + 1];
-                Engine::GlobeShiftCamera(cam, tx - lx, tz - lz);  // that planet is shown as last looked at: nothing jumps
+                Engine::GlobeShiftCamera(cam, tx - lx, tz - lz);
                 lx = tx, lz = tz;
                 g_cur = j;
-                g_rotate = false;
-            }
-            if (overPlanet) {
-                // Part of the way toward the point under the cursor, each step (as the game's own zoom
-                // to the cursor moves the flat camera).
-                const Globe::Planet& cp = g_planets[g_cur];
-                float dx = g_hoverFlat[0] - lx, dz = g_hoverFlat[1] - lz;
-                dx -= cp.w * roundf(dx / cp.w);
-                float bx = g_rotate ? g_rotGoal[0] : lx, bz = g_rotate ? g_rotGoal[1] : lz;
-                g_rotate = true, g_rotGoal[0] = bx + dx * 0.4f, g_rotGoal[1] = bz + dz * 0.4f;
             }
         }
         // The focus glides toward the current planet as the overview closes, toward the layout's
         // centre as it opens.
         float cx = 0, cy = 0;
         Globe::View v;
-        v.current = g_cur, v.p = p, v.fullHeight = g_settings.overviewFullHeight;
-        Globe::OverviewScale(g_planets, v, &cx, &cy);
+        v.current = g_cur, v.p = p, v.fullHeight = g_settings.overviewFullHeight, v.aspect = g_aspect;
+        float scale = Globe::OverviewScale(g_planets, v, &cx, &cy);
         float e = p * p * (3.0f - 2.0f * p);
         const Globe::Planet& c = g_planets[g_cur];
         float fx = c.ox + (cx - c.ox) * e, fy = c.oy + (cy - c.oy) * e;
         float k = dt * 6.0f > 1.0f ? 1.0f : dt * 6.0f;
         g_focus[0] += (fx - g_focus[0]) * k, g_focus[1] += (fy - g_focus[1]) * k;
-    }
-    // Turning the current planet so that the point zoomed at comes on top.
-    if (g_rotate && g_t > 0.0f) {
-        const Globe::Planet& c = g_planets[g_cur];
-        float dx = g_rotGoal[0] - lx, dz = g_rotGoal[1] - lz;
-        dx -= c.w * roundf(dx / c.w);
-        float k = dt * 5.0f > 1.0f ? 1.0f : dt * 5.0f;
-        if (fabsf(dx) < 1.0f && fabsf(dz) < 1.0f) g_rotate = false;
-        else Engine::GlobeShiftCamera(cam, dx * k, dz * k), lx += dx * k, lz += dz * k;
-    } else {
-        g_rotate = false;
+        // Another planet on screen: the camera holds still (dragging would turn the current planet
+        // under the others); once they are out of sight it moves as on the globe.
+        float halfH = height * 0.41421356f, halfW = halfH * g_aspect;
+        for (size_t i = 0; i < g_planets.size(); ++i) {
+            if ((int)i == g_cur) continue;
+            float r = g_planets[i].size * 0.5f * scale;
+            float dx = fabsf((g_planets[i].ox - g_focus[0]) * scale), dz = fabsf((g_planets[i].oy - g_focus[1]) * scale);
+            if (dx - r < halfW && dz - r < halfH) g_othersVisible = true;
+        }
     }
     g_lastLook[g_cur * 2] = lx, g_lastLook[g_cur * 2 + 1] = lz;
     g_p = p;
@@ -522,9 +429,9 @@ void ScreenRay(void* engineCamera, float dir[3], float origin[3], bool fromCamer
     const float* look = p.look(p.current());
     if (fromCamera) {
         // The map camera's own rays (drag, edge panning, zoom to the cursor) stay the game's: the
-        // camera moves as over the flat map, smoothly; on the planet that turns it. In the overview
-        // they point straight at the look-at: the camera stays, the loader moves it.
-        if (p.overview() > 0.0f) {
+        // camera moves as over the flat map, smoothly; on the planet that turns it. In the overview,
+        // while another planet is on screen, they point straight at the look-at: the camera stays.
+        if (p.overview() > 0.0f && g_othersVisible) {
             float d[3] = {look[0] - origin[0], -origin[1], look[1] - origin[2]};
             float len = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
             if (len > 1e-3f) dir[0] = d[0] / len, dir[1] = d[1] / len, dir[2] = d[2] / len;
@@ -541,7 +448,7 @@ void ScreenRay(void* engineCamera, float dir[3], float origin[3], bool fromCamer
     // For zooming in from the overview: the planet under the cursor and the layout point there.
     bool main = engineCamera == Engine::GlobeEngineCamera(game, 0);
     if (main) {
-        g_hoverPlanet = i, g_hoverTick = GetTickCount64(), g_hoverFlatOk = false, g_hoverLayoutOk = false;
+        g_hoverPlanet = i, g_hoverTick = GetTickCount64(), g_hoverLayoutOk = false;
         if (fabsf(dir[1]) > 1e-6f && g_scale > 0.0f) {
             float s = -o[1] / dir[1];
             if (s > 0) {
@@ -554,7 +461,6 @@ void ScreenRay(void* engineCamera, float dir[3], float origin[3], bool fromCamer
     float flat[2];
     bool hit = false;
     if (i >= 0 && Globe::Unbend(p, i, o, dir, flat, &hit) && hit) {
-        if (main) g_hoverFlat[0] = flat[0], g_hoverFlat[1] = flat[1], g_hoverFlatOk = true;
         // The copy of the point on the camera's side of the wrap line (5832, not 200, for a camera at
         // 5620) for a planet as wide as the map: the direction must point the way the cursor is; the
         // game's wrap copies find the province.
@@ -664,6 +570,260 @@ std::wstring FindFile(const std::string& path, const char* what, const std::stri
     if (GetFileAttributesW(p.c_str()) != INVALID_FILE_ATTRIBUTES) return p;
     Log("globe: the %s %s (named in %s) is in no enabled mod nor the game folder", what, path.c_str(), from.c_str());
     return L"";
+}
+
+// The game's bitmap fonts (BMFont text .fnt with a 32-bit .dds page, glyphs in the alpha channel), as
+// the map names use (gfx/fonts/hoi_mapfont4).
+struct Glyph {
+    int x = 0, y = 0, w = 0, h = 0, xo = 0, yo = 0, adv = 0;
+};
+struct BmFont {
+    int lineH = 0, base = 0;
+    std::map<uint32_t, Glyph> chars;
+    std::map<uint64_t, int> kerning;
+    std::vector<uint8_t> rgba;  // the page, RGBA (the glyphs carry their own colours: a dark core, a light rim)
+    int tw = 0, th = 0;
+};
+
+int FntValue(const std::string& line, const char* key) {
+    std::string k = std::string(" ") + key + "=";
+    size_t at = (" " + line).find(k);
+    if (at == std::string::npos) return 0;
+    return atoi(line.c_str() + at - 1 + k.size());
+}
+
+bool ReadBytes(const std::wstring& path, std::vector<uint8_t>* out) {
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, path.c_str(), L"rb") != 0 || !f) return false;
+    uint8_t buf[65536];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof buf, f)) > 0) out->insert(out->end(), buf, buf + n);
+    fclose(f);
+    return true;
+}
+
+bool LoadBmFont(const std::string& base, BmFont* font) {
+    std::wstring fnt = FindFile(base + ".fnt", "name font", "the globe settings");
+    std::wstring dds = FindFile(base + ".dds", "name font page", "the globe settings");
+    std::vector<uint8_t> text, page;
+    if (fnt.empty() || dds.empty() || !ReadBytes(fnt, &text) || !ReadBytes(dds, &page)) return false;
+    std::string all(text.begin(), text.end());
+    size_t pos = 0;
+    while (pos < all.size()) {
+        size_t end = all.find('\n', pos);
+        if (end == std::string::npos) end = all.size();
+        std::string line = all.substr(pos, end - pos);
+        pos = end + 1;
+        if (line.compare(0, 7, "common ") == 0) {
+            font->lineH = FntValue(line, "lineHeight"), font->base = FntValue(line, "base");
+        } else if (line.compare(0, 5, "char ") == 0) {
+            Glyph g;
+            g.x = FntValue(line, "x"), g.y = FntValue(line, "y"), g.w = FntValue(line, "width"), g.h = FntValue(line, "height");
+            g.xo = FntValue(line, "xoffset"), g.yo = FntValue(line, "yoffset"), g.adv = FntValue(line, "xadvance");
+            font->chars[(uint32_t)FntValue(line, "id")] = g;
+        } else if (line.compare(0, 8, "kerning ") == 0) {
+            uint64_t key = ((uint64_t)(uint32_t)FntValue(line, "first") << 32) | (uint32_t)FntValue(line, "second");
+            font->kerning[key] = FntValue(line, "amount");
+        }
+    }
+    // The page: an uncompressed 32-bit DDS (as the game's map font is); the alpha mask says which byte.
+    if (page.size() < 128 || memcmp(page.data(), "DDS ", 4) != 0) return false;
+    uint32_t h, w, pfFlags, bits, mask[4];
+    memcpy(&h, &page[12], 4), memcpy(&w, &page[16], 4), memcpy(&pfFlags, &page[80], 4), memcpy(&bits, &page[88], 4);
+    memcpy(mask, &page[92], 16);  // red, green, blue, alpha masks
+    int at[4];
+    for (int c = 0; c < 4; ++c) {
+        at[c] = mask[c] == 0xffu ? 0 : mask[c] == 0xff00u ? 1 : mask[c] == 0xff0000u ? 2 : mask[c] == 0xff000000u ? 3 : -1;
+        if (at[c] < 0) return false;
+    }
+    if (!(pfFlags & 0x40) || bits != 32 || w == 0 || h == 0 || page.size() < 128 + (size_t)w * h * 4) return false;
+    font->tw = (int)w, font->th = (int)h;
+    font->rgba.resize((size_t)w * h * 4);
+    for (size_t k = 0; k < (size_t)w * h; ++k)
+        for (int c = 0; c < 4; ++c) font->rgba[k * 4 + c] = page[128 + k * 4 + at[c]];
+    return font->lineH > 0 && !font->chars.empty();
+}
+
+// The page bilinearly at (x, y): RGBA 0..255.
+void FontSample(const BmFont& f, float x, float y, float out[4]) {
+    int x0 = (int)floorf(x), y0 = (int)floorf(y);
+    float fx = x - x0, fy = y - y0;
+    for (int c = 0; c < 4; ++c) {
+        auto at = [&](int xx, int yy) -> float {
+            if (xx < 0 || yy < 0 || xx >= f.tw || yy >= f.th) return 0.0f;
+            return f.rgba[((size_t)yy * f.tw + xx) * 4 + c];
+        };
+        out[c] = (at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx) * (1 - fy) + (at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx) * fy;
+    }
+}
+
+// Writes text (UTF-16 units, upper case) centred into row `row` (rh pixels) of a w-wide RGBA buffer,
+// in the font's own colours; returns the text's width in pixels.
+float DrawBmText(const BmFont& f, const std::wstring& text, uint8_t* rgba, int w, int rh, int row) {
+    float spacing = f.lineH * 0.08f;  // a little wider than the font, as the map names are spread
+    float width = 0;
+    for (size_t i = 0; i < text.size(); ++i) {
+        auto it = f.chars.find((uint32_t)text[i]);
+        if (it == f.chars.end()) continue;
+        width += it->second.adv + spacing;
+        if (i + 1 < text.size()) {
+            auto kt = f.kerning.find(((uint64_t)(uint32_t)text[i] << 32) | (uint32_t)text[i + 1]);
+            if (kt != f.kerning.end()) width += kt->second;
+        }
+    }
+    if (!(width > 0)) return 0;
+    float scale = fminf(1.0f, fminf((w - 32) / width, (rh - 8) / (float)f.lineH));
+    float pen = (w - width * scale) * 0.5f;
+    float top = row * rh + (rh - f.lineH * scale) * 0.5f;
+    for (size_t i = 0; i < text.size(); ++i) {
+        auto it = f.chars.find((uint32_t)text[i]);
+        if (it == f.chars.end()) continue;
+        const Glyph& g = it->second;
+        int dx0 = (int)floorf(pen + g.xo * scale), dy0 = (int)floorf(top + g.yo * scale);
+        int dw = (int)ceilf(g.w * scale) + 1, dh = (int)ceilf(g.h * scale) + 1;
+        for (int y = 0; y < dh; ++y) {
+            int yy = dy0 + y;
+            if (yy < row * rh || yy >= (row + 1) * rh) continue;
+            for (int x = 0; x < dw; ++x) {
+                int xx = dx0 + x;
+                if (xx < 0 || xx >= w) continue;
+                float sx = g.x + (xx + 0.5f - (pen + g.xo * scale)) / scale - 0.5f;
+                float sy = g.y + (yy + 0.5f - (top + g.yo * scale)) / scale - 0.5f;
+                if (sx < g.x - 1 || sy < g.y - 1 || sx > g.x + g.w || sy > g.y + g.h) continue;
+                float c[4];
+                FontSample(f, sx, sy, c);
+                uint8_t* d = &rgba[((size_t)yy * w + xx) * 4];
+                if (c[3] > d[3])
+                    for (int k = 0; k < 4; ++k) d[k] = (uint8_t)(c[k] > 255.0f ? 255.0f : c[k]);
+            }
+        }
+        pen += (g.adv + spacing) * scale;
+        if (i + 1 < text.size()) {
+            auto kt = f.kerning.find(((uint64_t)(uint32_t)text[i] << 32) | (uint32_t)text[i + 1]);
+            if (kt != f.kerning.end()) pen += kt->second * scale;
+        }
+    }
+    return width * scale;
+}
+
+std::wstring PlanetName(const Globe::Planet& pl) {
+    std::string text = native_localize_key(pl.name.c_str());
+    int len = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), (int)text.size(), nullptr, 0);
+    if (len <= 0) return L"";
+    std::wstring wide(len, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, text.c_str(), (int)text.size(), &wide[0], len);
+    CharUpperBuffW(&wide[0], (DWORD)wide.size());
+    return wide;
+}
+
+// The names of the planets in one texture: a row of 128 pixels per planet, the text centred, in the
+// game's map font (name_font; GDI's Georgia if it cannot be read), the fill in red, an outline (the
+// fill widened) in green.
+void BuildNames() {
+    g_namesBuilt = true;
+    const int W = 2048, RH = 128;
+    int n = (int)g_planets.size();
+    if (n < 1) return;
+    int H = RH * n;
+    std::vector<uint8_t> fill((size_t)W * H, 0);
+    std::vector<uint8_t> rgba((size_t)W * H * 4, 0);
+    BmFont font;
+    bool bm = LoadBmFont(g_settings.nameFont, &font);
+    if (!bm) Log("globe: the name font %s could not be read (a BMFont .fnt with a 32-bit .dds); Georgia instead", g_settings.nameFont.c_str());
+    int named = 0;
+    if (bm) {
+        for (int i = 0; i < n; ++i) {
+            Globe::Planet& pl = g_planets[i];
+            if (pl.name.empty()) continue;
+            float textW = DrawBmText(font, PlanetName(pl), rgba.data(), W, RH, i) + 8.0f;
+            if (textW <= 8.0f) continue;
+            pl.nameRow[0] = (float)(i * RH) / H, pl.nameRow[1] = (float)RH / H;
+            pl.nameAspect = textW / RH, pl.nameFrac = textW / W;
+            ++named;
+        }
+    } else {
+        BITMAPINFO bi = {};
+        bi.bmiHeader.biSize = sizeof bi.bmiHeader;
+        bi.bmiHeader.biWidth = W, bi.bmiHeader.biHeight = -H, bi.bmiHeader.biPlanes = 1, bi.bmiHeader.biBitCount = 32;
+        void* bits = nullptr;
+        HDC dc = CreateCompatibleDC(nullptr);
+        HBITMAP bmp = dc ? CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0) : nullptr;
+        if (!bmp || !bits) {
+            if (dc) DeleteDC(dc);
+            Log("globe: the planet names could not be drawn (GDI)");
+            return;
+        }
+        HGDIOBJ oldBmp = SelectObject(dc, bmp);
+        memset(bits, 0, (size_t)W * H * 4);
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, RGB(255, 255, 255));
+        for (int i = 0; i < n; ++i) {
+            Globe::Planet& pl = g_planets[i];
+            if (pl.name.empty()) continue;
+            std::wstring wide = PlanetName(pl);
+            if (wide.empty()) continue;
+            SIZE sz = {};
+            HFONT gf = nullptr;
+            for (int px = 96; px >= 24; px -= 8) {  // the largest that fits the row's width
+                if (gf) DeleteObject(gf);
+                gf = CreateFontW(-px, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+                                 ANTIALIASED_QUALITY, VARIABLE_PITCH | FF_ROMAN, L"Georgia");
+                SelectObject(dc, gf);
+                SetTextCharacterExtra(dc, px / 6);
+                GetTextExtentPoint32W(dc, wide.c_str(), (int)wide.size(), &sz);
+                if (sz.cx <= W - 32) break;
+            }
+            TextOutW(dc, (W - sz.cx) / 2, i * RH + (RH - sz.cy) / 2, wide.c_str(), (int)wide.size());
+            SelectObject(dc, GetStockObject(SYSTEM_FONT));
+            if (gf) DeleteObject(gf);
+            float textW = (float)(sz.cx + 16);
+            pl.nameRow[0] = (float)(i * RH) / H, pl.nameRow[1] = (float)RH / H;
+            pl.nameAspect = textW / RH, pl.nameFrac = textW / W;
+            ++named;
+        }
+        GdiFlush();
+        const uint8_t* src = (const uint8_t*)bits;
+        for (size_t k = 0; k < fill.size(); ++k) fill[k] = src[k * 4 + 1];
+        SelectObject(dc, oldBmp);
+        DeleteObject(bmp);
+        DeleteDC(dc);
+    }
+    if (!bm) BuildOutline(fill, W, H, RH, &rgba);
+    if (named && GlobeD3D::SetNames(rgba.data(), W, H))
+        Log("globe: %d planet name(s) drawn (%s)", named, bm ? g_settings.nameFont.c_str() : "Georgia");
+}
+
+// GDI's text as the map font's glyphs look: a dark core, a light rim (the text widened by 5 pixels,
+// within each row).
+void BuildOutline(const std::vector<uint8_t>& fill, int W, int H, int RH, std::vector<uint8_t>* rgbaOut) {
+    std::vector<uint8_t> wide1((size_t)W * H), outline((size_t)W * H);
+    const int r = 5;
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x) {
+            uint8_t m = 0;
+            for (int dx = -r; dx <= r; ++dx) {
+                int xx = x + dx;
+                if (xx >= 0 && xx < W && fill[(size_t)y * W + xx] > m) m = fill[(size_t)y * W + xx];
+            }
+            wide1[(size_t)y * W + x] = m;
+        }
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x) {
+            uint8_t m = 0;
+            int row = y / RH;
+            for (int dy = -r; dy <= r; ++dy) {
+                int yy = y + dy;
+                if (yy >= row * RH && yy < (row + 1) * RH && wide1[(size_t)yy * W + x] > m) m = wide1[(size_t)yy * W + x];
+            }
+            outline[(size_t)y * W + x] = m;
+        }
+    std::vector<uint8_t>& rgba = *rgbaOut;
+    for (size_t k = 0; k < fill.size(); ++k) {
+        float f = fill[k] / 255.0f;
+        uint8_t grey = (uint8_t)(224.0f * (1.0f - f) + 16.0f * f);
+        rgba[k * 4] = rgba[k * 4 + 1] = rgba[k * 4 + 2] = grey;
+        rgba[k * 4 + 3] = (uint8_t)(fill[k] > outline[k] * 0.5f ? 190 : outline[k] * 0.5f);
+    }
 }
 
 }  // namespace

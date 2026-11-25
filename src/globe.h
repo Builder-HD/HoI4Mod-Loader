@@ -47,7 +47,9 @@ struct PlanetSettings {
 //       polar_cap_color = { 0.72 0.77 0.82 }   # the ice's colour (red green blue, 0..1)
 //       polar_sea_color = { 0.14 0.19 0.27 }   # the polar seas' colour
 //       overview_height = 2600       # optional: from this height all planets are shown (0: never)
-//       overview_full_height = 3000  # the whole overview fits the view here (vanilla's highest camera)
+//       overview_full_height = 3000  # the whole overview fits the view here (a mod may raise
+//                                    # NFrontend.CAMERA_MAX_HEIGHT; camera_range follows it)
+//       name_font = "gfx/fonts/hoi_mapfont4"   # the planets' names (the map names' font)
 //       planet = { ... }       # several planets (see PlanetSettings); none: the whole map is one
 //   }
 // Several files and blocks: later keys replace earlier ones; planets add up (a later planet with
@@ -68,6 +70,7 @@ struct Settings {
     float polarSeaColor[3] = {0.14f, 0.19f, 0.27f};
     float overviewHeight = 0.0f;        // 0: no overview
     float overviewFullHeight = 3000.0f;
+    std::string nameFont = "gfx/fonts/hoi_mapfont4";  // the planets' names: a game bitmap font (no extension)
     std::vector<PlanetSettings> planets;
 };
 struct Problem {

@@ -137,6 +137,10 @@ void ParseFile(const std::string& text, const std::string& shown, Settings* s, s
             else if (ScriptTree::EqualsNoCase(n.key, "polar_cap_color")) ok = ColorOf(n, s->polarColor);
             else if (ScriptTree::EqualsNoCase(n.key, "overview_height")) ok = NumberOf(n, 0, 100000, &s->overviewHeight);
             else if (ScriptTree::EqualsNoCase(n.key, "overview_full_height")) ok = NumberOf(n, 1, 100000, &s->overviewFullHeight);
+            else if (ScriptTree::EqualsNoCase(n.key, "name_font")) {
+                ok = PathOf(n);
+                if (ok) s->nameFont = n.value;
+            }
             else if (ScriptTree::EqualsNoCase(n.key, "planet")) {
                 if (n.block) ParsePlanet(n, shown, s, problems);
                 else problems->push_back({shown, n.line, "planet must be a block"});
@@ -496,12 +500,12 @@ const char kHlsl[] =
     "\t\tq = HL_GlobeAway( q );\n"
     "\treturn float4( q * vPos.w, vPos.w );\n"
     "}\n"
-    "// The game's map names: as HL_GlobeCull, and gone in the overview (the planets' names instead).\n"
+    "// The game's map names: as HL_GlobeCull, and gone while the overview shows (the planets' names instead).\n"
     "float4 HL_GlobeLabel( float4 vPos )\n"
     "{\n"
     "\tif ( HL_GlobeA.x <= 0.0f || vPos.w == 0.0f )\n"
     "\t\treturn vPos;\n"
-    "\tif ( HL_GlobeB.z > 0.25f )\n"
+    "\tif ( HL_GlobeA.y > 0.0f )\n"
     "\t\treturn float4( vCamPos + float3( 0.0f, -1000000.0f, 0.0f ), 1.0f );\n"
     "\treturn HL_GlobeCull( vPos );\n"
     "}\n"
@@ -567,7 +571,7 @@ const char kHlsl[] =
     "\treturn HL_GlobeTexel( HL_GlobeSpace, uv, float4( 0.0f, 0.0f, 1.0f, 1.0f ) ).rgb;\n"
     "}\n"
     "// Planet i's name over the point vDisc of its disc (x east, y north, in radii from its centre): along\n"
-    "// an arc, as the game writes country names; rgb and coverage. The colours are in the map's lit range.\n"
+    "// an arc, as the game writes country names; rgb and coverage.\n"
     "float4 HL_GlobeName( int i, float2 vDisc )\n"
     "{\n"
     "\tfloat4 vN = HL_GlobeP[ i * 8 + 5 ];\n"
@@ -581,8 +585,8 @@ const char kHlsl[] =
     "\tfloat fFrac = HL_GlobeP[ i * 8 + 7 ].x;\n"
     "\tfloat2 uv = float2( 0.5f + ( u - 0.5f ) * fFrac, vN.x + v * vN.y );\n"
     "\tfloat4 t = HL_GlobeTexel( HL_GlobeNames, uv, float4( 0.0f, vN.x, 1.0f, vN.x + vN.y ) );\n"
-    "\tfloat3 vColor = lerp( float3( 0.3f, 0.3f, 0.28f ), float3( 0.03f, 0.03f, 0.03f ), t.r );\n"
-    "\treturn float4( vColor, saturate( max( t.r, t.g ) ) * HL_GlobeB.z );\n"
+    "\t// As the game's map names: the font's own colours, its alpha as the coverage.\n"
+    "\treturn float4( t.rgb, t.a * HL_GlobeB.z );\n"
     "}\n"
     "// Planet i's disc coordinates of world point q.\n"
     "float2 HL_GlobeDisc( int i, float3 q )\n"
