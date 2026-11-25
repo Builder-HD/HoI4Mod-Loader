@@ -610,6 +610,10 @@ def main():
         ox = (k - (copies - 1) / 2.0) * 1.4
         planets.append("\tplanet = {\n\t\tname = PLANET_EARTH_%s\n\t\tx = 0  y = %d  width = %d  height = %d\n"
                        "\t\toverview = { x = %.2f y = 0 size = 1 }\n\t}\n" % (letter, zoff(k), map_w, map_h, ox))
+    # The camera may go higher, for the overview (hoi4_loader's camera_range raises the far plane with it).
+    write_text(os.path.join(out, "common", "defines", "zz_hoi4_loader_planets.lua"),
+               "-- hoi4_loader planets test: a higher camera for the overview of the planets."+"\n"
+               "NDefines.NFrontend.CAMERA_MAX_HEIGHT = 6000.0"+"\n")
     bg = ""
     if args.background:
         with open(args.background, "rb") as f:
@@ -619,11 +623,12 @@ def main():
         bg = '\tbackground = "gfx/hoi4_loader_planets_test/space%s"\n' % ext
     write_text(os.path.join(out, "common", "hoi4_loader_globe", "hoi4_loader_planets_globe.txt"),
                "# hoi4_loader's globe for the planets test (written by tools/make_planets_map.py).\n"
-               "# Flat below 400; a globe from 2200 or once the view reaches past the planet's edge; from 2500 the\n"
-               "# overview of all planets, the whole of it at 3000 (vanilla's highest camera).\n"
+               "# Flat below 400; a globe from 2200 or once the view reaches past the planet's edge; from 2600 the\n"
+               "# overview of all planets, the whole of it at 6000 (the camera's highest, raised in common/defines;\n"
+               "# the loader's camera_range moves the far plane with it).\n"
                "globe = {\n\tdefault = yes\n\tflat_height = 400\n\tglobe_height = 2200\n\ttransition = 0.35\n"
                "\tnorth = 82\n\tsouth = -60\n\tpolar_cap_north = 85\n\tpolar_cap_south = -68\n%s"
-               "\toverview_height = 2500\n\toverview_full_height = 3000\n%s}\n" % (bg, "".join(planets)))
+               "\toverview_height = 2600\n\toverview_full_height = 6000\n%s}\n" % (bg, "".join(planets)))
     # Victory point names for the copies.
     vp = {}
     for path in glob.glob(os.path.join(game, "localisation", "english", "*.yml")):
