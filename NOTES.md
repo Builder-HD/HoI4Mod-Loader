@@ -8546,3 +8546,27 @@ rings of the owners' colours); over space the naval tooltip ("Control ratio", "P
 "Orbit of Earth A" base had its naval base (a low-supply alert, gone with `local_supplies`); no
 script errors. Not yet checked by hand: building a spaceport, producing spaceships, deploying them,
 giving a mission in a space zone (the owner's test).
+
+## U9: owner's test of step 1, and the space navy kept apart (2026-11-25)
+
+Owner's test: patrolling in a space zone works; another spaceport works (it gets a hidden port of its
+own on the ring); **spaceships can be deployed to any planet port but not to the spaceports**, though
+assigning a new spaceship to the space fleet deploys it at that fleet's port; **regular ships can be
+deployed to the space fleet** too. Owner: "the space map should be everywhere, with the planets inside
+it so the spaceships can move around" (the Part U2 picture; the "Space" disc in the overview was only
+step 1's way there), "add a new production tab for the spaceships", and "maybe better a whole new type,
+similar to the navy, as navy and air are different".
+
+Decision (owner, 2026-11-25): **the space navy stays the engine's navy underneath, kept strictly apart
+by the loader** wherever the two meet. A fourth unit domain beside army, navy and air is wired into the
+engine everywhere (combat, movement, supply, missions, UI, AI, saves, multiplayer) and was not chosen.
+Where they meet, from the test:
+- **Production:** spaceships in a production tab of their own (`production_tabs`, a new tab and button),
+  not in the naval tab.
+- **Deployment:** a spaceship line deploys only to spaceports (and space fleets), a regular ship line
+  never there (the deployment's base list and its fleet list both filtered).
+- **Fleets:** a fleet based at a spaceport is a space fleet: no regular ship joins it, no spaceship joins
+  a planet's fleet (assignment, reinforcement, transfer, merging).
+- Later, as planned: the space map mode, space missions, space superiority.
+
+Steps from here: step 2 the space map as the zoomed-out view (U2); step 3 the separation above.
