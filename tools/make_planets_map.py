@@ -2,7 +2,7 @@
 """Build a test map mod with several copies of the vanilla map ("planets"), stacked in z.
 
     python -I tools/make_planets_map.py --game "<HoI4 folder>" --out "<Documents>/mod/hoi4_loader_planets_test"
-        [--tags PLA,PLB] [--gap 256]
+        [--tags PLA,PLB] [--gap 256] [--background <image>]
 
 Reads the owner's own vanilla install and writes a total-conversion map mod (NOTES Part T): copy k of
 the map lies at z = k * (map height + gap), its provinces, states and strategic regions numbered after
@@ -241,6 +241,7 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--tags", default="PLA,PLB")
     ap.add_argument("--gap", type=int, default=256, help="map rows of lake between the copies (a multiple of 256)")
+    ap.add_argument("--background", default="", help="an image (PNG, JPEG) shown behind the planets")
     args = ap.parse_args()
     game, out = args.game, args.out
     tags = [t.strip().upper() for t in args.tags.split(",") if t.strip()]
@@ -601,6 +602,28 @@ def main():
     loc.append(' PLANETS_BOOKMARK_NAME:0 "The Planets"')
     loc.append(' PLANETS_BOOKMARK_DESC:0 "%d copies of the world, one country each (hoi4_loader planets test)."' % copies)
     loc.append(' STRATEGICREGION_PLANET_GAP:0 "Between the planets"')
+    # The globe: one planet per copy, side by side in the overview (hoi4_loader's globe, NOTES.md Part T).
+    planets = []
+    for k, tag in enumerate(tags):
+        letter = chr(ord("A") + k)
+        loc.append(' PLANET_EARTH_%s:0 "Earth %s"' % (letter, letter))
+        ox = (k - (copies - 1) / 2.0) * 1.4
+        planets.append("\tplanet = {\n\t\tname = PLANET_EARTH_%s\n\t\tx = 0  y = %d  width = %d  height = %d\n"
+                       "\t\toverview = { x = %.2f y = 0 size = 1 }\n\t}\n" % (letter, zoff(k), map_w, map_h, ox))
+    bg = ""
+    if args.background:
+        with open(args.background, "rb") as f:
+            data = f.read()
+        ext = os.path.splitext(args.background)[1].lower() or ".png"
+        write_bytes(os.path.join(out, "gfx", "hoi4_loader_planets_test", "space" + ext), data)
+        bg = '\tbackground = "gfx/hoi4_loader_planets_test/space%s"\n' % ext
+    write_text(os.path.join(out, "common", "hoi4_loader_globe", "hoi4_loader_planets_globe.txt"),
+               "# hoi4_loader's globe for the planets test (written by tools/make_planets_map.py).\n"
+               "# Flat below 400; a globe from 2200 or once the view reaches past the planet's edge; from 2500 the\n"
+               "# overview of all planets, the whole of it at 3000 (vanilla's highest camera).\n"
+               "globe = {\n\tdefault = yes\n\tflat_height = 400\n\tglobe_height = 2200\n\ttransition = 0.35\n"
+               "\tnorth = 82\n\tsouth = -60\n\tpolar_cap_north = 85\n\tpolar_cap_south = -68\n%s"
+               "\toverview_height = 2500\n\toverview_full_height = 3000\n%s}\n" % (bg, "".join(planets)))
     # Victory point names for the copies.
     vp = {}
     for path in glob.glob(os.path.join(game, "localisation", "english", "*.yml")):
