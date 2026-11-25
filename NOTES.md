@@ -8502,3 +8502,47 @@ Without `space` the Part T overview stays as it is.
 - Later parts: the new space missions (blockade a planet, orbital bombardment, intercept, terrorize),
   the space map mode, space superiority; supply ships between planets; troop carriers and space
   invasions.
+
+## U8: step 1, the space band (2026-11-25)
+
+`tools/make_planets_map.py --space-height 2048` (default; 0: none) adds above the planets a gap of
+lakes and the space band: 5632 x 2048 (the map 5632 x 6656, 28,038 provinces; `large_map`: scratch
+143 MB, terrain blocks of 512 pixels, 11 x 13 = 143), a column of lake tiles at the east edge (no
+east-west wrap), a grid of 56 x 21 cells of about 96 pixels: 1,126 sea provinces in space zones of 6 x
+5 cells (strategic regions "Space Zone N", no weather), per planet a hole of 5 x 5 cells (its 16 border
+cells hidden ports: land, `plains`, a new continent `space`, each its own state "Spaceport Dock N
+(Earth A)", `wasteland`, owned by the planet's country, flags `hl_port`, `hl_port_<k>`, `local_supplies
+= 20`; its inner 3 x 3 cells a lake), the holes in a land region "Orbit of Earth A". Planet states get
+`hl_planet_<k>`.
+
+Content: spaceship hulls `space_hull_light/cruiser/heavy` (vanilla's hull archetypes and their numbered
+hulls copied, renamed, `active = yes`, vanilla's `alias` dropped), units `space_destroyer`,
+`space_light_cruiser`, `space_battleship` (vanilla's, `sprite` kept: the normal ship models), the
+spaceport (`space_port`, a state building, 40,000, one per state, sharing slots), Germany's 1936
+technologies and its first light / cruiser / heavy hull designs on the space hulls ("Orbital Frigate",
+"Orbital Cruiser", "Orbital Battleship"). The script `hl_space_port_sync` (weekly, in a country scope:
+a scripted effect called with no scope is refused, "Invalid Scope"): per planet, ports whose spaceport
+is gone go free (naval base 0), spaceports without a port get a free one of their planet (state
+variables `hl_port` / `hl_port_of`), every paired port gets its spaceport's owner (`is_owned_by`; `owner
+=` is no state trigger) and naval base 10. The test start: each capital a spaceport paired with its
+planet's first port, and a fleet there (3 Orbital Frigates, 1 Orbital Cruiser, `load_oob`). The globe
+settings get the band as a temporary planet "Space" so the camera can go there (until step 2).
+
+Found on the way:
+- **"Failed to load the map: some errors are present in the map definition"** when a game started,
+  with nothing in error.log: the check is FUN_141d70d00 (the map object's byte `+0x979`, cleared by
+  FUN_140202130) and its message `MAP_ERROR: gun emplacement province ... is invalid for state ...`
+  (from FUN_140cb89a0) does not reach error.log. Fixed by giving each port state the building
+  positions a vanilla one-province coastal state has (per province: supply node, bunker, special
+  project facility; per coast: naval base spawn (the sea next to it), coastal bunker, naval supply hub,
+  naval headquarters, floating harbour (the province itself); per state: factories, air base, ...).
+- "Bases in Low Supply" for the ports (nothing reaches space by rail or sea): `local_supplies = 20`.
+- Warnings left: the space hulls are not in `script_enum_equipment_bonus_type` (documentation only;
+  vanilla's list would have to be replaced).
+
+In game (1.20): the game starts as Earth A; the overview shows Earth A, Earth B and Space (the holes as
+rings of the owners' colours); over space the naval tooltip ("Control ratio", "Patrol Missions",
+"Minimum for zone control 375"), the region window "Space Zone 16", the zones' borders as a grid; the
+"Orbit of Earth A" base had its naval base (a low-supply alert, gone with `local_supplies`); no
+script errors. Not yet checked by hand: building a spaceport, producing spaceships, deploying them,
+giving a mission in a space zone (the owner's test).
