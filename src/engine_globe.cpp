@@ -269,8 +269,11 @@ void GlobeHideCopies(void* mapCamera) {
     Wr<uint8_t>(mapCamera, g_copyFlag[1], 0);
 }
 
-void GlobeShiftCamera(void* mapCamera, float dx) {
-    for (uint32_t off : {g_eye, g_look, g_eyeTarget, g_lookTarget}) Wr<float>(mapCamera, off, Rd<float>(mapCamera, off) + dx);
+void GlobeShiftCamera(void* mapCamera, float dx, float dz) {
+    for (uint32_t off : {g_eye, g_look, g_eyeTarget, g_lookTarget}) {
+        Wr<float>(mapCamera, off, Rd<float>(mapCamera, off) + dx);
+        Wr<float>(mapCamera, off + 8, Rd<float>(mapCamera, off + 8) + dz);
+    }
 }
 
 void GlobeOpenFrustum(void* engineCamera) {
@@ -278,6 +281,15 @@ void GlobeOpenFrustum(void* engineCamera) {
     // zero normal with a very negative d keeps everything inside.
     const float open[4] = {0.0f, 0.0f, 0.0f, -1.0e30f};
     for (int k = 0; k < 6; ++k) memcpy((uint8_t*)engineCamera + g_planes + 16 * k, open, 16);
+}
+
+void GlobeAreaXRange(void* mapCamera, float* xmin, float* xmax) {
+    *xmin = 1e30f, *xmax = -1e30f;
+    for (int k = 0; k < 4; ++k) {
+        float x = Rd<float>(mapCamera, g_areaPts + 12 * k);
+        *xmin = x < *xmin ? x : *xmin;
+        *xmax = x > *xmax ? x : *xmax;
+    }
 }
 
 void GlobeAreaZRange(void* mapCamera, float* zmin, float* zmax) {

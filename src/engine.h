@@ -330,13 +330,14 @@ bool GlobeMapSize(float* width, float* height);       // false before the map is
 // The map camera's eye and look-at (x, y, z).
 bool GlobeCameraPose(void* mapCamera, float eye[3], float look[3]);
 void GlobeHideCopies(void* mapCamera);                // the two wrap copies off for this frame
-void GlobeShiftCamera(void* mapCamera, float dx);     // eye, look-at and their targets moved by dx in x
+void GlobeShiftCamera(void* mapCamera, float dx, float dz);  // eye, look-at and their targets moved by (dx, dz)
 void GlobeOpenFrustum(void* engineCamera);            // the six planes accept everything
 // The visible area's four corners pushed out from (cx, cz) by `factor`.
 void GlobeWidenArea(void* mapCamera, float cx, float cz, float factor);
 // The lowest and highest z of the visible area's four corners (as the game computed them for the
 // flat map: read before GlobeWidenArea).
 void GlobeAreaZRange(void* mapCamera, float* zmin, float* zmax);
+void GlobeAreaXRange(void* mapCamera, float* xmin, float* xmax);
 
 // --- Attention areas (attention_area; engine_attention.cpp, NOTES.md Part M) -------------------
 void ResolveAttention();     // after ResolveProvinceData

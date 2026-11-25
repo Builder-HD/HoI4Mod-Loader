@@ -51,6 +51,16 @@ static const char kShader[] =
     "\tMainCode VertexShaderShadow\n\t[[\n\t\tOut.p = mul( ViewProjectionMatrix, pos );\n\t]]\n}\n"
     "PixelShader =\n{\n\tMainCode PixelShader\n\t[[\n\t\tfloat4 x = mul( ViewProjectionMatrix, pos );\n\t]]\n}\n";
 
+// One planet (the whole map, or the settings' planets) at fold t, looking at (lx, lz).
+static bool MakeOne(const Globe::Settings& s, float w, float h, float t, float lx, float lz, Globe::Params* p, int current = 0,
+                    float overview = 0.0f) {
+    std::vector<Globe::Planet> planets = Globe::ResolvePlanets(s, w, h, nullptr);
+    Globe::View v;
+    v.current = current, v.t = t, v.p = overview, v.lookX = lx, v.lookZ = lz;
+    if (!planets.empty()) v.focusX = planets[current].ox, v.focusY = planets[current].oy;
+    return Globe::MakeParams(s, planets, w, v, p);
+}
+
 static void TestMaths() {
     Globe::Settings s;
     s.present = true;
@@ -65,54 +75,119 @@ static void TestMaths() {
         Check(!Globe::WantSphere(s, 800, false, &st), "below 85% of where it became one: flat");
     }
     Globe::Params p;
-    Check(!Globe::MakeParams(s, 5632, 2048, 0.0f, 100, 100, &p) && p.t() == 0.0f, "t = 0: flat");
+    Check(!MakeOne(s, 5632, 2048, 0.0f, 100, 100, &p) && p.t() == 0.0f, "t = 0: flat");
     float in[3] = {1234, 5, 777}, out[3];
-    Globe::Bend(p, in, out);
+    Globe::Bend(p, 0, in, out);
     Check(out[0] == in[0] && out[1] == in[1] && out[2] == in[2], "flat bend is the identity");
     for (float t : {1.0f, 0.4f, 0.05f}) {
         float lx = 3000, lz = 1500;
-        Check(Globe::MakeParams(s, 5632, 2048, t, lx, lz, &p), "params");
+        Check(MakeOne(s, 5632, 2048, t, lx, lz, &p), "params");
+        Check(p.count() == 1 && p.kind(0) == 1.0f, "one planet, the whole map, drawn");
         float l[3] = {lx, 0, lz}, lo[3];
-        Globe::Bend(p, l, lo);
+        Globe::Bend(p, 0, l, lo);
         Check(Near(lo[0], lx, 0.01f) && Near(lo[1], 0, 0.01f) && Near(lo[2], lz, 0.01f), "the look-at point stays");
         // Near the look-at point: 1 unit east -> cos(latitude) east (meridians meet at the poles).
         float e[3] = {lx + 1, 0, lz}, eo[3];
-        Globe::Bend(p, e, eo);
-        Check(Near(eo[0] - lx, p.b[2], 0.01f) && Near(eo[1], 0, 0.01f), "one unit east");
+        Globe::Bend(p, 0, e, eo);
+        Check(Near(eo[0] - lx, p.look(0)[2], 0.01f) && Near(eo[1], 0, 0.01f), "one unit east");
         // Round trip: a straight-down ray onto a bent point unbends to the flat point.
         const float pts[][2] = {{3200, 1600}, {2600, 1200}, {3500, 1900}, {2900, 1000}};
         for (const auto& q : pts) {
             float f[3] = {q[0], 0, q[1]}, b[3];
-            Globe::Bend(p, f, b);
+            Globe::Bend(p, 0, f, b);
             float o[3] = {lx, 4000, lz};
             float d[3] = {b[0] - o[0], b[1] - o[1], b[2] - o[2]};
             float flat[2];
             bool hit = false;
-            Check(Globe::Unbend(p, o, d, 5632, 2048, flat, &hit) && hit, "unbend hits");
+            Check(Globe::Unbend(p, 0, o, d, flat, &hit) && hit, "unbend hits");
             Check(Near(flat[0], q[0], 0.5f) && Near(flat[1], q[1], 0.5f), "unbend round trip");
+            float dist = 0;
+            Check(Globe::RayPlanet(p, o, d, &dist) == 0 && dist > 0, "the ray finds the planet");
         }
     }
     // Whole planet: the map wraps (x = 5620 and x = 12 are 24 units apart across the seam); what lies
-    // beyond the map's edges sinks below the surface.
-    Globe::MakeParams(s, 5632, 2048, 1.0f, 100, 1024, &p);
+    // beyond the map's edges is on no planet (the shader drops it).
+    MakeOne(s, 5632, 2048, 1.0f, 100, 1024, &p);
     float a[3] = {5620, 0, 1024}, b2[3] = {12, 0, 1024}, ao[3], bo[3];
-    Globe::Bend(p, a, ao);
-    Globe::Bend(p, b2, bo);
+    Globe::Bend(p, 0, a, ao);
+    Globe::Bend(p, 0, b2, bo);
     float gap = sqrtf((ao[0] - bo[0]) * (ao[0] - bo[0]) + (ao[1] - bo[1]) * (ao[1] - bo[1]) + (ao[2] - bo[2]) * (ao[2] - bo[2]));
     Check(Near(gap, 24.0f, 0.5f), "wrap across the seam");
-    float out1[3] = {5700, 0, 1024}, oo[3];
-    Globe::Bend(p, out1, oo);
-    float rr = sqrtf((oo[0] - p.b[0]) * (oo[0] - p.b[0]) + (oo[1] + p.a[1]) * (oo[1] + p.a[1]) + (oo[2] - p.b[1]) * (oo[2] - p.b[1]));
-    Check(rr < p.a[1] - 100.0f, "beyond the east edge sinks");
+    std::vector<Globe::Planet> one = Globe::ResolvePlanets(s, 5632, 2048, nullptr);
+    Check(Globe::PlanetAt(one, 5700, 1024) == -1 && Globe::PlanetAt(one, 100, 2100) == -1 && Globe::PlanetAt(one, 100, 1024) == 0,
+          "beyond the map's edges: no planet");
     // Poles: z = 0 and z = height are single points at t = 1.
     float s1[3] = {0, 0, 2048}, s2[3] = {3000, 0, 2048}, o1[3], o2[3];
-    Globe::Bend(p, s1, o1);
-    Globe::Bend(p, s2, o2);
+    Globe::Bend(p, 0, s1, o1);
+    Globe::Bend(p, 0, s2, o2);
     Check(Near(o1[0], o2[0], 0.05f) && Near(o1[2], o2[2], 0.05f), "north pole");
     // A ray past the planet: no hit, the closest point.
     float o[3] = {100, 4000, 1024}, d[3] = {1, 0, 0}, flat[2];
     bool hit = true;
-    Check(Globe::Unbend(p, o, d, 5632, 2048, flat, &hit) && !hit, "miss gives the closest point");
+    Check(Globe::Unbend(p, 0, o, d, flat, &hit) && !hit, "miss gives the closest point");
+    Check(Globe::RayPlanet(p, o, d, nullptr) == -1, "the ray finds no planet");
+}
+
+// Two Earths stacked as the planets test map makes them (5632 x 4352, a gap of 256 rows).
+static void TestPlanets() {
+    Globe::Settings s;
+    std::vector<Globe::Problem> pr;
+    Globe::ParseFile("globe = { north = 82 south = -60 overview_height = 2600 overview_full_height = 3000\n"
+                     " planet = { name = A x = 0 y = 0 width = 5632 height = 2048 overview = { x = -0.7 y = 0 size = 1 } }\n"
+                     " planet = { name = B x = 0 y = 2304 width = 5632 height = 2048 overview = { x = 0.7 y = 0 size = 1 } "
+                     "image = \"gfx/x/b.png\" polar_cap_north = 85 }\n"
+                     " planet = { width = 10 }\n"
+                     " planet = { name = C width = 100 }\n}",
+                     "t", &s, &pr);
+    Check(s.planets.size() == 3 && pr.size() == 2, "planets read (a nameless one refused, half a rectangle reported)");
+    Check(s.planets[1].image == "gfx/x/b.png" && s.planets[1].setCapNorth && s.planets[0].hasOverview && s.planets[0].overviewX == -0.7f,
+          "planet keys");
+    Globe::ParseFile("globe = { planet = { name = C x = 0 y = 0 width = 1000 height = 500 } }", "t", &s, &pr);
+    Check(s.planets.size() == 3 && s.planets[2].width == 1000, "a later planet of the same name replaces it");
+    s.planets.pop_back();
+    std::vector<std::string> probs;
+    std::vector<Globe::Planet> pl = Globe::ResolvePlanets(s, 5632, 4352, &probs);
+    Check(pl.size() == 2 && probs.empty() && pl[1].z0 == 2304 && pl[1].capNorth == 85 && pl[0].capNorth == 90 && pl[1].north == 82,
+          "planets resolved (keys not given take the globe's)");
+    Check(Globe::PlanetAt(pl, 1000, 3000) == 1 && Globe::PlanetAt(pl, 1000, 1000) == 0 && Globe::PlanetAt(pl, 1000, 2200) == -1,
+          "the gap is on no planet");
+    // Globe of B: only B drawn, at the camera.
+    Globe::View v;
+    v.current = 1, v.t = 1, v.lookX = 2800, v.lookZ = 3300, v.focusX = 0.7f;
+    Globe::Params p;
+    Check(Globe::MakeParams(s, pl, 5632, v, &p) && p.kind(0) == 0.0f && p.kind(1) == 1.0f && p.current() == 1, "globe: the current planet only");
+    float rs = 5632.0f / (2.0f * 3.14159265f);
+    Check(Near(p.centre(1)[3], rs, 0.1f) && Near(p.centre(1)[0], 2800, 0.01f) && Near(p.centre(1)[1], -rs, 0.1f), "its sphere under the camera");
+    float lo[3] = {2800, 0, 3300}, lb[3];
+    Globe::Bend(p, 1, lo, lb);
+    Check(Near(lb[0], 2800, 0.05f) && Near(lb[1], 0, 0.05f) && Near(lb[2], 3300, 0.05f), "its look-at on top");
+    // Overview just begun: the same picture (the current planet as the globe), the other beside it.
+    Globe::Params q;
+    v.p = 0.0001f;
+    Check(Globe::MakeParams(s, pl, 5632, v, &q) && q.kind(0) == 1.0f && q.kind(1) == 1.0f, "overview: every planet drawn");
+    Check(Near(q.centre(1)[0], p.centre(1)[0], 1.0f) && Near(q.centre(1)[3], p.centre(1)[3], 1.0f) && q.centre(0)[0] < q.centre(1)[0] - 1.3f * rs,
+          "from the globe to the overview without a jump; A to the west");
+    // The whole overview: both fit the view at its full height.
+    v.p = 1.0f, v.focusX = 0.0f;
+    Check(Globe::MakeParams(s, pl, 5632, v, &q), "full overview");
+    float halfH = 3000 * 0.41421356f, halfW = halfH * 16.0f / 9.0f;
+    bool fits = true;
+    for (int i = 0; i < 2; ++i)
+        fits = fits && fabsf(q.centre(i)[0] - v.lookX) + q.centre(i)[3] <= halfW && fabsf(q.centre(i)[2] - v.lookZ) + q.centre(i)[3] <= halfH;
+    Check(fits && q.centre(0)[3] < rs, "the layout fits the view (smaller than the globe)");
+    Check(Near(q.overview(), 1.0f, 1e-6f) && q.b[2] > 0.99f, "names at full strength");
+    // Picking in the overview: straight down onto A's top finds A's look-at point.
+    float o[3] = {q.centre(0)[0], 3000, q.centre(0)[2]}, d[3] = {0, -1, 0}, flat[2];
+    bool hit = false;
+    Check(Globe::RayPlanet(q, o, d, nullptr) == 0, "the ray finds A");
+    Check(Globe::Unbend(q, 0, o, d, flat, &hit) && hit && Near(flat[0], 2816, 1.0f) && flat[1] > 0 && flat[1] < 2048, "and A's map under it");
+    // B with its image: shown as the image (a disc) from half way.
+    pl[1].image = true;
+    v.p = 0.7f;
+    Globe::MakeParams(s, pl, 5632, v, &q);
+    Check(q.kind(1) == 2.0f && q.kind(0) == 1.0f, "an image planet becomes its image");
+    float ob[3] = {q.centre(1)[0], 3000, q.centre(1)[2]};
+    Check(Globe::RayPlanet(q, ob, d, nullptr) == 1 && !Globe::Unbend(q, 1, ob, d, flat, &hit), "its disc is hit, but holds no map");
 }
 
 static void TestSettings() {
@@ -131,18 +206,18 @@ static void TestSettings() {
         Check(pc.empty() && c.polarCapNorth == 70 && c.polarCapSouth == -70 && c.polarColor[0] == 0.5f && c.polarColor[2] == 0.7f,
               "polar caps read");
         Globe::Params cp;
-        Globe::MakeParams(c, 5632, 2048, 1.0f, 1000, 1024, &cp);
-        Check(cp.d[3] == 0.0f, "no polar seas while the map reaches both poles");
+        MakeOne(c, 5632, 2048, 1.0f, 1000, 1024, &cp);
+        Check(cp.pl[7][1] == 0.0f, "no polar seas while the map reaches both poles");
         Globe::ParseFile("globe = { north = 80 south = -60 polar_cap_north = 84 polar_cap_south = -68 "
                          "polar_sea_color = { 0.1 0.2 0.3 } }", "t", &c, &pc);
         Check(pc.empty() && c.polarSeaColor[1] == 0.2f, "polar seas read");
-        Globe::MakeParams(c, 5632, 2048, 1.0f, 1000, 1024, &cp);
+        MakeOne(c, 5632, 2048, 1.0f, 1000, 1024, &cp);
         float zPerDeg = 2048.0f / 140.0f;
-        Check(cp.d[3] == 1.0f && Near(cp.d[0], 144 * zPerDeg, 0.5) && Near(cp.d[1], -8 * zPerDeg, 0.5) && cp.f[2] == 0.3f,
+        Check(cp.pl[7][1] == 1.0f && Near(cp.pl[4][0], 144 * zPerDeg, 0.5) && Near(cp.pl[4][1], -8 * zPerDeg, 0.5) && cp.f[2] == 0.3f,
               "polar seas and ice placed beyond the map's edges");
         Globe::ParseFile("globe = { polar_cap_north = 75 polar_cap_south = -50 }", "t", &c, &pc);
-        Globe::MakeParams(c, 5632, 2048, 1.0f, 1000, 1024, &cp);
-        Check(cp.d[0] == 2048.0f && cp.d[1] == 0.0f, "ice never over the map");
+        MakeOne(c, 5632, 2048, 1.0f, 1000, 1024, &cp);
+        Check(cp.pl[4][0] == 2048.0f && cp.pl[4][1] == 0.0f, "ice never over the map");
         Globe::ParseFile("globe = { polar_cap_color = { 2 0 0 } }", "t", &c, &pc);
         Check(pc.size() == 1, "bad cap colour refused");
     }
@@ -219,7 +294,7 @@ static int TestCompile(const std::string& dir) {
         if (mainAt == std::string::npos) continue;
         mainAt = src.rfind('\n', mainAt);
         int n = 0;
-        int mode = compiled % 4;  // every variant gets compiled across the files
+        int mode = compiled % 5;  // every variant gets compiled across the files
         std::string out = src.substr(0, mainAt) + Globe::HlslCode() + Globe::PatchVertexCode(src.substr(mainAt), mode, &n);
         ID3DBlob *code = nullptr, *msg = nullptr;
         HRESULT hr = compile(out.data(), out.size(), fd.cFileName, nullptr, nullptr, "main", "vs_5_0", 0, 0, &code, &msg);
@@ -285,6 +360,7 @@ static int TestCompilePixel(const std::string& dir) {
 int main(int argc, char** argv) {
     TestMaths();
     TestSettings();
+    TestPlanets();
     TestPatch();
     if (argc >= 2) TestRealFiles(argv[1]);
     if (argc >= 3) TestCompile(argv[2]);
