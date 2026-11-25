@@ -11,6 +11,13 @@ A–F; NOTES.md has the findings and test results behind each.
   (185/185) and every code shape (97/97) matches at the same address as on 1.20 (checked offline on
   a copy). The vanilla files the loader patches are unchanged. No code changes. Not yet tested in
   game on this build.
+- **Railway UI opt-in** (`railway_queue`; NOTES.md H8). The loader now leaves the railway UI
+  vanilla until a mod sets the global flag `hoi4_loader_railway_dismantling`: without it there is
+  no Alt+Shift dismantling on the railway map, no green marker on railway build entries, no badge
+  splitting by level, no partial-line badges and no railway hover outline. Script commands and
+  dismantle entries a mod queues work as before. **Players:** update HoI4Mod Loader: Railway
+  Dismantle (it sets the flag); with an older copy of it, Alt+Shift dismantling is off. The test
+  mod sets the flag at `on_startup` and has decisions to clear and set it.
 
 ## 0.7.1-beta (2026-11-23), script version 3
 

@@ -224,8 +224,50 @@ const char* const kRuleFlags[] = {"hoi4_loader_railway_dismantle_allies", "hoi4_
                                   "hoi4_loader_railway_dismantle_overlord"};
 int g_ruleTokens[3] = {};
 
+// The opt-in: without the global flag hoi4_loader_railway_dismantling the loader changes nothing a
+// player sees on vanilla railways (no Alt+Shift on the map, no marker on build entries, badges as
+// the engine builds them). Dismantle entries a mod queues still work and show as such.
+const char kOptInFlag[] = "hoi4_loader_railway_dismantling";
+int g_optInToken = 0;
+
 void InternRuleFlags() {
     for (int i = 0; i < 3; ++i) g_ruleTokens[i] = Engine::Intern(kRuleFlags[i]);
+    g_optInToken = Engine::Intern(kOptInFlag);
+}
+
+bool ReadOptIn() {
+    bool on = false;
+    if (g_optInToken)
+        Engine::ForEachGlobalFlag(
+            [](const Engine::FlagEntry& f, void* ctx) {
+                if (f.token == g_optInToken) *(bool*)ctx = true;
+            },
+            &on);
+    return on;
+}
+
+// When the flag counts: at game entry everywhere (a new game after on_startup, a loaded save, a hot
+// join); in single player also mid-game, read every 30 frames (a decision or the console counts
+// within a second). In multiplayer only at game entry, so every machine changes at the same point.
+std::atomic<bool> g_optInLive{false};  // single player: the frame read is on
+int g_optInFrames = 0;
+
+void OptInEntering() {
+    g_optInLive.store(false);
+    Engine::SetRailwayDismantleUi(false);  // no previous game's choice during the entry
+}
+
+void OptInEntered(bool) {
+    const char* why = "";
+    g_optInLive.store(SessionAllowsLocalWrites(&why));
+    bool on = ReadOptIn();
+    Engine::SetRailwayDismantleUi(on);
+    if (!on) Log("railway_queue: %s not set; railway UI stays vanilla (dismantle entries a mod queues still work)", kOptInFlag);
+}
+
+void OptInFrame() {
+    if (!g_optInLive.load() || Engine::GameDateHours() <= 0 || ++g_optInFrames % 30) return;
+    Engine::SetRailwayDismantleUi(ReadOptIn());
 }
 
 int ReadRules() {
@@ -318,8 +360,11 @@ bool RailwayQueueInit() {
     if (Engine::HookRailwayTooltip()) Engine::HookRailwayEntryTitle();
     // Optional too: Alt+Shift on the railway map badges (needs the main-thread queue to defer clicks).
     if (MainThreadQueueAvailable()) Engine::HookRailwayMapIcons(&OnIconClick);
-    // Allies / subjects / overlord: the game rules' global flags.
+    // The opt-in flag, and allies / subjects / overlord: the game rules' global flags.
     OnLexerReady(&InternRuleFlags);
+    OnGameEntering(&OptInEntering);
+    OnGameEntered(&OptInEntered);
+    if (MainThreadQueueAvailable()) OnMainThreadFrame(&OptInFrame);
     Engine::SetRailwayDismantleRules(&ReadRules);
     Engine::SetRailwayDismantleCost(&ReadCostPercent);
     register_native_effect({"queue_railway_dismantle",

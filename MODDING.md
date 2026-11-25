@@ -40,7 +40,7 @@ Current features:
 | `create_army` | engine (needs `lifecycle`) | `hoi4_loader_plugin_create_army` | `create_army`: spawn divisions as an army under a chosen general, see below |
 | `add_to_army` | engine (needs `create_army`) | `hoi4_loader_plugin_add_to_army` | `add_to_army`: put a division into a general's army, see below |
 | `railways` | engine (needs `lifecycle`) | `hoi4_loader_plugin_railways` | `downgrade_railway`: lower or remove a railway; `has_railway_between` trigger, see below |
-| `railway_queue` | engine (needs `railways`) | `hoi4_loader_plugin_railway_queue` | `queue_railway_dismantle`: dismantling as a construction queue entry, see below |
+| `railway_queue` | engine (needs `railways`) | `hoi4_loader_plugin_railway_queue` | `queue_railway_dismantle`: dismantling as a construction queue entry; Alt+Shift dismantling on the railway map only once a mod sets `hoi4_loader_railway_dismantling`, see below |
 | `time_control` | engine (needs `lifecycle`) | `hoi4_loader_plugin_time_control` | `force_game_speed`, `release_game_speed`, `hide_date_display`, `hide_time_controls`, `has_forced_game_speed`: lock the game speed (and the pause) for a while, hide the top bar's date; single player, see below |
 | `province_building_removal` | engine (needs `lifecycle`) | `hoi4_loader_plugin_province_building_removal` | a removal cross on the state view's province buildings (supply hub, naval base, bunkers); no script commands, see below |
 | `equipment_conversion` | engine (needs `lifecycle`) | `hoi4_loader_plugin_equipment_conversion` | tools a mod switches on with global flags: "Convert from Stockpile" from every earlier generation, a cost factor, "same role only"; off until a mod sets them, see below |
@@ -988,6 +988,29 @@ has_railway_between = { start_province = 6521 target_province = 6282 min_level =
   listed 1.19.3 builds; there the feature may report missing signatures and stay off.
 
 ### Dismantling through the construction queue (`railway_queue`)
+
+**The railway UI stays vanilla until a mod opts in.** Without the global flag
+`hoi4_loader_railway_dismantling` the loader changes nothing a player sees on vanilla railways:
+
+| With `hoi4_loader_railway_dismantling` set | Without it (vanilla) |
+|---|---|
+| Alt+Shift on the railway map shows the removal cross; Alt+Shift+click queues dismantling | Alt+Shift+click is vanilla's (maximum level, last in the queue) |
+| Railway build entries in the queue start with a green up triangle | Build entries' titles as vanilla |
+| Badges are split where the railway level changes | Badges as the engine builds them (a merged stretch shows its lowest level) |
+| A badge shows and changes a queued line that covers only part of its segment | Only lines for exactly the badge's segment |
+| The `attention_area` hover outline on railway queue entries | No outline |
+
+What stays on without the flag, since only a mod creates it: `downgrade_railway`,
+`has_railway_between`, `queue_railway_dismantle`, and the display of dismantle entries (their
+daily progress and cost, the red down triangle, the "Dismantling" tooltip, a badge showing the
+segment being dismantled and its click and right click to dismantle less).
+
+- **Set it** at `on_startup` (global flags are saved with the game), from a game rule or
+  unconditionally. The separate mod **HoI4Mod Loader: Railway Dismantle** does that. Setting it
+  on a loader without this switch is harmless.
+- **When a change counts:** at game entry everywhere (a new game after `on_startup`, a loaded
+  save, a hot join). In single player also mid-game: the loader reads it every 30 frames, so a
+  decision or the console counts within a second. In multiplayer only at game entry.
 
 ```
 queue_railway_dismantle = { start_province = 6521 target_province = 6282 }             # one level
