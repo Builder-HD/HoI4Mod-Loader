@@ -218,6 +218,7 @@ def check(path, codes):
     results += check_map_adjacency(img, codes, text_va, text)
     results += check_globe(img, codes, text_va, text)
     results += check_large_map(img, codes, text_va, text)
+    results += check_camera_range(img, codes, text_va, text)
     return results
 
 
@@ -989,6 +990,29 @@ def check_large_map(img, codes, text_va, text):
                                  for n, v in [(n, (lambda mm: mm[0] if len(mm) == 1 else None)(
                                      [text_va + x.start() for x in cs.compile_pattern(sigs[n]).finditer(text)]))
                                      for n in ('kSigTerrainBlocksBuild', 'kSigTerrainBlocksCamera')]]]
+
+
+def check_camera_range(img, codes, text_va, text):
+    """camera_range (NOTES.md Part T): the engine camera's fov, aspect, near and far 4 bytes apart; the
+    map camera's constructor reads CAMERA_MAX_HEIGHT (a float in .data) and stores it 4 past the minimum."""
+    hdr = pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h'
+    sigs, _ = cs.load_signatures(hdr)
+    sigs, k = dict(sigs), load_constants(hdr)
+    u32 = lambda va: struct.unpack_from('<I', img.d, img.va2off(va))[0]
+
+    def one(name):
+        m = [text_va + x.start() for x in cs.compile_pattern(sigs[name]).finditer(text)]
+        return m[0] if len(m) == 1 else None
+
+    f, c = one('kSigCameraFar'), one('kSigCameraMaxHeight')
+    if not (f and c):
+        return [('kSigCameraFar / kSigCameraMaxHeight', False, 'missing')]
+    fov, asp, nr, far = (u32(f + k[n]) for n in ('kSigCameraFovDisp', 'kSigCameraAspectDisp', 'kSigCameraNearDisp', 'kSigCameraFarDisp'))
+    mn, mx = u32(c + 3), u32(c + 28)
+    define = c + k['kSigCameraMaxHeightInsn'] + 8 + i32(img, c + k['kSigCameraMaxHeightInsn'] + 4)
+    return [('kSigCameraFar (fov +0x%x, aspect +0x%x, near +0x%x, far +0x%x)' % (fov, asp, nr, far),
+             asp == fov + 4 and nr == asp + 4 and far == nr + 4, hex(f)),
+            ('kSigCameraMaxHeight (min +0x%x, max +0x%x, define %s)' % (mn, mx, hex(define)), mx == mn + 4, hex(c))]
 
 
 def check_province_terrain(img, codes, text_va, text):

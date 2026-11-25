@@ -162,3 +162,4 @@ bool EquipmentConversionInit();  // plugin_equipment_conversion.cpp
 bool AttentionAreaInit();        // plugin_attention_area.cpp
 bool GlobeInit();                // plugin_globe.cpp
 bool LargeMapInit();             // plugin_large_map.cpp
+bool CameraRangeInit();          // plugin_camera_range.cpp

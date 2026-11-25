@@ -1508,6 +1508,17 @@ static const size_t kSigTerrainBlocksBuildShift1 = 10, kSigTerrainBlocksBuildShi
 SIG(kSigTerrainBlocksCamera, "44 0F B6 E2 44 03 E0 41 8B 40 44 99 41 C1 FC 08 0F B6 CA 03 C8 41 8B 40 40 99 C1 F9 08 41 F7 FC")
 static const size_t kSigTerrainBlocksCameraShift1 = 15, kSigTerrainBlocksCameraShift2 = 28;
 
+// --- camera_range (NOTES.md Part T; addresses 1.20) -----------------------------------------------
+// The engine camera's set-up (FUN_142358c50(cam, fov, aspect, near, far)): `mov rcx, rbx; movss
+// [rbx+0x1b0], xmm0 (far); movss [rbx+0x1a4], xmm4 (fov); movss [rbx+0x1a8], xmm2 (aspect); movss
+// [rbx+0x1ac], xmm3 (near)`. The far plane (4000, a constant) is read back by the projection's rebuild.
+SIG(kSigCameraFar, "48 8B CB F3 0F 11 83 ?? ?? 00 00 F3 0F 11 A3 ?? ?? 00 00 F3 0F 11 93 ?? ?? 00 00 F3 0F 11 9B ?? ?? 00 00 C7 83")
+static const size_t kSigCameraFarDisp = 7, kSigCameraFovDisp = 15, kSigCameraAspectDisp = 23, kSigCameraNearDisp = 31;
+// The map camera's constructor (FUN_1412f3690): `mov [r14+0x6d0], eax (min height); cvttss2si eax,
+// [rip+CAMERA_MAX_HEIGHT]; mov word [r14+0x6d8], 0; mov [r14+0x6d4], eax (max height)`.
+SIG(kSigCameraMaxHeight, "41 89 86 ?? ?? 00 00 F3 0F 2C 05 ?? ?? ?? ?? 66 41 C7 86 ?? ?? 00 00 00 00 41 89 86 ?? ?? 00 00")
+static const size_t kSigCameraMaxHeightInsn = 7;
+
 #undef CODE
 #undef SIG
 #undef ANCHOR
