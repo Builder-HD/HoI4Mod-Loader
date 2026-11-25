@@ -8360,3 +8360,113 @@ Use the normal HoI4 font. You can hook into the max scroll, add general stuff to
   camera's three engine cameras get far = define x 4/3 when theirs is less. Tested: with 6000 the
   camera reached it, `far plane 8000 instead of 4000`, both planets whole. The planets test now
   raises the define to 6000 (`common/defines/zz_hoi4_loader_planets.lua`), the overview from 2600 to 6000.
+
+# Part U: space, a navy between the planets (plan)
+
+Owner's request (2026-11-25): "a new kind of mode similar to navy mode, with spaceships. If you zoom
+out enough you see it; it should work like the navy, with space zones as sea zones and provinces in
+them, spaceships assigned to missions there as in the sea zones. You either scroll out further so the
+planets appear smaller, or the planets get smaller when you zoom out. Use normal ship models for now.
+Where the planets are there are no space zones (spaceships can't fly there)."
+
+Owner's choices (2026-11-25): spaceports in orbit; the space map the size of one planet (a generator
+option, to change later); a starfield with the zones' borders; regular ships never enter space,
+spaceships never land. **Later features, not in this part:** supply ships that carry supplies from
+one planet to another, and troop carriers with space invasions ("you can't defend a whole planet, but
+you can defend the space outside it").
+
+## U1: the idea: space is more map
+
+The engine's navy works on sea provinces, sea strategic regions (missions are given per region),
+naval bases, fleets and ship equipment. Space is made of exactly these, so all of it works natively
+(movement, missions, combat, repairs, the naval UI, the AI):
+
+- **The space map:** a rectangle of the map (as a planet is) filled with sea provinces; their strategic
+  regions are the space zones. Each planet has a **hole** in it, at the place where it is shown.
+- **Spaceports:** around each hole a ring of land provinces, an "orbit" state owned by the planet's
+  owner, with naval bases: spaceships are deployed, based and repaired there. The ring touches only
+  space provinces, so no division walks there and no regular ship sails there.
+- **Kept apart by the map:** no adjacency links a planet's seas to space (the lake gaps), so regular
+  ships cannot enter space and spaceships cannot land. One rule is the loader's (U4): a new ship is
+  deployed only at its kind of base (spaceships at spaceports, regular ships at planet ports).
+- **Spaceships:** new ship hull archetypes and ship units in script (as `ship_hull_light` and the
+  vanilla ships are made), normal ship models for now, their own technologies.
+
+## U2: the camera: the overview becomes the space map
+
+The Part T overview (planets floating in space) is replaced by the space map when a mod defines one:
+
+- **Over space** the camera is an ordinary flat camera over the space rectangle: the game draws the
+  space provinces, their borders, the fleet counters, the mission map mode, selection and picking as
+  over any sea. The loader draws each planet as a disc (as in the overview) in its hole, with its name.
+- **Planet -> space:** zooming out past a planet's globe, the camera moves to the planet's hole in the
+  space map at the height at which the disc there looks exactly as the globe did (camera height x hole
+  radius / globe radius): no jump. From there on it zooms out over the space map as over a map.
+- **Space -> planet:** zooming in over a planet's disc below that height, the camera goes back to the
+  planet's globe (the reverse), then its flat map.
+- So both readings of "zoom out further / planets get smaller" hold: the space map is zoomed like a
+  map, and a planet shrinks into its hole on the way.
+- **Look:** in the space rectangle the terrain's pixels show the background image (space.png) instead
+  of land and water, the game's water is not drawn there, and the borders of provinces and zones stay
+  (as the sea's in the naval map mode).
+
+## U3: settings (draft)
+
+```
+globe = {
+	space = { x = 0  y = 4608  width = 5632  height = 2048 }   # the space map (map pixels)
+	planet = {
+		name = PLANET_EARTH_A
+		x = 0  y = 0  width = 5632  height = 2048
+		orbit = { x = 1500  y = 5632  radius = 160 }   # its hole in the space map (centre, radius)
+	}
+	...
+}
+```
+
+Without `space` the Part T overview stays as it is.
+
+## U4: the loader's part
+
+1. Settings (`space`, `orbit`), the shaders: the space rectangle flat with the background, the planets
+   drawn as discs in their holes while the camera is over space, the names on them.
+2. The camera switch between a planet's globe and its hole in the space map (both ways), picking over
+   space (the game's own, it is flat) and on the discs.
+3. Deployment: find where the game picks the naval base a new ship goes to (production, "deploy at")
+   and allow only bases of the ship's kind (spaceship = its hull archetype is one of the mod's space
+   hulls, from a setting; spaceport = a naval base in the space rectangle). Signatures on 1.20,
+   1.19.5, 1.19.4.2; fail-safe (without them: logged, ships may be deployed at the wrong kind of base,
+   and they would then be stuck there).
+
+## U5: the test content (generator)
+
+`tools/make_planets_map.py --space <width>x<height>` (default: one planet's size) adds:
+- the space band (lake gaps around it, as between the planets), filled with sea provinces of about
+  vanilla's sea province size (a jittered grid), grouped into space zones (strategic regions of about
+  30 provinces), no weather;
+- per planet a hole (a lake disc) at its place, ringed by orbit land provinces in one state owned by the
+  planet's country, with a naval base and a dockyard-free port;
+- the spaceship hulls (light, cruiser, heavy, carrier copies of vanilla's hulls under new names),
+  spaceship units and a technology that gives them, localisation;
+- the globe settings: `space`, each planet's `orbit`.
+
+## U6: questions for the first test
+
+1. Does the engine take sea provinces and naval regions that touch no other sea (only their orbit
+   ports)? Naval missions, combat and the AI there.
+2. A state of a few orbit provinces with a naval base: ships deployed there, repaired, based.
+3. New hulls in the naval designer from script alone (the designer, the equipment variants, the
+   production line).
+4. The camera switch: setting the camera's position and height directly (the map camera's eye and its
+   target, as GlobeShiftCamera moves them) without the game's zoom fighting it.
+5. Where the deployment location is checked (U4.3).
+
+## U7: steps (each its own commits; the owner tests in game after each)
+
+1. Generator: the space band, holes, orbit states, the spaceship hulls and units; load test and the
+   naval part by hand (build a spaceship, deploy it at a spaceport, give a mission in a space zone).
+2. Loader: settings, the space look, the planets in their holes, the camera switch, picking.
+3. Loader: deployment by kind.
+4. Docs, tests, the test decisions.
+- Still open from Part T: keeping planes and non-walking unit moves on their planet (T7 step 3).
+- Later parts: supply ships between planets; troop carriers and space invasions.
