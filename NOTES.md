@@ -7740,7 +7740,7 @@ game by us. Branch `feature/globe`, from main at #33 (0.7.1-beta). Analysed on a
 ## S1: what vanilla has
 
 - A flat map, 5632 x 2048 world units (x east, z north, y up; heights in y). It wraps east-west.
-- Camera heights 50..3000 (`NGraphics CAMERA_MIN_HEIGHT / CAMERA_MAX_HEIGHT`), vertical FOV
+- Camera heights 50..3000 (`NFrontend CAMERA_MIN_HEIGHT / CAMERA_MAX_HEIGHT`), vertical FOV
   0.785 rad (45 degrees), near plane 5, far plane 4000 (constants in the exe, see S2).
 - Nothing round anywhere. The main menu camera turns around a point (`CAMERA_LOOKAT_X/Y/Z`, "Rotation
   point in main menu"), over the same flat map.
@@ -8325,3 +8325,38 @@ Three zoom levels, driven by the camera's height:
   cursor; zooming in over empty space below the middle glided to Earth A; hovering in the overview
   found provinces (sea zone tooltips); flat, the camera stops at each planet's edges. The vanilla map
   with the test mod (no planet blocks) is the one globe as before, `large_map` left alone.
+
+## T11: owner's points on the overview (2026-11-25)
+
+Owner: "if I zoom out to the planet selection and zoom in again, first it turns the planet in a weird
+way instead of showing it the way it was; zooming in and then turning it with the middle mouse button
+jolts back to where you zoomed. When the other planet disappears you should be able to move around.
+Use the normal HoI4 font. You can hook into the max scroll, add general stuff to the loader."
+
+- **No turn on zooming in:** the turn toward the cursor (a goal 40% of the way per step, animated) is
+  gone; a planet zoomed into keeps the face it showed. The jolt was that animation pulling the camera
+  back to its goal against the drag.
+- **Moving once alone:** the camera's own rays point straight at the look-at only while another planet
+  is on screen (its disc within the view: |offset| - radius below half the view's width / height at
+  the camera's height); otherwise they are the game's, so dragging, edge panning and zooming toward
+  the cursor turn the planet as on the globe. Tested: drags across and down turned Earth B (Africa to
+  the Americas, then toward the pole), nothing snapped back; with Earth A still on screen drags do
+  nothing.
+- **The game's map names** are now dropped as soon as the overview shows at all (they came back half
+  way while the planet names were still faint).
+- **Font:** the map names' font is `gfx/fonts/hoi_mapfont4` (interface/core.gfx): a BMFont text `.fnt`
+  (Tahoma bold 84, lineHeight 84, base 70, 575 characters, kerning) with a 2048 x 1024 uncompressed
+  32-bit `.dds`. The game's mapname.shader uses the texture's RGBA as it is (the glyphs carry a dark
+  core, alpha about 0.5..0.75, and a light low-alpha rim), so the names texture now holds the font's
+  RGBA and the shader returns it times the names' fade. Read from the copy the game loads (mods first);
+  key `name_font`; GDI Georgia (dark core, light widened rim) as the fallback.
+- **camera_range (new feature, general):** `NFrontend.CAMERA_MAX_HEIGHT` (not NGraphics: the first test
+  named the wrong table and nothing changed) is read by the map camera's constructor (1.20
+  FUN_1412f3690: `cvttss2si eax, [rip+define]; mov [r14+0x6d4], eax`, `kSigCameraMaxHeight`, which also
+  gives the define's address). The far plane is set by the engine camera's set-up (FUN_142358c50(cam,
+  fov, aspect, near, far): `movss [rbx+0x1b0], xmm0`, `kSigCameraFar`) from a shared 4000.0
+  (0x1429ccb94, also read by the edge clamp and others, so not patched) and read back by the
+  projection's rebuild (FUN_142359750 / FUN_142359cd0) on every camera update. Each frame the in-game
+  camera's three engine cameras get far = define x 4/3 when theirs is less. Tested: with 6000 the
+  camera reached it, `far plane 8000 instead of 4000`, both planets whole. The planets test now
+  raises the define to 6000 (`common/defines/zz_hoi4_loader_planets.lua`), the overview from 2600 to 6000.

@@ -52,6 +52,7 @@ Current features:
 | `map_adjacency` | engine (needs `lifecycle`) | `hoi4_loader_plugin_map_adjacency` | `set_province_adjacency`, `reset_province_adjacency`, `province_adjacency_passable`, `set_state_impassable`, `reset_state_impassable`: close and open borders between provinces and whole states at runtime (as `map/adjacencies.csv`'s and `history/states`' impassable), saved, see below |
 | `attention_area` | engine (needs `lifecycle`) | `hoi4_loader_plugin_attention_area` | `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area`: mark any set of provinces on the map (a line and a fill shader each, built-in or a mod's own) and move the camera to it; display only, not saved, see below |
 | `globe` | engine (needs `lifecycle`) | `hoi4_loader_plugin_globe` | the map as a planet when zoomed out, turned on by a mod's `common/hoi4_loader_globe/` file; `set_globe_view` (saved), `is_globe_view`; display only, DX11 only, see below |
+| `camera_range` | engine (needs `lifecycle`) | `hoi4_loader_plugin_camera_range` | a raised `NFrontend.CAMERA_MAX_HEIGHT` works: the map camera's far plane follows it, see below |
 | `large_map` | engine | `hoi4_loader_plugin_large_map` | maps with more pixels than vanilla's (more than about 5632 x 2327): the engine's 50 MB map scratch buffer is sized to the map, see below |
 
 On an unknown build the file tier stays on, the engine tier is off, and `loader.log` lists the
@@ -168,6 +169,7 @@ when the loader is missing or a feature is off. Without them, using a loader tri
 | `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area` | `scripted_triggers/hoi4_loader_feature_attention_area.txt` |
 | `set_globe_view`, `is_globe_view` | `scripted_triggers/hoi4_loader_feature_globe.txt` |
 | `large_map` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_large_map.txt` |
+| `camera_range` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_camera_range.txt` |
 
 - **Combinations:** a block that combines features needs each feature's stub and guard, e.g.
   `air_superiority` inside `strategic_region` needs both `region_control` and `region_scope`.
@@ -2250,7 +2252,9 @@ globe = {
 	polar_cap_color = { 0.72 0.77 0.82 }   # optional: the ice's colour (red green blue, 0..1)
 	polar_sea_color = { 0.14 0.19 0.27 }   # optional: the polar seas' colour
 	overview_height = 2500        # optional: from here all planets are shown (see "Planets")
-	overview_full_height = 3000   # the whole overview fits the view here (vanilla's highest camera)
+	overview_full_height = 3000   # the whole overview fits the view here (vanilla's highest camera;
+	                              # NFrontend.CAMERA_MAX_HEIGHT can raise it, see camera_range)
+	name_font = "gfx/fonts/hoi_mapfont4"   # optional: the planets' names (the game's map font)
 	planet = { ... }              # optional, up to 16 (see "Planets"); none: the whole map is one
 }
 ```
@@ -2335,12 +2339,19 @@ planet = {
   game writes country names. The game's own country and state names are hidden there. Zooming out
   further shrinks the layout until all of it fits at `overview_full_height`.
 - **Switching:** zoom in (the wheel) over a planet in the overview: it becomes the planet the camera is
-  on, and each step turns it part of the way toward the point under the cursor, down to its globe and
-  its flat map. Zooming in over empty space pulls toward the closest planet, a little more with each
-  step. Hovering and clicking find provinces on every planet shown.
+  on, shown as it was in the overview (it does not turn), down to its globe and its flat map. Zooming
+  in over empty space pulls toward the closest planet, a little more with each step. While another
+  planet is on screen the camera holds still (dragging would turn the planet under the others); once
+  the others are out of sight, dragging, edge panning and zooming toward the cursor work as on the
+  globe. Hovering and clicking find provinces on every planet shown.
 - Without `planet` blocks the whole map is one planet (everything as above, nothing else changes).
 - The images go in one texture of 512 x 512 cells (any size is scaled; transparency is kept). The
-  names are drawn by the loader (bold serif, upper case, outlined) from the planets' `name` keys.
+  names are laid out by the loader from the planets' `name` keys in the game's map font (`name_font`, a
+  BMFont `.fnt` with an uncompressed 32-bit `.dds`, the copy the game would load: a mod's first), upper
+  case, in the font's own colours as the game's country names are; Georgia if the font cannot be read.
+- **Room for the overview:** vanilla's camera stops at 3000. A mod that raises
+  `NDefines.NFrontend.CAMERA_MAX_HEIGHT` (e.g. to 6000) gets a longer overview; `camera_range` moves the
+  far plane with it.
 
 **Limits:**
 - DirectX 11 only (the Windows default). With the DX9 or OpenGL renderer the map stays flat
@@ -2367,6 +2378,15 @@ planet = {
 `gfx/hoi4_loader_test/space.png`, which is not in the
 repository: put any image there; decisions in `common/decisions/hoi4_loader_test_globe_decisions.txt`): "Globe: flat map",
 "Globe: back to the globe", "Globe: status (see game.log)".
+
+## Camera range (`camera_range`)
+
+A mod may raise how far the camera zooms out (`NDefines.NFrontend.CAMERA_MAX_HEIGHT`, vanilla 3000),
+but the map camera's far plane is fixed at 4000 in the game, so from about 3000 up the far side of
+the map is cut off. With the loader the far plane follows the define (vanilla's ratio: 4/3 of the
+highest camera; 6000 gives 8000). Nothing to turn on; at vanilla's height nothing changes. `loader.log`:
+`camera_range: CAMERA_MAX_HEIGHT 6000: the map camera's far plane 8000 instead of 4000` (in the first
+game frame).
 
 ## Large maps (`large_map`)
 

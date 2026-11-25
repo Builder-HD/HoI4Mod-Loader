@@ -6,6 +6,10 @@ A–F; NOTES.md has the findings and test results behind each.
 
 ## Unreleased
 
+- **New feature `camera_range`** (engine tier, needs `lifecycle`; guard
+  `hoi4_loader_feature_camera_range`; MODDING.md "Camera range"). A mod's raised
+  `NFrontend.CAMERA_MAX_HEIGHT` works: the map camera's far plane (fixed 4000) follows it. 2 new
+  signatures, checked on 1.20, 1.19.5 and 1.19.4.2; tested in game on 1.20 with 6000.
 - **New feature `large_map`** (engine tier; guard `hoi4_loader_feature_large_map`; NOTES.md Part T,
   MODDING.md "Large maps"). Maps larger than vanilla's: the engine's fixed 50 MB map scratch buffer,
   its 16 MB texture file limit and its 256 terrain blocks are sized to the map the game will load
@@ -19,7 +23,8 @@ A–F; NOTES.md has the findings and test results behind each.
   name x y width height north south polar_cap_* overview = { x y size } image }` blocks (up to 16) make
   rectangles of the map separate worlds: the flat camera stays on its planet, the globe is that
   planet's, and from `overview_height` all planets are shown at their places with their names curved
-  across them (or a mod's image); zooming in over one goes to it, landing where the cursor points.
+  across them in the game's map font (or a mod's image); zooming in over one goes to it as it was
+  shown, and the camera moves freely once the other planets are out of sight.
   Without planet blocks the whole map is one planet, as before.
 - **New feature `globe`** (engine tier, needs `lifecycle`; guard `hoi4_loader_feature_globe`; NOTES.md
   Part S, MODDING.md "Globe view"). The map as a planet: zoomed out far enough that the flat view
