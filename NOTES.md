@@ -8383,23 +8383,38 @@ naval bases, fleets and ship equipment. Space is made of exactly these, so all o
 
 - **The space map:** a rectangle of the map (as a planet is) filled with sea provinces; their strategic
   regions are the space zones. Each planet has a **hole** in it, at the place where it is shown.
-- **The planet is the port:** each hole is filled by a hidden land province (a state owned by the
-  planet's country) with a naval base, covered by the planet's disc: nothing extra to see. Fleets based
-  there show as docked at the planet; spaceships are deployed, based and repaired "at the planet". It
-  touches only space provinces, so no division walks there and no regular ship sails there. (The
-  owner turned down a visible ring of spaceport provinces as silly.)
-- **Launch complex:** the hidden port's naval base is 0 until its country builds a new, very
-  expensive state building on the planet, the launch complex; the port's naval base level follows the
-  country's launch complexes on that planet (script, weekly: `set_building_level`), so how many
-  spaceships a planet can base and repair is a strategic investment. Owner: "make it a really
-  expensive building so you can't just easily slap it down".
+- **Spaceports are state buildings on the planet** (owner, 2026-11-25: "just make it a state building,
+  whoever owns the state can deploy ships; a planet can have multiple spaceports, so two can fight over
+  a planet and both send ships out"; and: "make it a really expensive building so you can't just
+  easily slap it down"). A visible ring of spaceport provinces around the planet was turned down as
+  silly.
+- **Hidden ports:** the engine bases ships at a naval base next to the sea they sail. So each hole in
+  the space map holds a pool of hidden land provinces (16 per planet, each its own state, naval base 0),
+  covered by the planet's disc: nothing extra to see; they touch only space provinces, so no division
+  walks there and no regular ship sails there. Each spaceport on the planet is given one of them: the
+  hidden port belongs to the owner of the spaceport's state and its naval base level follows the
+  spaceport's level. A captured spaceport state takes its hidden port along; a spaceport gone frees
+  its port. Kept in step by script (on construction finished, from the loader's engine_on_actions, and
+  weekly: `transfer_state`, `set_building_level`; the pairing in state variables). Fleets based there
+  show as docked at the planet.
 - **Kept apart by the map:** no adjacency links a planet's seas to space (the lake gaps), so regular
   ships cannot enter space and spaceships cannot land. One rule is the loader's (U4): a new ship is
   deployed only at its kind of base (spaceships at a planet's hidden port, regular ships at planet
   ports).
-- **Several countries on a planet (later):** a hole can hold several hidden port states, one handed to
-  each country that builds a launch complex there (`transfer_state`); with one country per planet now,
-  one port per planet.
+- **Missions** (owner, 2026-11-25: "space zones aren't 100% the same as sea zones, they should have
+  their own missions"). The engine's naval missions work in space zones as they are; renamed and tuned
+  for space they are the start: **patrol, strike force, raiding** ("basically blockading"), **escort,
+  training**. New missions, each engine work of its own (later parts):
+  - **Blockade a planet:** ships in the zones around a planet keep the enemy's spaceships from leaving
+    its spaceports (later its supply ships too).
+  - **Orbital bombardment:** ships over a planet support ground combat on it (planet-wide shore
+    bombardment).
+  - **Intercept:** ships attack enemy fleets entering the zone, a defensive screen.
+  - **Terrorize** (owner's own): "gives space superiority basically, but instantly runs away and
+    doesn't try attacking at all, also has a lot of debuffs for attack and defense, but they also lower
+    resistance and compliance by a small margin in planets close by; similar to patrol."
+- **Its own map mode** (a space view of fleets and zones, apart from the naval one) and **its own
+  control rules** (space superiority instead of naval supremacy): later parts too.
 - **Spaceships:** new ship hull archetypes and ship units in script (as `ship_hull_light` and the
   vanilla ships are made), normal ship models for now, their own technologies.
 
@@ -8455,10 +8470,10 @@ Without `space` the Part T overview stays as it is.
 - the space band (lake gaps around it, as between the planets), filled with sea provinces of about
   vanilla's sea province size (a jittered grid), grouped into space zones (strategic regions of about
   30 provinces), no weather;
-- per planet a hole at its place, filled by one hidden land province (its state owned by the planet's
-  country, naval base 0, no other buildings);
-- the launch complex (a state building, expensive, limited to the planet's states) and the weekly
-  script that sets each hidden port's naval base from its country's launch complexes on that planet;
+- per planet a hole at its place, filled by 16 hidden land provinces (each its own state, owned by the
+  planet's country for now, naval base 0, no other buildings);
+- the spaceport (a state building, very expensive, only on planets) and the script that pairs each
+  spaceport with a free hidden port of its planet and keeps owner and naval base level in step;
 - the spaceship hulls (light, cruiser, heavy, carrier copies of vanilla's hulls under new names),
   spaceship units and a technology that gives them, localisation;
 - the globe settings: `space`, each planet's `orbit`.
@@ -8467,8 +8482,8 @@ Without `space` the Part T overview stays as it is.
 
 1. Does the engine take sea provinces and naval regions that touch no other sea (only their orbit
    ports)? Naval missions, combat and the AI there.
-2. A one-province state in space with a naval base set by script: ships deployed there, repaired,
-   based; the base level following the launch complexes.
+2. One-province states in space whose naval base and owner are set by script: ships deployed there,
+   repaired, based; two countries' ports in the same hole.
 3. New hulls in the naval designer from script alone (the designer, the equipment variants, the
    production line).
 4. The camera switch: setting the camera's position and height directly (the map camera's eye and its
@@ -8477,11 +8492,13 @@ Without `space` the Part T overview stays as it is.
 
 ## U7: steps (each its own commits; the owner tests in game after each)
 
-1. Generator: the space band, the holes with their hidden ports, the launch complex, the spaceship
-   hulls and units; load test and the naval part by hand (build a launch complex, build a spaceship,
-   deploy it at the planet, give a mission in a space zone).
+1. Generator: the space band, the holes with their hidden ports, the spaceport and its script, the
+   spaceship hulls and units; load test and the naval part by hand (build a spaceport, build a
+   spaceship, deploy it at the planet, give a mission in a space zone).
 2. Loader: settings, the space look, the planets in their holes, the camera switch, picking.
 3. Loader: deployment by kind.
 4. Docs, tests, the test decisions.
 - Still open from Part T: keeping planes and non-walking unit moves on their planet (T7 step 3).
-- Later parts: supply ships between planets; troop carriers and space invasions.
+- Later parts: the new space missions (blockade a planet, orbital bombardment, intercept, terrorize),
+  the space map mode, space superiority; supply ships between planets; troop carriers and space
+  invasions.
