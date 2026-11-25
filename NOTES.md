@@ -8252,3 +8252,76 @@ province in Moravia, owner Earth A"); zoomed out, Earth A below and Earth B abov
 "Hearts of Iron IV" frame drawn at the bands' edges), each with its country name. error.log: only
 vanilla scripts for countries that do not exist here, and missing character names for the new tags
 (the generator now writes `common/names`).
+
+## T9: step 2 design, the planets and the overview (owner's choices, 2026-11-25)
+
+Owner: "when you zoom out enough, you get a 2D view of all the planets, you can put them all over, with
+the planet name spanning the planet." Choices: the mod places the planets in the overview; each shows
+as a flat disc (the planet seen from afar) or a mod's image, the mod chooses; the name curved across
+it like the game's country names; zooming in lands where the cursor points, and zooming into empty
+space pulls toward the closest planet a little more with each step.
+
+Three zoom levels, driven by the camera's height:
+- **Flat** (below the sphere rule): the flat map of the current planet; the camera stays inside its
+  rectangle (north-south clamped, east-west wrapped within the planet for planets narrower than the map).
+- **Globe** (as Part S): the current planet folds into its sphere; the others are not drawn.
+- **Overview** (from `overview_height` to `overview_full_height`, progress p 0..1): every planet at its
+  `overview = { x y size }` place (no block: a row by size), each at size x S world units; S goes from
+  the globe's scale (p = 0: the current planet exactly as the globe) to the scale where the whole layout
+  fits the view at `overview_full_height` (p = 1). The point of the layout under the camera (the focus)
+  goes from the current planet to the layout's centre. Names fade in with p. Planets with `image` show it
+  (drawn in the sky pass, a disc facing the camera) from p = 0.5, their map before.
+- **Switching:** zooming in while p > 0 picks the planet under the cursor (else the one closest to the
+  cursor's point of the layout); it becomes the current planet (the camera jumps to where that planet
+  was last looked at, which is how it is shown, so nothing jumps) and the focus moves smoothly toward
+  it; the planet then turns so that the point under the cursor comes on top. The game's own camera rays
+  point straight down while p > 0 (no lateral zoom or edge pan in the overview).
+- **Drawing:** one constant buffer with a table of up to 16 planets (8 float4 each: rectangle; centre
+  and radius; look-at and its latitude; equator, radians per z and per x, kind; ice and height scale;
+  name row; image cell; name width). Each vertex finds its planet by its flat position (none: dropped).
+  The sky pass traces every planet (sphere or image disc) for the polar seas, the images and the names
+  over them; the terrain's pixel shader lays the name over the map. Names: the localised `name` key,
+  rendered by the loader (GDI, bold serif, upper case, an outline) into a texture, one row per planet,
+  drawn along an arc across the planet. Images: loaded with WIC into one texture of 512 x 512 cells.
+
+## T10: step 2, the planets and the overview (2026-11-25)
+
+- **Pure part (globe.cpp/h):** `Settings::planets` (parsed `planet` blocks; a later block of the same
+  name replaces it; at most 16), `ResolvePlanets` (the rectangles on the loaded map, keys inherited from
+  the globe block, the overview row by size when not given), `PlanetAt`, `MakeParams(settings, planets,
+  mapW, View)` filling the constant table (4 globals + 8 float4 per planet, 2112 bytes), `OverviewScale`
+  (from the globe's scale at p = 0, the current planet exactly as its globe, to the scale where the
+  layout fits 85% of the view at `overview_full_height`, geometric in the eased p), `Bend`, `RayPlanet`,
+  `Unbend` per planet. The overview places planet i at look-at + (o_i - focus) x scale, radius
+  size_i / 2 x scale, sphere top at y = 0; its rotation is its last look-at (the current planet: the
+  camera's).
+- **Shaders:** every vertex finds its planet by its flat position; on no planet (the gaps, the frame)
+  it is dropped near the closest planet's edge (dropping it at its flat position made long slivers from
+  the planet's edge across the screen). The sky pass traces every planet (sphere or the image's disc at
+  the sphere's top) for the polar seas, the images and the names; the terrain's pixel shader returns
+  `HL_GlobeNameOut( float4( vOut, ... ), Input.prepos )`. The names: an arc of radius 1.8 planet radii
+  (2.5 looked straight), at most 1.6 radii long and 0.3 high, fill (red channel) dark, outline (green)
+  light, faded in with the eased p. New mode `kLabel` for mapname.shader: the game's country and state
+  names are dropped while the name alpha is above 0.25.
+- **D3D:** the constant buffer is sizeof(Params); t21 the names (GDI on the main thread: a 2048 x 128
+  row per planet, Georgia bold, upper case, letter spacing, the largest size that fits; the outline is
+  the fill widened by 5 pixels), t22 the images (WIC, scaled to 512 x 512 cells, 4 per row).
+- **Camera (plugin):** the current planet is where the flat camera is; flat, the look-at is kept in its
+  rectangle (east-west wrapped within it); on the globe north-south within it. In the overview the
+  game's own camera rays point straight at the look-at (no lateral zoom or edge pan); a zoom-in step
+  (the height falling) picks the hovered planet, else the one closest to the cursor's layout point; a
+  new planet gets the camera at its last look-at (nothing jumps) and the focus glides to it; each step
+  sets a turn goal 40% of the way to the point under the cursor (the first try went all the way:
+  Africa to Australia in one step).
+- **Tried and dropped:** keeping the low flat view within 200 of the planet's edges by the visible area
+  (vanilla's CAMERA_OUTSIDE_MAP_DISTANCE): the area the engine keeps is much smaller than the screen
+  (z -121..131 at height 310), so it never acted; the look-at clamp alone gives vanilla's map-edge look.
+- **Tests:** 318 checks (new: planets read and resolved, the gap on no planet, globe and overview
+  placement, the overview's start equal to the globe, the layout fitting the view, picking in the
+  overview, image planets), 84 cached vertex shaders (all five modes) and 112 pixel shaders compile.
+- **In game (1.20, the twin map):** the overview shows Earth A and Earth B side by side over the
+  starfield, "EARTH A" / "EARTH B" curved across them, no country names; zooming in over Earth B made
+  it the current planet and went down to its globe and flat map (Australia), turning toward the
+  cursor; zooming in over empty space below the middle glided to Earth A; hovering in the overview
+  found provinces (sea zone tooltips); flat, the camera stops at each planet's edges. The vanilla map
+  with the test mod (no planet blocks) is the one globe as before, `large_map` left alone.

@@ -12,8 +12,15 @@ A–F; NOTES.md has the findings and test results behind each.
   (read from its provinces bitmap before the game starts). Vanilla-sized maps are left alone. 4 new
   signatures, checked on 1.20, 1.19.5 and 1.19.4.2; tested in game on 1.20 with a 5632 x 4352 map.
 - **`tools/make_planets_map.py`**: builds a test mod with several copies of the vanilla map stacked
-  north to south, lake gaps between them, one new country owning each copy (NOTES.md Part T). Reads
-  the owner's own game install; the generated files are game data and stay out of the repository.
+  north to south, lake gaps between them, one new country owning each copy, and the globe's planets
+  for them (NOTES.md Part T). Reads the owner's own game install; the generated files are game data
+  and stay out of the repository.
+- **`globe`: several planets and the overview** (NOTES.md Part T, MODDING.md "Planets"). `planet = {
+  name x y width height north south polar_cap_* overview = { x y size } image }` blocks (up to 16) make
+  rectangles of the map separate worlds: the flat camera stays on its planet, the globe is that
+  planet's, and from `overview_height` all planets are shown at their places with their names curved
+  across them (or a mod's image); zooming in over one goes to it, landing where the cursor points.
+  Without planet blocks the whole map is one planet, as before.
 - **New feature `globe`** (engine tier, needs `lifecycle`; guard `hoi4_loader_feature_globe`; NOTES.md
   Part S, MODDING.md "Globe view"). The map as a planet: zoomed out far enough that the flat view
   would reach past the map's north or south edge (or above `globe_height`), the flat map folds into a

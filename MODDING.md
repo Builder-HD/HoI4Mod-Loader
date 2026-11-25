@@ -2249,6 +2249,9 @@ globe = {
 	                       # (polar_cap = 85 sets both: 85 and -85)
 	polar_cap_color = { 0.72 0.77 0.82 }   # optional: the ice's colour (red green blue, 0..1)
 	polar_sea_color = { 0.14 0.19 0.27 }   # optional: the polar seas' colour
+	overview_height = 2500        # optional: from here all planets are shown (see "Planets")
+	overview_full_height = 3000   # the whole overview fits the view here (vanilla's highest camera)
+	planet = { ... }              # optional, up to 16 (see "Planets"); none: the whole map is one
 }
 ```
 
@@ -2307,6 +2310,38 @@ and zooming toward the cursor use the game's own (flat) camera movement, which t
 smoothly; over the wrap line too. Zoom toward the cursor aims at the flat map point under it, so on
 the planet it lands near, not exactly on, the place under the cursor.
 
+**Planets** (NOTES.md Part T). A map can hold several worlds, each a rectangle of the map (for
+example several copies of the world stacked north to south, with lake provinces between them, so no
+division or ship can cross: `tools/make_planets_map.py` builds such a test map, and `large_map` lets the
+engine load a map that large). Each `planet` block names one:
+
+```
+planet = {
+	name = PLANET_EARTH_B          # localisation key: its name in the overview
+	x = 0  y = 2304  width = 5632  height = 2048   # map pixels, y counted from the map's bottom
+	north = 82  south = -60        # optional: its own latitudes (else the globe block's), and
+	polar_cap_north = 85           # polar_cap / polar_cap_north / polar_cap_south likewise
+	overview = { x = 0.7 y = 0 size = 1 }   # its place and diameter in the overview (else in a row)
+	image = "gfx/my_mod/earth_b.png"        # optional: shown instead of its map in the overview
+}
+```
+
+- **Flat:** the camera stays on the planet it is on (its look-at inside the planet's rectangle; a
+  planet narrower than the map wraps east-west within itself). A planet's edge looks like vanilla's
+  map edge.
+- **Globe:** the planet the camera is on folds into its own sphere, as above; the others are not drawn.
+- **Overview** (from `overview_height`): every planet at its `overview` place, as a disc (the planet
+  seen from afar, live) or its `image`; its name, localised and in capitals, curved across it as the
+  game writes country names. The game's own country and state names are hidden there. Zooming out
+  further shrinks the layout until all of it fits at `overview_full_height`.
+- **Switching:** zoom in (the wheel) over a planet in the overview: it becomes the planet the camera is
+  on, and each step turns it part of the way toward the point under the cursor, down to its globe and
+  its flat map. Zooming in over empty space pulls toward the closest planet, a little more with each
+  step. Hovering and clicking find provinces on every planet shown.
+- Without `planet` blocks the whole map is one planet (everything as above, nothing else changes).
+- The images go in one texture of 512 x 512 cells (any size is scaled; transparency is kept). The
+  names are drawn by the loader (bold serif, upper case, outlined) from the planets' `name` keys.
+
 **Limits:**
 - DirectX 11 only (the Windows default). With the DX9 or OpenGL renderer the map stays flat
   (`loader.log` names no device).
@@ -2324,7 +2359,8 @@ the planet it lands near, not exactly on, the place under the cursor.
   `sky.shader`, `pdxwater.shader`).
 - Problems in the settings files: `globe: <mod>/<file> line 3: unknown key 'wobble'`; a background
   no mod has: `globe: the background ... is in no enabled mod nor the game folder`.
-- In a game: `globe: first globe frame (camera height ..., background on)`.
+- In a game: `globe: 2 planet(s) on the 5632 x 4352 map: PLANET_EARTH_A (0,0 5632x2048), ...`,
+  `globe: 2 planet name(s) drawn`, `globe: first globe frame (camera height ..., background on)`.
 
 **Test mod** (`common/hoi4_loader_globe/hoi4_loader_test_globe.txt`: default globe, 400 / 2500,
 0.35 s, the map from 82 N to 60 S with polar seas and ice from 85 N and 68 S, background
