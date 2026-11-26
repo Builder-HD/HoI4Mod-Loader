@@ -989,7 +989,9 @@ def main():
                "\t\t\"---\" = {\n\t\t\thistory = \"PLANETS_BOOKMARK_DESC\"\n\t\t}\n\t}\n}\n" % (tags[0], "".join(bookmark_countries)))
     loc.append(' PLANETS_BOOKMARK_NAME:0 "The Planets"')
     loc.append(' PLANETS_BOOKMARK_DESC:0 "%d copies of the world, one country each (hoi4_loader planets test)."' % copies)
-    loc.append(' STRATEGICREGION_PLANET_GAP:0 "Between the planets"')
+    # No name: the game writes a sea region's name across the map, and the gaps' region surrounds the space
+    # map, so its name would run across space.
+    loc.append(' STRATEGICREGION_PLANET_GAP:0 ""')
     # The globe: one planet per copy, side by side in the overview (hoi4_loader's globe, NOTES.md Part T).
     planets = []
     for k, tag in enumerate(tags):
