@@ -8605,3 +8605,32 @@ Steps from here: step 2 the space map as the zoomed-out view (U2); step 3 the se
   as bright as the background beside it; the cursor over Earth B while zooming in: at 652 the camera
   went to Earth B's globe at 2336. Not yet: fleets and missions checked over the new view (the owner's
   test), the step 3 separation.
+
+## U11: the 1.20.1 crash, and the space map checked in game (2026-11-26)
+
+- **The crash:** Steam updated the game to 1.20.1 (`v1.20.1.0.0fd1`); its hash was not listed, so the
+  engine tier was off (`large_map` with it) and the twin map with space crashed while loading (an
+  access violation, as before `large_map`). Signatures 202/202 and code shapes 104/104 match on a copy;
+  listed as `1.20.1_vanilla`.
+- **Black crescent in each hole:** the disc's sphere hung below the map (top at the map's level), so
+  the tilted camera saw into the hole beside it, where the rim's triangles (partly dropped: the part
+  before the far plane still drawn) showed dark. The sphere is now centred on the map's level: its
+  outline covers the whole hole from any angle and the rim lies behind it. The camera heights at the
+  switch keep the distance to the sphere's top: planet -> space `h * scale + r`, space -> planet
+  `(h - r) / scale`, below `space_height * scale * 0.9 + r`.
+- **Space darker than the sky beside it:** the sky writes alpha 1 (its glow), the space map's ground
+  wrote 0. Measured on screenshots across the space map's west edge: alpha 0 gave 24 against the
+  sky's 34 (blue 76 / 92), alpha 1 gave 45 / 35, alpha 0.5 gives 34 / 35 (blue 92 / 93): 0.5.
+- **Wrong look-at after space -> planet:** `SpaceFrame` moved the camera to the planet's last look-at,
+  but `Frame` went on with the space look-at it had read (z ~5600), and `Confine` moved the camera
+  south by the difference (Earth A ended on its south edge). `SpaceFrame` now returns the new look-at
+  and height. Earth A round trip: Europe before and after; Earth B: Africa on its disc and its globe.
+- **"Between the planets" across space:** the game writes a sea region's name across its provinces;
+  the gaps' strategic region surrounds the space map, so its name ran across space. The generator
+  gives it an empty name.
+- **Fleets over space (1.20.1):** the naval map mode's hover names the space zones ("Space Zone 5",
+  the dominance tooltip); the First Space Fleet (docked in Spaceport Dock 1 (Earth A)) took a patrol
+  over Space Zone 15 and was "Operating in Space Zone 13" after 4 days; its counter shows over space
+  when zoomed in (the game's own icon cutoff hides it far out). Not yet: the naval map mode's sea
+  colours over space (they are drawn by the game's water, hidden while bent); a space map mode is a
+  later part.

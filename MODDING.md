@@ -2364,8 +2364,11 @@ the planet's block: the hole's centre and the radius of the planet's disc there)
   planet's orbit in the space map, at the height where the planet's disc there looks exactly as the
   globe did. From there it is an ordinary flat camera over a sea: the game draws the space zones,
   their borders, the fleet counters and the naval map mode, and missions are given per zone as at sea.
-  The loader draws every planet with an orbit as its globe in its hole (turned as it was last looked
-  at, its name on it), and the background image over the space map's ground.
+  The loader draws every planet with an orbit as its globe in its hole (centred on the map's level, so
+  from any angle it covers its whole hole; turned as it was last looked at, its name on it), and the
+  background image over the space map's ground, glowing as the sky beside it does. Fleet counters show
+  over space as over any sea (at the game's own zoom cutoff); the naval map mode's sea colours do not
+  yet (the game's water, which carries them, is hidden while the map is bent).
 - **Space -> planet:** zooming in over a planet's disc (the camera or the cursor on it) below the
   matching height goes back to that planet's globe, then its flat map.
 - With `space` the Part T overview is not used. Hovering and clicking a disc find that planet's

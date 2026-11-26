@@ -6,6 +6,10 @@ A–F; NOTES.md has the findings and test results behind each.
 
 ## Unreleased
 
+- **Game 1.20.1** (`v1.20.1.0.0fd1`, Steam update of 2026-11-26) is listed in `loader_config.ini`:
+  every signature (202/202) and code shape (104/104) matches exactly once (checked offline on a copy);
+  tested in game. Unlisted, the engine features were off, and a mod that needs `large_map` crashed
+  loading its map.
 - **New feature `camera_range`** (engine tier, needs `lifecycle`; guard
   `hoi4_loader_feature_camera_range`; MODDING.md "Camera range"). A mod's raised
   `NFrontend.CAMERA_MAX_HEIGHT` works: the map camera's far plane (fixed 4000) follows it. 2 new
@@ -22,8 +26,8 @@ A–F; NOTES.md has the findings and test results behind each.
 - **`globe`: the space map** (NOTES.md Part U, MODDING.md "Space"). `space = { x y width height }` and
   per planet `orbit = { x y radius }`: zoomed out past `space_height` over a planet's globe, the camera
   goes over the planet's orbit in the space map (a flat map of space zones, the game's own naval map,
-  fleets and missions), the planets drawn as their globes in their holes; zooming in over a disc goes
-  back to that planet. `tools/make_planets_map.py --space-height` builds a space band with space zones,
+  fleets and missions), the planets drawn as their globes in their holes (centred on the map's level);
+  zooming in over a disc goes back to that planet, looking where it last looked. `tools/make_planets_map.py --space-height` builds a space band with space zones,
   hidden spaceport docks per planet, a spaceport building, spaceship hulls and units.
 - **`globe`: several planets and the overview** (NOTES.md Part T, MODDING.md "Planets"). `planet = {
   name x y width height north south polar_cap_* overview = { x y size } image }` blocks (up to 16) make
