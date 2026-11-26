@@ -1000,11 +1000,13 @@ def main():
         ox = (k - (copies - 1) / 2.0) * 1.4
         orbit = ""
         if space:
-            # Its hole in the space map: the centre of its 5 x 5 cells; the disc a little smaller than the
-            # hole, so its spaceports' ring shows round it in the owners' colours.
+            # Its hole in the space map: the centre of its 5 x 5 cells; the disc reaches the hole's corners,
+            # so its spaceport docks (only there for their naval bases) lie under the planet, out of sight.
             ix0, iy0 = space["holes"][k]
             cx, cz = space["centre"]((ix0 + 2, iy0 + 2))
-            orbit = "\t\torbit = { x = %.0f y = %.0f radius = 250 }\n" % (cx, cz)
+            half = max(space["ws"] / space["nx"], space["hs"] / space["ny"]) * 2.5  # half the hole's side
+            radius = int(half * 1.4142136) + 4
+            orbit = "\t\torbit = { x = %.0f y = %.0f radius = %d }\n" % (cx, cz, radius)
         planets.append("\tplanet = {\n\t\tname = PLANET_EARTH_%s\n\t\tx = 0  y = %d  width = %d  height = %d\n"
                        "\t\toverview = { x = %.2f y = 0 size = 1 }\n%s\t}\n" % (letter, zoff(k), map_w, map_h, ox, orbit))
     # The camera may go higher, for the overview (hoi4_loader's camera_range raises the far plane with it).
