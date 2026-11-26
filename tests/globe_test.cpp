@@ -204,11 +204,11 @@ static void TestPlanets() {
     Globe::Params sq;
     Check(Globe::MakeParams(sp, spl, 5632, sv, &sq) && sq.space() && sq.t() == 1.0f && sq.kind(0) == 1.0f && sq.kind(1) == 1.0f,
           "over space: both planets drawn");
-    Check(sq.centre(1)[0] == 3600 && sq.centre(1)[2] == 5632 && sq.centre(1)[3] == 250 && sq.centre(1)[1] == -250 && sq.s[1] == 4608,
-          "each in its orbit, its top at the map's level");
+    Check(sq.centre(1)[0] == 3600 && sq.centre(1)[2] == 5632 && sq.centre(1)[3] == 250 && sq.centre(1)[1] == 0 && sq.s[1] == 4608,
+          "each in its orbit, centred on the map's level");
     float top[3] = {2816, 0, 3300}, tq[3];
     Globe::Bend(sq, 1, top, tq);
-    Check(Near(tq[0], 3600, 0.05f) && Near(tq[1], 0, 0.05f) && Near(tq[2], 5632, 0.05f), "turned as it was last looked at");
+    Check(Near(tq[0], 3600, 0.05f) && Near(tq[1], 250, 0.05f) && Near(tq[2], 5632, 0.05f), "turned as it was last looked at");
     float so[3] = {3600, 1500, 5632}, sd[3] = {0, -1, 0}, sf[2];
     Check(Globe::RayPlanet(sq, so, sd, nullptr) == 1 && Globe::Unbend(sq, 1, so, sd, sf, &hit) && hit && Near(sf[0], 2816, 1.0f),
           "a ray onto its disc finds its province");

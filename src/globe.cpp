@@ -297,8 +297,9 @@ bool MakeParams(const Settings& s, const std::vector<Planet>& planets, float map
         float ccz = cur && !overview ? v.lookZ : v.lookZ + (p.oy - fy) * scale;
         float kind = overview ? (p.image && v.p >= 0.5f ? 2.0f : 1.0f) : (cur ? 1.0f : 0.0f);
         if (v.space) {
-            // Over the space map: every planet with an orbit is its sphere in its hole there, sunk so
-            // that its top is at the map's level; it is turned as it was last looked at.
+            // Over the space map: every planet with an orbit is its sphere in its hole there, centred on
+            // the map's level (so from any angle its outline covers the whole hole: nothing is seen
+            // through the hole beside it); it is turned as it was last looked at.
             r = p.orbitR;
             radPerX = 2.0f * kPi / p.w, radPerZ = span / p.h;
             ccx = p.orbitX, ccz = p.orbitZ;
@@ -308,7 +309,7 @@ bool MakeParams(const Settings& s, const std::vector<Planet>& planets, float map
             latL = Clamp((Clamp(lz, p.z0, p.z0 + p.h) - zEq) * radPerZ, -kPi / 2, kPi / 2);
         }
         q[0][0] = p.x0, q[0][1] = p.z0, q[0][2] = p.w, q[0][3] = p.h;
-        q[1][0] = ccx, q[1][1] = -r, q[1][2] = ccz, q[1][3] = r;
+        q[1][0] = ccx, q[1][1] = v.space ? 0.0f : -r, q[1][2] = ccz, q[1][3] = r;
         q[2][0] = lx, q[2][1] = lz, q[2][2] = cosf(latL), q[2][3] = sinf(latL);
         q[3][0] = zEq, q[3][1] = radPerZ, q[3][2] = radPerX, q[3][3] = kind;
         bool polar = p.north < 90.0f || p.south > -90.0f;
@@ -657,10 +658,10 @@ const char kHlsl[] =
     "// The names over the terrain's final output (in the overview); its alpha is the glow, cleared under them.\n"
     "float4 HL_GlobeNameOut( float4 vOut, float3 vPrepos )\n"
     "{\n"
-    "\t// The space map: the background image added to its (dark) lit ground, as bright as the sky beside\n"
-    "\t// it; the map modes and borders stay over it. No glow.\n"
+    "\t// The space map: the background image added to its (dark) lit ground; the map modes and borders\n"
+    "\t// stay over it. It glows as the sky beside it does (alpha 1), so the two match.\n"
     "\tif ( HL_GlobeU.x > 0.5f && vPrepos.x >= HL_GlobeS.x && vPrepos.x <= HL_GlobeS.x + HL_GlobeS.z && vPrepos.z >= HL_GlobeS.y && vPrepos.z <= HL_GlobeS.y + HL_GlobeS.w )\n"
-    "\t\treturn float4( vOut.rgb + HL_GlobeBackground( float3( 0.0f, 0.0f, 0.0f ), normalize( vPrepos - vCamPos ) ), 0.0f );\n"
+    "\t\treturn float4( vOut.rgb + HL_GlobeBackground( float3( 0.0f, 0.0f, 0.0f ), normalize( vPrepos - vCamPos ) ), 0.5f );\n"
     "\tif ( HL_GlobeB.z <= 0.0f )\n"
     "\t\treturn vOut;\n"
     "\tint i = HL_GlobePlanetOf( vPrepos );\n"

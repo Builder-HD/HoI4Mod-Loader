@@ -339,8 +339,10 @@ int ZoomTarget() {
 
 // Over the space map (main thread): the camera is a flat camera over it; the planets are drawn in
 // their orbits. Zooming in over a planet's disc, below the height that matches space_height, goes back
-// to that planet's globe (the reverse of the way in). False when not over space (the planet modes run).
-bool SpaceFrame(void* cam, bool wanted, float lx, float lz, float height) {
+// to that planet's globe (the reverse of the way in). False when not over space (the planet modes run;
+// after a switch to a planet *lx, *lz and *height are where the camera is now).
+bool SpaceFrame(void* cam, bool wanted, float* plx, float* plz, float* pheight) {
+    float lx = *plx, lz = *plz, height = *pheight;
     if (!g_space) return false;
     if (!wanted) {
         g_space = false;
@@ -359,17 +361,21 @@ bool SpaceFrame(void* cam, bool wanted, float lx, float lz, float height) {
         if (!c.hasOrbit) continue;
         float scale = c.orbitR / (c.w / 6.2831853f);
         float ddx = lx - c.orbitX, ddz = lz - c.orbitZ;
-        // Over its disc: the camera looking at it, or the cursor on it (zooming toward the cursor).
+        // Over its disc: the camera looking at it, or the cursor on it (zooming toward the cursor). Its
+        // sphere's top is orbit radius above the map (centred on it), the globe's top at the map.
         bool over = ddx * ddx + ddz * ddz <= c.orbitR * c.orbitR || (hovered && g_hoverPlanet == (int)j);
-        if (!over || height >= s.spaceHeight * scale * 0.9f) continue;
+        if (!over || height >= s.spaceHeight * scale * 0.9f + c.orbitR) continue;
+        float globe = (height - c.orbitR) / scale;
+        if (globe < 1.0f) globe = 1.0f;
         float tx = g_lastLook[j * 2], tz = g_lastLook[j * 2 + 1];
         Engine::GlobeShiftCamera(cam, tx - lx, tz - lz);
-        Engine::GlobeSetCameraHeight(cam, height / scale);
+        Engine::GlobeSetCameraHeight(cam, globe);
         g_space = false;
         g_cur = (int)j;
         g_t = 1.0f;
-        g_sphere.sphere = true, g_sphere.enterHeight = height / scale;
-        Log("globe: from the space map to %s (camera height %.0f -> %.0f)", c.name.c_str(), height, height / scale);
+        g_sphere.sphere = true, g_sphere.enterHeight = globe;
+        Log("globe: from the space map to %s (camera height %.0f -> %.0f)", c.name.c_str(), height, globe);
+        *plx = tx, *plz = tz, *pheight = globe;
         return false;
     }
     g_t = 1.0f, g_p = 0.0f, g_othersVisible = false;
@@ -396,7 +402,8 @@ void Frame() {
     float lx = 0, lz = 0, height = 0;
     if (!LookAt(cam, &lx, &lz, &height)) return;
     g_height = height;
-    if (g_settings.hasSpace && SpaceFrame(cam, wanted, lx, lz, height)) return;
+    if (g_settings.hasSpace && SpaceFrame(cam, wanted, &lx, &lz, &height)) return;
+    g_height = height;
     // The overview: from overview_height to overview_full_height (not with a space map).
     float p = 0.0f;
     if (wanted && g_settings.overviewHeight > 0.0f && !g_settings.hasSpace)
@@ -461,9 +468,10 @@ void Frame() {
         const Globe::Planet& c = g_planets[g_cur];
         float scale = c.orbitR / (c.w / 6.2831853f);
         Engine::GlobeShiftCamera(cam, c.orbitX - lx, c.orbitZ - lz);
-        Engine::GlobeSetCameraHeight(cam, height * scale);
+        // The same distance to the sphere's top: the globe's top is at the map, the disc's orbit radius above.
+        Engine::GlobeSetCameraHeight(cam, height * scale + c.orbitR);
         g_space = true;
-        Log("globe: to the space map at %s's orbit (camera height %.0f -> %.0f)", c.name.c_str(), height, height * scale);
+        Log("globe: to the space map at %s's orbit (camera height %.0f -> %.0f)", c.name.c_str(), height, height * scale + c.orbitR);
         Apply(cam, false);
         return;
     }
