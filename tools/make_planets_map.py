@@ -464,6 +464,30 @@ def write_space_content(out, game, sp, tags, loc):
     loc.append(' space:0 "Space"')
 
 
+def write_space_tab(out, game, loc):
+    """The spaceships' production tab (hoi4_loader's production_tabs): the space hulls in a tab of their
+    own, out of the naval tab, and its button in the production view (vanilla's file, the button in the
+    free place of the top row at x = 265, with the naval button's picture)."""
+    hulls = "space_hull_light space_hull_cruiser space_hull_heavy"
+    write_text(os.path.join(out, "common", "hoi4_loader_production_tabs", "hoi4_loader_space_tabs.txt"),
+               "# The spaceships' production tab (hoi4_loader production_tabs, MODDING.md).\n"
+               "hl_space_ships = {\n\tbutton = hl_space_tab_button\n\tglow = hl_space_tab_button_glow\n\tadd = { %s }\n}\n"
+               "naval = {\n\tremove = { %s }\n}\n" % (hulls, hulls))
+    src = os.path.join(game, "interface", "countryproductionlineview.gui")
+    text = read_text(src)
+    anchor = re.search(r'\n([ \t]*)buttonType = \{\s*\n\s*name = "naval_repair_button"', text)
+    if not anchor:
+        fail("%s: the naval repair button was not found (the spaceships' tab button goes before it)" % src)
+    ind = anchor.group(1)
+    block = ("\n{i}buttonType = {{\n{i}\tname = \"hl_space_tab_button\"\n{i}\tposition = {{ x=265 y=122 }}\n"
+             "{i}\tspriteType =\"GFX_add_prod_naval_line\"\n{i}\tpdx_tooltip = \"HL_SPACE_TAB\"\n{i}\tclicksound = click_checkbox\n{i}}}\n"
+             "\n{i}iconType = {{\n{i}\tname = \"hl_space_tab_button_glow\"\n{i}\tposition = {{ x = 268 y = 123 }}\n"
+             "{i}\tspriteType = \"GFX_prod_new_equipment_glow\"\n{i}\talwaystransparent = yes\n{i}}}\n").format(i=ind)
+    text = text[:anchor.start()] + block + text[anchor.start():]
+    write_text(os.path.join(out, "interface", "countryproductionlineview.gui"), text)
+    loc.append(' HL_SPACE_TAB:0 "Spaceships\\nAdd a production line for ships built for space."')
+
+
 def write_space_start(out, sp, tags, capitals, variants):
     """The test scenario's start: each country's capital state has a spaceport, paired with its planet's
     first hidden port, and a small space fleet based there (frigates and a cruiser of the starting
@@ -968,6 +992,7 @@ def main():
     write_text(os.path.join(out, "common", "country_tags", "hoi4_loader_planets.txt"), "\n".join(tag_lines) + "\n")
     if space:
         write_space_content(out, game, space, tags, loc)
+        write_space_tab(out, game, loc)
         write_space_start(out, space, tags, capitals, variants)
     # Character names (generals, admirals, ministers), the same plain list for every planet.
     males = "Adam Bernard Carl David Emil Felix Georg Henry Isaac Jonas Karl Leon Martin Noah Oscar Paul Robert Simon Thomas Victor"
