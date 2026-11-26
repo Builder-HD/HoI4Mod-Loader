@@ -276,6 +276,19 @@ void GlobeShiftCamera(void* mapCamera, float dx, float dz) {
     }
 }
 
+void GlobeSetCameraHeight(void* mapCamera, float height) {
+    // The eye (and its target) moved along the line from the look-at, so the camera keeps its angle.
+    float eyeY = Rd<float>(mapCamera, g_eye + 4), lookY = Rd<float>(mapCamera, g_look + 4);
+    if (!(eyeY - lookY > 1.0f)) return;
+    float s = (height - lookY) / (eyeY - lookY);
+    for (int k = 0; k < 3; ++k) {
+        float e = Rd<float>(mapCamera, g_eye + 4 * k), l = Rd<float>(mapCamera, g_look + 4 * k);
+        Wr<float>(mapCamera, g_eye + 4 * k, l + (e - l) * s);
+        float et = Rd<float>(mapCamera, g_eyeTarget + 4 * k), lt = Rd<float>(mapCamera, g_lookTarget + 4 * k);
+        Wr<float>(mapCamera, g_eyeTarget + 4 * k, lt + (et - lt) * s);
+    }
+}
+
 void GlobeOpenFrustum(void* engineCamera) {
     // The planes point outwards (the update negates them): a point is outside when n.p + d > 0. A
     // zero normal with a very negative d keeps everything inside.

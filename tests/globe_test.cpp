@@ -188,6 +188,30 @@ static void TestPlanets() {
     Check(q.kind(1) == 2.0f && q.kind(0) == 1.0f, "an image planet becomes its image");
     float ob[3] = {q.centre(1)[0], 3000, q.centre(1)[2]};
     Check(Globe::RayPlanet(q, ob, d, nullptr) == 1 && !Globe::Unbend(q, 1, ob, d, flat, &hit), "its disc is hit, but holds no map");
+    // The space map (Part U): every planet with an orbit as its sphere in its hole there.
+    Globe::Settings sp = s;
+    std::vector<Globe::Problem> pp;
+    Globe::ParseFile("globe = { space = { x = 0 y = 4608 width = 5376 height = 2048 } space_height = 2600\n"
+                     " planet = { name = A orbit = { x = 1872 y = 5632 radius = 250 } }\n"
+                     " planet = { name = B orbit = { x = 3600 y = 5632 radius = 250 } } }",
+                     "t", &sp, &pp);
+    Check(pp.empty() && sp.hasSpace && sp.spaceY == 4608 && sp.planets[1].hasOrbit && sp.planets[1].orbitRadius == 250,
+          "space and orbits read");
+    std::vector<Globe::Planet> spl = Globe::ResolvePlanets(sp, 5632, 6656, nullptr);
+    Globe::View sv;
+    sv.space = true, sv.lookX = 2000, sv.lookZ = 5000;
+    sv.lastLook = {2816, 1000, 2816, 3300};
+    Globe::Params sq;
+    Check(Globe::MakeParams(sp, spl, 5632, sv, &sq) && sq.space() && sq.t() == 1.0f && sq.kind(0) == 1.0f && sq.kind(1) == 1.0f,
+          "over space: both planets drawn");
+    Check(sq.centre(1)[0] == 3600 && sq.centre(1)[2] == 5632 && sq.centre(1)[3] == 250 && sq.centre(1)[1] == -250 && sq.s[1] == 4608,
+          "each in its orbit, its top at the map's level");
+    float top[3] = {2816, 0, 3300}, tq[3];
+    Globe::Bend(sq, 1, top, tq);
+    Check(Near(tq[0], 3600, 0.05f) && Near(tq[1], 0, 0.05f) && Near(tq[2], 5632, 0.05f), "turned as it was last looked at");
+    float so[3] = {3600, 1500, 5632}, sd[3] = {0, -1, 0}, sf[2];
+    Check(Globe::RayPlanet(sq, so, sd, nullptr) == 1 && Globe::Unbend(sq, 1, so, sd, sf, &hit) && hit && Near(sf[0], 2816, 1.0f),
+          "a ray onto its disc finds its province");
 }
 
 static void TestSettings() {

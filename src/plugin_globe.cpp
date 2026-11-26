@@ -163,6 +163,7 @@ int g_cur = 0;                         // the planet the camera is on
 std::vector<float> g_lastLook;         // per planet x, z
 float g_focus[2] = {0, 0};             // the overview layout point under the camera
 bool g_othersVisible = false;          // in the overview, another planet is on screen
+bool g_space = false;                  // over the space map (NOTES.md Part U)
 float g_aspect = 16.0f / 9.0f;         // the view's, last frame
 bool g_namesBuilt = false;
 std::vector<int> g_imageIndex;         // per planet: its index in the images given to GlobeD3D, -1 none
@@ -259,13 +260,14 @@ void Apply(void* mapCamera, bool fresh) {
     }
     g_height = height;
     const Globe::Planet& cur = g_planets[g_cur];
-    if (fresh) {
+    if (fresh && !g_space) {
         ReadArea(mapCamera);
         bool narrow = cur.w < w - 0.5f;
         g_edgeInView = g_area[2] < cur.z0 || g_area[3] > cur.z0 + cur.h || (narrow && (g_area[0] < cur.x0 || g_area[1] > cur.x0 + cur.w));
     }
-    lz = Clampf(lz, cur.z0, cur.z0 + cur.h);
+    if (!g_space) lz = Clampf(lz, cur.z0, cur.z0 + cur.h);
     Globe::View v;
+    v.space = g_space;
     v.current = g_cur, v.t = g_t, v.p = g_p, v.lookX = lx, v.lookZ = lz;
     v.focusX = g_focus[0], v.focusY = g_focus[1];
     v.fullHeight = g_settings.overviewFullHeight;
@@ -335,6 +337,47 @@ int ZoomTarget() {
     return best;
 }
 
+// Over the space map (main thread): the camera is a flat camera over it; the planets are drawn in
+// their orbits. Zooming in over a planet's disc, below the height that matches space_height, goes back
+// to that planet's globe (the reverse of the way in). False when not over space (the planet modes run).
+bool SpaceFrame(void* cam, bool wanted, float lx, float lz, float height) {
+    if (!g_space) return false;
+    if (!wanted) {
+        g_space = false;
+        return false;
+    }
+    const Globe::Settings& s = g_settings;
+    float dx = 0, dz = 0;
+    if (lx < s.spaceX) dx = s.spaceX - lx;
+    else if (lx > s.spaceX + s.spaceW) dx = s.spaceX + s.spaceW - lx;
+    if (lz < s.spaceY) dz = s.spaceY - lz;
+    else if (lz > s.spaceY + s.spaceH) dz = s.spaceY + s.spaceH - lz;
+    if (dx != 0.0f || dz != 0.0f) Engine::GlobeShiftCamera(cam, dx, dz), lx += dx, lz += dz;
+    bool hovered = GetTickCount64() - g_hoverTick < 500;
+    for (size_t j = 0; j < g_planets.size(); ++j) {
+        const Globe::Planet& c = g_planets[j];
+        if (!c.hasOrbit) continue;
+        float scale = c.orbitR / (c.w / 6.2831853f);
+        float ddx = lx - c.orbitX, ddz = lz - c.orbitZ;
+        // Over its disc: the camera looking at it, or the cursor on it (zooming toward the cursor).
+        bool over = ddx * ddx + ddz * ddz <= c.orbitR * c.orbitR || (hovered && g_hoverPlanet == (int)j);
+        if (!over || height >= s.spaceHeight * scale * 0.9f) continue;
+        float tx = g_lastLook[j * 2], tz = g_lastLook[j * 2 + 1];
+        Engine::GlobeShiftCamera(cam, tx - lx, tz - lz);
+        Engine::GlobeSetCameraHeight(cam, height / scale);
+        g_space = false;
+        g_cur = (int)j;
+        g_t = 1.0f;
+        g_sphere.sphere = true, g_sphere.enterHeight = height / scale;
+        Log("globe: from the space map to %s (camera height %.0f -> %.0f)", c.name.c_str(), height, height / scale);
+        return false;
+    }
+    g_t = 1.0f, g_p = 0.0f, g_othersVisible = false;
+    g_prevHeight = height;
+    Apply(cam, false);
+    return true;
+}
+
 void Frame() {
     void* cam = Engine::GameState() ? Engine::UiMapCamera() : nullptr;
     g_gameCam.store(cam);
@@ -349,13 +392,14 @@ void Frame() {
         g_t = 0.0f, g_p = 0.0f, g_sphere = Globe::SphereState(), g_othersVisible = false;
         return;
     }
-    if (!g_namesBuilt && g_settings.overviewHeight > 0 && GlobeD3D::Ready()) BuildNames();
+    if (!g_namesBuilt && (g_settings.overviewHeight > 0 || g_settings.hasSpace) && GlobeD3D::Ready()) BuildNames();
     float lx = 0, lz = 0, height = 0;
     if (!LookAt(cam, &lx, &lz, &height)) return;
     g_height = height;
-    // The overview: from overview_height to overview_full_height.
+    if (g_settings.hasSpace && SpaceFrame(cam, wanted, lx, lz, height)) return;
+    // The overview: from overview_height to overview_full_height (not with a space map).
     float p = 0.0f;
-    if (wanted && g_settings.overviewHeight > 0.0f)
+    if (wanted && g_settings.overviewHeight > 0.0f && !g_settings.hasSpace)
         p = Clampf((height - g_settings.overviewHeight) / (g_settings.overviewFullHeight - g_settings.overviewHeight), 0.0f, 1.0f);
     bool sphere = wanted && (p > 0.0f || Globe::WantSphere(g_settings, height, g_edgeInView, &g_sphere));
     if (!wanted) g_sphere = Globe::SphereState();
@@ -411,6 +455,18 @@ void Frame() {
     g_lastLook[g_cur * 2] = lx, g_lastLook[g_cur * 2 + 1] = lz;
     g_p = p;
     g_prevHeight = height;
+    // Zoomed out past space_height over a planet's globe: the space map, the camera over the planet's
+    // orbit at the height where its disc there looks as the globe did.
+    if (g_settings.hasSpace && wanted && g_t >= 1.0f && height >= g_settings.spaceHeight && g_planets[g_cur].hasOrbit) {
+        const Globe::Planet& c = g_planets[g_cur];
+        float scale = c.orbitR / (c.w / 6.2831853f);
+        Engine::GlobeShiftCamera(cam, c.orbitX - lx, c.orbitZ - lz);
+        Engine::GlobeSetCameraHeight(cam, height * scale);
+        g_space = true;
+        Log("globe: to the space map at %s's orbit (camera height %.0f -> %.0f)", c.name.c_str(), height, height * scale);
+        Apply(cam, false);
+        return;
+    }
     if (g_t <= 0.0f) {
         Publish(Globe::Params());
         return;
@@ -426,6 +482,21 @@ void ScreenRay(void* engineCamera, float dir[3], float origin[3], bool fromCamer
     if (!ours) return;
     Globe::Params p = Current();
     if (!(p.t() > 0.0f) || p.count() < 1) return;
+    if (p.space()) {
+        // Over the space map the game's own rays find what lies on it; a ray onto a planet's disc finds
+        // that planet's province. The camera's own rays move it over the space map as over any map.
+        if (fromCamera) return;
+        float flat[2];
+        bool hit = false;
+        int i = Globe::RayPlanet(p, origin, dir, nullptr);
+        if (engineCamera == Engine::GlobeEngineCamera(game, 0)) g_hoverPlanet = i, g_hoverTick = GetTickCount64();
+        if (i < 0 || !Globe::Unbend(p, i, origin, dir, flat, &hit)) return;
+        if (!hit) flat[0] = origin[0], flat[1] = -100000.0f;
+        float d[3] = {flat[0] - origin[0], -origin[1], flat[1] - origin[2]};
+        float len = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+        if (len > 1e-3f && origin[1] > 1.0f) dir[0] = d[0] / len, dir[1] = d[1] / len, dir[2] = d[2] / len;
+        return;
+    }
     const float* look = p.look(p.current());
     if (fromCamera) {
         // The map camera's own rays (drag, edge panning, zoom to the cursor) stay the game's: the
@@ -479,11 +550,17 @@ void ScreenRay(void* engineCamera, float dir[3], float origin[3], bool fromCamer
     dir[0] = d[0] / len, dir[1] = d[1] / len, dir[2] = d[2] / len;
 }
 
-bool SkipEdgeClamp(void* mapCamera) { return mapCamera == g_gameCam.load() && Current().t() > 0.0f; }
+bool SkipEdgeClamp(void* mapCamera) {
+    Globe::Params p = Current();
+    return mapCamera == g_gameCam.load() && p.t() > 0.0f && !p.space();
+}
 
 // While bent, the 2D map icons (city names, ports, units, ...) hide by their own cutoffs: they are
-// placed for the flat map.
-bool HideIcons() { return g_gameCam.load() && Current().t() > 0.0f; }
+// placed for the flat map. Over the space map they stay (fleets, zones): it is flat.
+bool HideIcons() {
+    Globe::Params p = Current();
+    return g_gameCam.load() && p.t() > 0.0f && !p.space();
+}
 
 // Things drawn without a depth test (names, arrows, routes, particles) drop what lies beyond the
 // planet's horizon; the rest is hidden by the planet itself.

@@ -19,6 +19,7 @@ const int kMaxPlanets = 16;
 //       north = 82  south = -60    # its latitudes; polar_cap_north / polar_cap_south as below
 //       overview = { x = -0.7 y = 0 size = 1 }      # its place and diameter in the overview
 //       image = "gfx/my_mod/planet_a.png"           # shown instead of its map in the overview
+//       orbit = { x = 1950 y = 5632 radius = 276 }  # its hole in the space map (Part U): centre, radius
 //   }
 struct PlanetSettings {
     std::string name;
@@ -27,6 +28,8 @@ struct PlanetSettings {
     float north = 90.0f, south = -90.0f, polarCapNorth = 90.0f, polarCapSouth = -90.0f;
     bool hasOverview = false;
     float overviewX = 0, overviewY = 0, overviewSize = 1;
+    bool hasOrbit = false;
+    float orbitX = 0, orbitY = 0, orbitRadius = 0;
     std::string image, imageFrom;
 };
 
@@ -51,6 +54,9 @@ struct PlanetSettings {
 //                                    # NFrontend.CAMERA_MAX_HEIGHT; camera_range follows it)
 //       name_font = "gfx/fonts/hoi_mapfont4"   # the planets' names (the map names' font)
 //       planet = { ... }       # several planets (see PlanetSettings); none: the whole map is one
+//       space = { x = 0 y = 4608 width = 5376 height = 2048 }   # the space map (Part U): zoomed out
+//                              # past space_height a planet's globe becomes its disc in its orbit there
+//       space_height = 2600    # the camera height (over a planet's globe) where space takes over
 //   }
 // Several files and blocks: later keys replace earlier ones; planets add up (a later planet with
 // the same name replaces the earlier one).
@@ -71,6 +77,9 @@ struct Settings {
     float overviewHeight = 0.0f;        // 0: no overview
     float overviewFullHeight = 3000.0f;
     std::string nameFont = "gfx/fonts/hoi_mapfont4";  // the planets' names: a game bitmap font (no extension)
+    bool hasSpace = false;
+    float spaceX = 0, spaceY = 0, spaceW = 0, spaceH = 0;
+    float spaceHeight = 2600.0f;
     std::vector<PlanetSettings> planets;
 };
 struct Problem {
@@ -102,6 +111,8 @@ struct Planet {
     float nameRow[2] = {0, 0};          // v0, dv of its row in the names texture (dv 0: no name)
     float nameAspect = 0;               // the text's width / its row's height (pixels)
     float nameFrac = 0;                 // the text's width / the texture's width
+    bool hasOrbit = false;
+    float orbitX = 0, orbitZ = 0, orbitR = 0;  // its hole in the space map
 };
 // The planets of the settings on a map of w x h (no planet blocks: one, the whole map). Planets
 // outside the map are cut to it; empty ones dropped (with a problem).
@@ -120,12 +131,14 @@ struct View {
     float aspect = 16.0f / 9.0f;     // of the view (for fitting the layout)
     std::vector<float> lastLook;     // per planet: x, z where it was last looked at
     bool background = false;
+    bool space = false;              // over the space map: every planet with an orbit as a disc there
 };
 
 // The shader's constants (register b13): four globals and 8 float4 per planet (NOTES.md T9).
 //   A = (fold t of the current planet, overview p, map width, 1 / map width)
 //   B = (planet count, current planet, name alpha, background on)
 //   E = (ice colour, 0), F = (polar sea colour, 0)
+//   S = the space map's rectangle (x0, z0, w, h); U = (over space, the camera's look-at x, 0, 0)
 //   per planet: 0 rectangle (x0, z0, w, h); 1 centre xyz, radius; 2 look-at x, z, cos, sin of its
 //   latitude; 3 equator z, radians per z, radians per x, kind (0 hidden, 1 its map, 2 its image);
 //   4 ice north z, ice south z, ice edge width, height scale; 5 name row v0, dv, length, height (in
@@ -135,6 +148,8 @@ struct Params {
     float b[4] = {0, 0, 0, 0};
     float e[4] = {0, 0, 0, 0};
     float f[4] = {0, 0, 0, 0};
+    float s[4] = {0, 0, 0, 0};
+    float u[4] = {0, 0, 0, 0};
     float pl[kMaxPlanets * 8][4] = {};
     float t() const { return a[0]; }
     float overview() const { return a[1]; }
@@ -145,6 +160,7 @@ struct Params {
     const float* look(int i) const { return pl[i * 8 + 2]; }
     const float* bend(int i) const { return pl[i * 8 + 3]; }
     float kind(int i) const { return pl[i * 8 + 3][3]; }
+    bool space() const { return u[0] > 0.5f; }
 };
 // False (and an empty table, t = 0) when there is nothing to bend (t <= 0 and p <= 0) or bad input.
 bool MakeParams(const Settings& s, const std::vector<Planet>& planets, float mapW, const View& v, Params* out);

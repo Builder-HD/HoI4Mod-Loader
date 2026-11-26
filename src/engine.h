@@ -332,6 +332,7 @@ bool GlobeCameraPose(void* mapCamera, float eye[3], float look[3]);
 void GlobeHideCopies(void* mapCamera);                // the two wrap copies off for this frame
 void GlobeShiftCamera(void* mapCamera, float dx, float dz);  // eye, look-at and their targets moved by (dx, dz)
 void GlobeOpenFrustum(void* engineCamera);            // the six planes accept everything
+void GlobeSetCameraHeight(void* mapCamera, float height);  // eye and its target, keeping the camera's angle
 // The visible area's four corners pushed out from (cx, cz) by `factor`.
 void GlobeWidenArea(void* mapCamera, float cx, float cz, float factor);
 // The lowest and highest z of the visible area's four corners (as the game computed them for the

@@ -80,6 +80,15 @@ void ParsePlanet(const ScriptTree::Node& b, const std::string& shown, Settings* 
                 else problems->push_back({shown, o.line, "unknown key '" + ScriptTree::Label(o) + "' in overview"});
             }
             pl.hasOverview = ok;
+        } else if (ScriptTree::EqualsNoCase(n.key, "orbit")) {
+            ok = n.block;
+            for (const ScriptTree::Node& o : n.children) {
+                if (ScriptTree::EqualsNoCase(o.key, "x")) ok = NumberOf(o, 0, 1000000, &pl.orbitX) && ok;
+                else if (ScriptTree::EqualsNoCase(o.key, "y")) ok = NumberOf(o, 0, 1000000, &pl.orbitY) && ok;
+                else if (ScriptTree::EqualsNoCase(o.key, "radius")) ok = NumberOf(o, 8, 100000, &pl.orbitRadius) && ok;
+                else problems->push_back({shown, o.line, "unknown key '" + ScriptTree::Label(o) + "' in orbit"});
+            }
+            pl.hasOrbit = ok && pl.orbitRadius > 0;
         } else {
             problems->push_back({shown, n.line, "unknown key '" + ScriptTree::Label(n) + "' in planet"});
             continue;
@@ -141,7 +150,18 @@ void ParseFile(const std::string& text, const std::string& shown, Settings* s, s
                 ok = PathOf(n);
                 if (ok) s->nameFont = n.value;
             }
-            else if (ScriptTree::EqualsNoCase(n.key, "planet")) {
+            else if (ScriptTree::EqualsNoCase(n.key, "space_height")) ok = NumberOf(n, 1, 100000, &s->spaceHeight);
+            else if (ScriptTree::EqualsNoCase(n.key, "space")) {
+                ok = n.block;
+                for (const ScriptTree::Node& o : n.children) {
+                    if (ScriptTree::EqualsNoCase(o.key, "x")) ok = NumberOf(o, 0, 1000000, &s->spaceX) && ok;
+                    else if (ScriptTree::EqualsNoCase(o.key, "y")) ok = NumberOf(o, 0, 1000000, &s->spaceY) && ok;
+                    else if (ScriptTree::EqualsNoCase(o.key, "width")) ok = NumberOf(o, 64, 1000000, &s->spaceW) && ok;
+                    else if (ScriptTree::EqualsNoCase(o.key, "height")) ok = NumberOf(o, 64, 1000000, &s->spaceH) && ok;
+                    else problems->push_back({shown, o.line, "unknown key '" + ScriptTree::Label(o) + "' in space"});
+                }
+                s->hasSpace = ok && s->spaceW > 0 && s->spaceH > 0;
+            } else if (ScriptTree::EqualsNoCase(n.key, "planet")) {
                 if (n.block) ParsePlanet(n, shown, s, problems);
                 else problems->push_back({shown, n.line, "planet must be a block"});
                 continue;
@@ -198,6 +218,8 @@ std::vector<Planet> ResolvePlanets(const Settings& s, float mapW, float mapH, st
         p.capNorth = ps.setCapNorth ? ps.polarCapNorth : s.polarCapNorth;
         p.capSouth = ps.setCapSouth ? ps.polarCapSouth : s.polarCapSouth;
         p.image = !ps.image.empty();
+        p.hasOrbit = ps.hasOrbit && s.hasSpace;
+        p.orbitX = ps.orbitX, p.orbitZ = ps.orbitY, p.orbitR = ps.orbitRadius;
         p.size = ps.hasOverview ? ps.overviewSize : p.w / mapW;
         if (ps.hasOverview) p.ox = ps.overviewX, p.oy = ps.overviewY;
         else p.ox = autoX + p.size * 0.5f, p.oy = 0;
@@ -237,8 +259,8 @@ bool MakeParams(const Settings& s, const std::vector<Planet>& planets, float map
     *out = Params();
     int n = (int)planets.size();
     if (n < 1 || n > kMaxPlanets || v.current < 0 || v.current >= n || !(mapW > 1.0f)) return false;
-    bool overview = v.p > 0.0f;
-    if (!overview && !(v.t > kMinT)) return false;
+    bool overview = v.p > 0.0f && !v.space;
+    if (!overview && !v.space && !(v.t > kMinT)) return false;
     float t = overview ? 1.0f : (v.t > 1.0f ? 1.0f : v.t);
     float cx = 0, cy = 0, scale = 1;
     if (overview) scale = OverviewScale(planets, v, &cx, &cy);
@@ -247,6 +269,11 @@ bool MakeParams(const Settings& s, const std::vector<Planet>& planets, float map
     out->b[0] = (float)n, out->b[1] = (float)v.current, out->b[2] = overview ? Ease(v.p) : 0.0f, out->b[3] = v.background ? 1.0f : 0.0f;
     out->e[0] = s.polarColor[0], out->e[1] = s.polarColor[1], out->e[2] = s.polarColor[2];
     out->f[0] = s.polarSeaColor[0], out->f[1] = s.polarSeaColor[1], out->f[2] = s.polarSeaColor[2];
+    out->u[1] = v.lookX;
+    if (v.space) {
+        out->a[0] = 1.0f, out->b[2] = 1.0f, out->u[0] = 1.0f;
+        out->s[0] = s.spaceX, out->s[1] = s.spaceY, out->s[2] = s.spaceW, out->s[3] = s.spaceH;
+    }
     for (int i = 0; i < n; ++i) {
         const Planet& p = planets[i];
         float(*q)[4] = &out->pl[i * 8];
@@ -269,6 +296,17 @@ bool MakeParams(const Settings& s, const std::vector<Planet>& planets, float map
         float ccx = cur && !overview ? v.lookX : v.lookX + (p.ox - fx) * scale;
         float ccz = cur && !overview ? v.lookZ : v.lookZ + (p.oy - fy) * scale;
         float kind = overview ? (p.image && v.p >= 0.5f ? 2.0f : 1.0f) : (cur ? 1.0f : 0.0f);
+        if (v.space) {
+            // Over the space map: every planet with an orbit is its sphere in its hole there, sunk so
+            // that its top is at the map's level; it is turned as it was last looked at.
+            r = p.orbitR;
+            radPerX = 2.0f * kPi / p.w, radPerZ = span / p.h;
+            ccx = p.orbitX, ccz = p.orbitZ;
+            kind = p.hasOrbit ? 1.0f : 0.0f;
+            lx = v.lastLook.size() > (size_t)(2 * i + 1) ? v.lastLook[2 * i] : p.x0 + p.w * 0.5f;
+            lz = v.lastLook.size() > (size_t)(2 * i + 1) ? v.lastLook[2 * i + 1] : p.z0 + p.h * 0.5f;
+            latL = Clamp((Clamp(lz, p.z0, p.z0 + p.h) - zEq) * radPerZ, -kPi / 2, kPi / 2);
+        }
         q[0][0] = p.x0, q[0][1] = p.z0, q[0][2] = p.w, q[0][3] = p.h;
         q[1][0] = ccx, q[1][1] = -r, q[1][2] = ccz, q[1][3] = r;
         q[2][0] = lx, q[2][1] = lz, q[2][2] = cosf(latL), q[2][3] = sinf(latL);
@@ -396,6 +434,8 @@ const char kHlsl[] =
     "\tfloat4 HL_GlobeB;\t// planet count, current planet, name alpha, background on\n"
     "\tfloat4 HL_GlobeE;\t// the ice's colour\n"
     "\tfloat4 HL_GlobeF;\t// the polar seas' colour\n"
+    "\tfloat4 HL_GlobeS;\t// the space map's rectangle (x0, z0, w, h)\n"
+    "\tfloat4 HL_GlobeU;\t// over the space map (1), the camera's look-at x, 0, 0\n"
     "\tfloat4 HL_GlobeP[ 128 ];\t// 8 per planet (globe.h)\n"
     "};\n"
     "Texture2D HL_GlobeSpace : register( t20 );\n"
@@ -441,8 +481,21 @@ const char kHlsl[] =
     "// everything in a wrap copy's pass (the main camera draws every planet).\n"
     "float3 HL_GlobePoint( float3 p, out float3 vCentre )\n"
     "{\n"
-    "\tint k = (int)HL_GlobeB.y;\n"
-    "\tfloat fPass = round( ( vCamPos.x - HL_GlobeP[ k * 8 + 2 ].x ) * HL_GlobeA.w );\n"
+    "\tfloat fPass = round( ( vCamPos.x - HL_GlobeU.y ) * HL_GlobeA.w );\n"
+    "\tif ( HL_GlobeU.x > 0.5f && p.x >= HL_GlobeS.x && p.x <= HL_GlobeS.x + HL_GlobeS.z && p.z >= HL_GlobeS.y && p.z <= HL_GlobeS.y + HL_GlobeS.w )\n"
+    "\t{\n"
+    "\t\t// The space map stays flat; inside a planet's hole (its disc is drawn there) it is dropped.\n"
+    "\t\tvCentre = p - float3( 0.0f, 100000.0f, 0.0f );\n"
+    "\t\tfor ( int h = 0; h < 16; ++h )\n"
+    "\t\t{\n"
+    "\t\t\tif ( h >= (int)HL_GlobeB.x )\n"
+    "\t\t\t\tbreak;\n"
+    "\t\t\tfloat4 vC = HL_GlobeP[ h * 8 + 1 ];\n"
+    "\t\t\tif ( HL_GlobeP[ h * 8 + 3 ].w > 0.5f && distance( p.xz, vC.xz ) < vC.w )\n"
+    "\t\t\t\treturn HL_GlobeAway( p );\n"
+    "\t\t}\n"
+    "\t\treturn fPass != 0.0f ? HL_GlobeAway( p ) : p;\n"
+    "\t}\n"
     "\tint i = HL_GlobePlanetOf( p );\n"
     "\tif ( i < 0 )\n"
     "\t{\n"
@@ -505,7 +558,7 @@ const char kHlsl[] =
     "{\n"
     "\tif ( HL_GlobeA.x <= 0.0f || vPos.w == 0.0f )\n"
     "\t\treturn vPos;\n"
-    "\tif ( HL_GlobeA.y > 0.0f )\n"
+    "\tif ( HL_GlobeA.y > 0.0f || ( HL_GlobeU.x > 0.5f && HL_GlobePlanetOf( vPos.xyz / vPos.w ) >= 0 ) )\n"
     "\t\treturn float4( vCamPos + float3( 0.0f, -1000000.0f, 0.0f ), 1.0f );\n"
     "\treturn HL_GlobeCull( vPos );\n"
     "}\n"
@@ -565,10 +618,17 @@ const char kHlsl[] =
     "\tif ( HL_GlobeB.w <= 0.5f )\n"
     "\t\treturn vColor;\n"
     "\tfloat2 uv = d.xz / max( -d.y, 0.05f ) * 0.68f;\n"
-    "\tint k = (int)HL_GlobeB.y;\n"
-    "\tuv = float2( 0.5f + uv.x + HL_GlobeP[ k * 8 + 2 ].x * HL_GlobeA.w * 0.5f, 0.5f - uv.y );\n"
+    "\tuv = float2( 0.5f + uv.x + HL_GlobeU.y * HL_GlobeA.w * 0.5f, 0.5f - uv.y );\n"
     "\tuv = 1.0f - abs( frac( uv * 0.5f ) * 2.0f - 1.0f );\n"
     "\treturn HL_GlobeTexel( HL_GlobeSpace, uv, float4( 0.0f, 0.0f, 1.0f, 1.0f ) ).rgb;\n"
+    "}\n"
+    "// The space map's ground (over space): the background image instead of land and sea, as the sky behind\n"
+    "// it shows it; the map modes and borders are laid over it as over any ground.\n"
+    "float3 HL_GlobeSpaceGround( float3 vDiffuse, float3 vPrepos )\n"
+    "{\n"
+    "\tif ( HL_GlobeU.x <= 0.5f || vPrepos.x < HL_GlobeS.x || vPrepos.x > HL_GlobeS.x + HL_GlobeS.z || vPrepos.z < HL_GlobeS.y || vPrepos.z > HL_GlobeS.y + HL_GlobeS.w )\n"
+    "\t\treturn vDiffuse;\n"
+    "\treturn float3( 0.01f, 0.01f, 0.02f );\t// dark: the background is added to the lit output (HL_GlobeNameOut)\n"
     "}\n"
     "// Planet i's name over the point vDisc of its disc (x east, y north, in radii from its centre): along\n"
     "// an arc, as the game writes country names; rgb and coverage.\n"
@@ -597,6 +657,10 @@ const char kHlsl[] =
     "// The names over the terrain's final output (in the overview); its alpha is the glow, cleared under them.\n"
     "float4 HL_GlobeNameOut( float4 vOut, float3 vPrepos )\n"
     "{\n"
+    "\t// The space map: the background image added to its (dark) lit ground, as bright as the sky beside\n"
+    "\t// it; the map modes and borders stay over it. No glow.\n"
+    "\tif ( HL_GlobeU.x > 0.5f && vPrepos.x >= HL_GlobeS.x && vPrepos.x <= HL_GlobeS.x + HL_GlobeS.z && vPrepos.z >= HL_GlobeS.y && vPrepos.z <= HL_GlobeS.y + HL_GlobeS.w )\n"
+    "\t\treturn float4( vOut.rgb + HL_GlobeBackground( float3( 0.0f, 0.0f, 0.0f ), normalize( vPrepos - vCamPos ) ), 0.0f );\n"
     "\tif ( HL_GlobeB.z <= 0.0f )\n"
     "\t\treturn vOut;\n"
     "\tint i = HL_GlobePlanetOf( vPrepos );\n"
@@ -697,6 +761,7 @@ const char kHlsl[] =
     "float3 HL_GlobeWater( float3 vColor ) { return vColor; }\n"
     "float4 HL_GlobeSky( float3 vColor, float3 vPos ) { return float4( vColor, 1.0f ); }\n"
     "float3 HL_GlobeSea( float3 vDiffuse, float3 vTint, float fHeight ) { return vDiffuse; }\n"
+    "float3 HL_GlobeSpaceGround( float3 vDiffuse, float3 vPrepos ) { return vDiffuse; }\n"
     "float4 HL_GlobeNameOut( float4 vOut, float3 vPrepos ) { return vOut; }\n"
     "#endif\n"
     "#endif\n";
@@ -778,7 +843,8 @@ std::string PixelCode(const std::string& code, int* count) {
     if (res.find("TerrainColor") != std::string::npos && res.find("Input.prepos") != std::string::npos &&
         std::regex_search(res, g, gbRx)) {
         size_t at = (size_t)g.position() + 1;
-        res.insert(at, g[1].str() + "diffuse.rgb = HL_GlobeSea( diffuse.rgb, TerrainColor.rgb, Input.prepos.y );\n");
+        res.insert(at, g[1].str() + "diffuse.rgb = HL_GlobeSea( diffuse.rgb, TerrainColor.rgb, Input.prepos.y );\n" + g[1].str() +
+                           "diffuse.rgb = HL_GlobeSpaceGround( diffuse.rgb, Input.prepos );\n");
         ++*count;
         // The planet names over its final output: `return float4( vOut, ... );` becomes
         // `return HL_GlobeNameOut( float4( vOut, ... ), Input.prepos );`.
