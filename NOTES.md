@@ -8570,3 +8570,38 @@ Where they meet, from the test:
 - Later, as planned: the space map mode, space missions, space superiority.
 
 Steps from here: step 2 the space map as the zoomed-out view (U2); step 3 the separation above.
+
+## U10: step 2, the space map as the zoomed-out view (2026-11-26)
+
+- **Settings:** `space = { x y width height }`, `space_height` (2600), per planet `orbit = { x y radius
+  }` (the generator: the hole's centre, radius 250 for a hole of 5 x 5 cells of 96: a little smaller
+  than the hole, so the spaceport docks show as a ring in the owners' colours round the planet).
+- **Constants:** two more float4: S = the space map's rectangle, U = (over space, the camera's look-at
+  x). The wrap-copy test and the background's drift now use U.y (the camera's look-at x; with the
+  camera over space it is not on a planet).
+- **Shaders:** over space a point in the space rectangle stays where it is (flat), except inside a
+  planet's hole (dropped where it was seen; its neighbours are flat too, so nothing is smeared);
+  points on a planet are bent onto its sphere at its orbit (`MakeParams` with `View::space`: centre
+  (orbit x, -r, orbit z), radius r, the planet's own radians per x and z, turned to its last look-at);
+  the gaps dropped. The terrain's ground over space is dark (`HL_GlobeSpaceGround`) and its final
+  output gets the background image added (`HL_GlobeNameOut`), so the space map is as bright as the
+  sky beside it and the map modes and borders stay over it (first tried: the background as the
+  ground's diffuse, lit and fogged it was far darker than the sky, even times 2.5). The game's map
+  names on the planets' globes are dropped over space, the space map's own kept.
+- **Camera:** `GlobeSetCameraHeight` (new) moves the eye and its target along the line from the
+  look-at, so the camera keeps its angle. Planet -> space when the globe is whole (t = 1), the height
+  reaches `space_height` and the planet has an orbit: the camera to the orbit's centre, height times
+  r / (planet width / 2 pi). Space -> planet when the camera's look-at or the cursor (the game's hover
+  ray hitting the disc; zooming toward the cursor does not bring the look-at onto the disc) is over a
+  planet's disc and the height is below 90% of the matching height: the camera to the planet's last
+  look-at, height divided by the same factor, the globe kept (its sphere state's enter height set).
+  Over space the camera's own rays and the edge clamp are the game's, the 2D icons are not hidden
+  (fleet counters), the look-at is kept inside the space rectangle; non-camera rays that hit a disc are
+  re-aimed at that planet's province.
+- **Tests:** 329 checks (new: space and orbits read; over space both planets drawn, each in its orbit
+  with its top at the map's level, turned as last looked at; a ray onto a disc finds its province).
+- **In game (1.20, the twin map with space):** from Earth A's globe at 2628 the camera went to the
+  space map at 733; zoomed out, the space map showed both planets in their rings over the starfield,
+  as bright as the background beside it; the cursor over Earth B while zooming in: at 652 the camera
+  went to Earth B's globe at 2336. Not yet: fleets and missions checked over the new view (the owner's
+  test), the step 3 separation.

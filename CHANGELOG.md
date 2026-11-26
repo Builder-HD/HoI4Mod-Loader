@@ -19,6 +19,12 @@ A–F; NOTES.md has the findings and test results behind each.
   north to south, lake gaps between them, one new country owning each copy, and the globe's planets
   for them (NOTES.md Part T). Reads the owner's own game install; the generated files are game data
   and stay out of the repository.
+- **`globe`: the space map** (NOTES.md Part U, MODDING.md "Space"). `space = { x y width height }` and
+  per planet `orbit = { x y radius }`: zoomed out past `space_height` over a planet's globe, the camera
+  goes over the planet's orbit in the space map (a flat map of space zones, the game's own naval map,
+  fleets and missions), the planets drawn as their globes in their holes; zooming in over a disc goes
+  back to that planet. `tools/make_planets_map.py --space-height` builds a space band with space zones,
+  hidden spaceport docks per planet, a spaceport building, spaceship hulls and units.
 - **`globe`: several planets and the overview** (NOTES.md Part T, MODDING.md "Planets"). `planet = {
   name x y width height north south polar_cap_* overview = { x y size } image }` blocks (up to 16) make
   rectangles of the map separate worlds: the flat camera stays on its planet, the globe is that

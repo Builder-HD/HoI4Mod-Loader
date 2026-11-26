@@ -2256,6 +2256,8 @@ globe = {
 	                              # NFrontend.CAMERA_MAX_HEIGHT can raise it, see camera_range)
 	name_font = "gfx/fonts/hoi_mapfont4"   # optional: the planets' names (the game's map font)
 	planet = { ... }              # optional, up to 16 (see "Planets"); none: the whole map is one
+	space = { x = 0 y = 4608 width = 5376 height = 2048 }   # optional: the space map (see "Space")
+	space_height = 2600           # where a planet's globe hands over to the space map
 }
 ```
 
@@ -2352,6 +2354,22 @@ planet = {
 - **Room for the overview:** vanilla's camera stops at 3000. A mod that raises
   `NDefines.NFrontend.CAMERA_MAX_HEIGHT` (e.g. to 6000) gets a longer overview; `camera_range` moves the
   far plane with it.
+
+**Space** (NOTES.md Part U). A mod can make a rectangle of the map **the space map**: sea provinces
+in their own strategic regions (space zones), with a hole for each planet (`orbit = { x y radius }` in
+the planet's block: the hole's centre and the radius of the planet's disc there). The planets test
+(`tools/make_planets_map.py`) builds one: a grid of space provinces, each hole ringed by hidden ports
+(their spaceports' naval bases, see the generator), spaceship hulls and units.
+- **Planet -> space:** zoomed out past `space_height` over a planet's globe, the camera moves over the
+  planet's orbit in the space map, at the height where the planet's disc there looks exactly as the
+  globe did. From there it is an ordinary flat camera over a sea: the game draws the space zones,
+  their borders, the fleet counters and the naval map mode, and missions are given per zone as at sea.
+  The loader draws every planet with an orbit as its globe in its hole (turned as it was last looked
+  at, its name on it), and the background image over the space map's ground.
+- **Space -> planet:** zooming in over a planet's disc (the camera or the cursor on it) below the
+  matching height goes back to that planet's globe, then its flat map.
+- With `space` the Part T overview is not used. Hovering and clicking a disc find that planet's
+  provinces; the space map is picked by the game as any map.
 
 **Limits:**
 - DirectX 11 only (the Windows default). With the DX9 or OpenGL renderer the map stays flat
