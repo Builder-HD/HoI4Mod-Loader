@@ -31,7 +31,8 @@ A–F; NOTES.md has the findings and test results behind each.
   last looked. Over space the game draws only the planets' terrain for the discs (2 new signatures on
   the terrain's block and patch choices, checked on 1.20.1, 1.20, 1.19.5 and 1.19.4.2), so zooming in
   over space keeps its frame rate. `tools/make_planets_map.py --space-height` builds a space band with space zones,
-  hidden spaceport docks per planet, a spaceport building, spaceship hulls and units.
+  hidden spaceport docks per planet, a spaceport building, spaceship hulls and units, and a
+  spaceships production tab.
 - **`globe`: several planets and the overview** (NOTES.md Part T, MODDING.md "Planets"). `planet = {
   name x y width height north south polar_cap_* overview = { x y size } image }` blocks (up to 16) make
   rectangles of the map separate worlds: the flat camera stays on its planet, the globe is that

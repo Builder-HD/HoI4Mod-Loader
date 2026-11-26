@@ -8674,3 +8674,17 @@ Steps from here: step 2 the space map as the zoomed-out view (U2); step 3 the se
 - **In game (1.20.1):** both discs drawn whole, no ring, no square; Earth A -> space at 1361, the
   cursor over Earth B: at 1254 to Earth B's globe at 2333 (Africa); the First Space Fleet docked in
   Spaceport Dock 1 (Earth A), its missions bar; error.log without errors.
+
+## U13: step 3a, the spaceships' production tab (2026-11-26)
+
+- No loader code: the planets test uses `production_tabs`. `common/hoi4_loader_production_tabs/
+  hoi4_loader_space_tabs.txt`: a tab `hl_space_ships` with the three space hulls, removed from `naval`;
+  its button `hl_space_tab_button` (naval picture, tooltip "Spaceships") and glow in the generator's copy
+  of `interface/countryproductionlineview.gui`, in the free place of the top row (x = 265), inserted
+  before the naval repair button.
+- **In game (1.20.1):** `hl_space_ships: button hl_space_tab_button bound (with glow)`, naval 3
+  archetypes removed, the new tab 3 added; the button opens the dockyard list with the Orbital Cruiser,
+  the Orbital Frigate and the light, cruiser and heavy space hulls; the naval tab lists vanilla's ships
+  only (convoy to submarines).
+- Next (3b): deployment and fleets kept apart in the engine (spaceship lines only to spaceports and
+  space fleets, regular ships never there, no mixed fleets).

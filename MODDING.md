@@ -2362,7 +2362,8 @@ everything within its radius from any angle, so whatever lies in the hole (provi
 there for the game, such as spaceport docks) is out of sight when the radius reaches the hole's
 corners. The planets test (`tools/make_planets_map.py`) builds one: a grid of space provinces, each
 hole ringed by hidden ports (their spaceports' naval bases, see the generator) under a disc reaching
-its corners, spaceship hulls and units.
+its corners, spaceship hulls and units, and a production tab of their own (`production_tabs`: the
+space hulls out of the naval tab, a button at x = 265 in its copy of the production view).
 - **Planet -> space:** zoomed out past `space_height` over a planet's globe, the camera moves over the
   planet's orbit in the space map, at the height where the planet's disc there looks exactly as the
   globe did. From there it is an ordinary flat camera over a sea: the game draws the space zones,
