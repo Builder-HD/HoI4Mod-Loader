@@ -2357,9 +2357,12 @@ planet = {
 
 **Space** (NOTES.md Part U). A mod can make a rectangle of the map **the space map**: sea provinces
 in their own strategic regions (space zones), with a hole for each planet (`orbit = { x y radius }` in
-the planet's block: the hole's centre and the radius of the planet's disc there). The planets test
-(`tools/make_planets_map.py`) builds one: a grid of space provinces, each hole ringed by hidden ports
-(their spaceports' naval bases, see the generator), spaceship hulls and units.
+the planet's block: the hole's centre and the radius of the planet's disc there). The disc covers
+everything within its radius from any angle, so whatever lies in the hole (provinces that are only
+there for the game, such as spaceport docks) is out of sight when the radius reaches the hole's
+corners. The planets test (`tools/make_planets_map.py`) builds one: a grid of space provinces, each
+hole ringed by hidden ports (their spaceports' naval bases, see the generator) under a disc reaching
+its corners, spaceship hulls and units.
 - **Planet -> space:** zoomed out past `space_height` over a planet's globe, the camera moves over the
   planet's orbit in the space map, at the height where the planet's disc there looks exactly as the
   globe did. From there it is an ordinary flat camera over a sea: the game draws the space zones,
@@ -2368,7 +2371,10 @@ the planet's block: the hole's centre and the radius of the planet's disc there)
   from any angle it covers its whole hole; turned as it was last looked at, its name on it), and the
   background image over the space map's ground, glowing as the sky beside it does. Fleet counters show
   over space as over any sea (at the game's own zoom cutoff); the naval map mode's sea colours do not
-  yet (the game's water, which carries them, is hidden while the map is bent).
+  yet (the game's water, which carries them, is hidden while the map is bent). Over space the game
+  draws only the planets' terrain for their discs, and only while a disc is in view: their icons,
+  cities, trees, shadows and railways are left out (drawn at full detail when zoomed in, they would
+  cost most of the frame rate).
 - **Space -> planet:** zooming in over a planet's disc (the camera or the cursor on it) below the
   matching height goes back to that planet's globe, then its flat map.
 - With `space` the Part T overview is not used. Hovering and clicking a disc find that planet's

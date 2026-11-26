@@ -8634,3 +8634,43 @@ Steps from here: step 2 the space map as the zoomed-out view (U2); step 3 the se
   when zoomed in (the game's own icon cutoff hides it far out). Not yet: the naval map mode's sea
   colours over space (they are drawn by the game's water, hidden while bent); a space map mode is a
   later part.
+
+## U12: the lag over space, and the docks out of sight (2026-11-26)
+
+- **The lag (owner: "if I zoom in fully to the space map it just starts lagging like crazy"):** over
+  space the loader opened every frustum plane and widened the visible area each frame (as for the
+  globe), so the game handled both whole planets as visible. Measured (1.20.1, frame rate logged
+  every 2 s): 53-55 fps from 1700 down to 924, then 24 below about 900 (`UNITS_ICONS_DISTANCE_CUTOFF`,
+  `FACILITY_DISTANCE_CUTOFF`, the base icons: 900), 17 at 206 and 11 below about 100 (shadows 400,
+  railways 300). Not the widened area (11 fps without it).
+- **Fix:** the terrain decides what it draws in two functions, both testing boxes against the main
+  camera's four side planes (`lea rax, [r8+0x1c0]`, the planes at engine camera +0x1b8, the cameras at
+  map camera +0x10 / +0x230 / +0x450): the per-block camera choice FUN_1413155d0 (renderer, map
+  camera), 256 x 256 blocks into renderer +0x5348, and the per-patch detail and camera choice
+  FUN_1413146e0 (renderer, ?, map camera), 64 x 64 patches into renderer +0x4970, which the terrain
+  draw FUN_14130d210 reads (a patch is drawn when its byte has the camera's bit). Hooking only the
+  block choice drew nothing on the discs (the sky's sphere showed); both are needed. Over space, while
+  a disc is in view, the main camera's six planes are opened for those two calls alone and put back
+  after; nothing else sees them open, the visible area is not widened. Result: 60 fps (the vsync cap)
+  at every height from 1700 down to 50, the discs drawn with their terrain. Signatures:
+  `kSigTerrainBlocksCameraStart` (the block choice's start; the bytes large_map rewrites are not in
+  it) and `kSigTerrainPatches` (inside the patch choice; its start from `.pdata`, not a chained
+  fragment), both unique on 1.20.1, 1.20, 1.19.5 and 1.19.4.2; the shape check (both read the planes
+  at the frustum planes + 8, the patch choice starts within 0x1000 before the match) passes on all four
+  (105/105). If either is missing or different, over space every plane is opened as before.
+- **A disc in view:** the game's visible area (read right after its camera update) within 1.2 radii of
+  a planet's orbit (its sphere rises a radius above the map). Over empty space nothing is opened.
+- **The docks out of sight (owner: "the space docks shouldn't be visible right?"):** first tried
+  hiding a square `hole` round the orbit: borders, models and names dropped there (fine), and the
+  terrain there drawn as the space round it, which never matched: the docks are land, and the light,
+  the fog of war and the border glow treat land and sea differently (+12 brighter even with no shine
+  and no border glow; the background alone was darker, the hole's ground clipped showed black where
+  the background image is dark, a fogged estimate was +15 brighter). Dropped. Instead the disc covers
+  them: centred on the map, a sphere covers everything within its radius from any angle, so the
+  generator now gives the disc the radius of the hole's corners (half its diagonal + 4: 348 for holes
+  of 5 x 5 cells of about 97). The neighbouring sea cells lie partly under the disc's edge (a fleet
+  there shows at the planet's edge, as in orbit). Space -> planet then at 1254 (2600 x scale x 0.9 +
+  348), planet -> space at 1361.
+- **In game (1.20.1):** both discs drawn whole, no ring, no square; Earth A -> space at 1361, the
+  cursor over Earth B: at 1254 to Earth B's globe at 2333 (Africa); the First Space Fleet docked in
+  Spaceport Dock 1 (Earth A), its missions bar; error.log without errors.

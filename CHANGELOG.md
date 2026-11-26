@@ -26,8 +26,11 @@ A–F; NOTES.md has the findings and test results behind each.
 - **`globe`: the space map** (NOTES.md Part U, MODDING.md "Space"). `space = { x y width height }` and
   per planet `orbit = { x y radius }`: zoomed out past `space_height` over a planet's globe, the camera
   goes over the planet's orbit in the space map (a flat map of space zones, the game's own naval map,
-  fleets and missions), the planets drawn as their globes in their holes (centred on the map's level);
-  zooming in over a disc goes back to that planet, looking where it last looked. `tools/make_planets_map.py --space-height` builds a space band with space zones,
+  fleets and missions), the planets drawn as their globes in their holes (centred on the map's level,
+  covering whatever the hole holds); zooming in over a disc goes back to that planet, looking where it
+  last looked. Over space the game draws only the planets' terrain for the discs (2 new signatures on
+  the terrain's block and patch choices, checked on 1.20.1, 1.20, 1.19.5 and 1.19.4.2), so zooming in
+  over space keeps its frame rate. `tools/make_planets_map.py --space-height` builds a space band with space zones,
   hidden spaceport docks per planet, a spaceport building, spaceship hulls and units.
 - **`globe`: several planets and the overview** (NOTES.md Part T, MODDING.md "Planets"). `planet = {
   name x y width height north south polar_cap_* overview = { x y size } image }` blocks (up to 16) make
