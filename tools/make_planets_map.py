@@ -996,17 +996,23 @@ def main():
         letter = chr(ord("A") + k)
         loc.append(' PLANET_EARTH_%s:0 "Earth %s"' % (letter, letter))
         ox = (k - (copies - 1) / 2.0) * 1.4
+        orbit = ""
+        if space:
+            # Its hole in the space map: the centre of its 5 x 5 cells; the disc a little smaller than the
+            # hole, so its spaceports' ring shows round it in the owners' colours.
+            ix0, iy0 = space["holes"][k]
+            cx, cz = space["centre"]((ix0 + 2, iy0 + 2))
+            orbit = "\t\torbit = { x = %.0f y = %.0f radius = 250 }\n" % (cx, cz)
         planets.append("\tplanet = {\n\t\tname = PLANET_EARTH_%s\n\t\tx = 0  y = %d  width = %d  height = %d\n"
-                       "\t\toverview = { x = %.2f y = 0 size = 1 }\n\t}\n" % (letter, zoff(k), map_w, map_h, ox))
+                       "\t\toverview = { x = %.2f y = 0 size = 1 }\n%s\t}\n" % (letter, zoff(k), map_w, map_h, ox, orbit))
     # The camera may go higher, for the overview (hoi4_loader's camera_range raises the far plane with it).
     write_text(os.path.join(out, "common", "defines", "zz_hoi4_loader_planets.lua"),
                "-- hoi4_loader planets test: a higher camera for the overview of the planets."+"\n"
                "NDefines.NFrontend.CAMERA_MAX_HEIGHT = 6000.0"+"\n")
+    space_keys = ""
     if space:
-        # Step 1 (NOTES.md U7): the space band as a planet of its own, so the camera can go there.
-        loc.append(' PLANET_SPACE:0 "Space"')
-        planets.append("\tplanet = {\n\t\tname = PLANET_SPACE\n\t\tx = 0  y = %d  width = %d  height = %d\n"
-                       "\t\toverview = { x = 0 y = -1.3 size = 1 }\n\t}\n" % (space["z0"], space["ws"], space_h))
+        # The space map: zoomed out past space_height over a planet's globe (NOTES.md Part U).
+        space_keys = "\tspace = { x = 0 y = %d width = %d height = %d }\n\tspace_height = 2600\n" % (space["z0"], space["ws"], space_h)
     bg = ""
     if args.background:
         with open(args.background, "rb") as f:
@@ -1021,7 +1027,7 @@ def main():
                "# the loader's camera_range moves the far plane with it).\n"
                "globe = {\n\tdefault = yes\n\tflat_height = 400\n\tglobe_height = 2200\n\ttransition = 0.35\n"
                "\tnorth = 82\n\tsouth = -60\n\tpolar_cap_north = 85\n\tpolar_cap_south = -68\n%s"
-               "\toverview_height = 2600\n\toverview_full_height = 6000\n%s}\n" % (bg, "".join(planets)))
+               "\toverview_height = 2600\n\toverview_full_height = 6000\n%s%s}\n" % (bg, space_keys, "".join(planets)))
     # Victory point names for the copies.
     vp = {}
     for path in glob.glob(os.path.join(game, "localisation", "english", "*.yml")):
