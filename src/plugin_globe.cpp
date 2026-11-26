@@ -164,6 +164,7 @@ std::vector<float> g_lastLook;         // per planet x, z
 float g_focus[2] = {0, 0};             // the overview layout point under the camera
 bool g_othersVisible = false;          // in the overview, another planet is on screen
 bool g_space = false;                  // over the space map (NOTES.md Part U)
+bool g_discsInView = true;             // over space: a planet's disc is in the game's view area
 float g_aspect = 16.0f / 9.0f;         // the view's, last frame
 bool g_namesBuilt = false;
 std::vector<int> g_imageIndex;         // per planet: its index in the images given to GlobeD3D, -1 none
@@ -260,6 +261,18 @@ void Apply(void* mapCamera, bool fresh) {
     }
     g_height = height;
     const Globe::Planet& cur = g_planets[g_cur];
+    if (fresh && g_space) {
+        // Over space the planets' maps are drawn only while a disc is in view: with every frustum plane
+        // open the game draws all of both maps, at its full detail when zoomed in (trees, cities, ...).
+        ReadArea(mapCamera);
+        g_discsInView = false;
+        for (const Globe::Planet& c : g_planets) {
+            float m = c.orbitR * 1.2f;  // its sphere rises its radius above the map: a margin
+            if (c.hasOrbit && c.orbitX + m >= g_area[0] && c.orbitX - m <= g_area[1] && c.orbitZ + m >= g_area[2] &&
+                c.orbitZ - m <= g_area[3])
+                g_discsInView = true;
+        }
+    }
     if (fresh && !g_space) {
         ReadArea(mapCamera);
         bool narrow = cur.w < w - 0.5f;
@@ -289,6 +302,11 @@ void Apply(void* mapCamera, bool fresh) {
     Publish(p);
     // The main camera draws every planet: the wrap copies are off, every frustum plane open.
     Engine::GlobeHideCopies(mapCamera);
+    // Over space only the terrain's block choice sees the planes open (OpenBlocks), so the game draws
+    // the planets' terrain as their discs but nothing else of them (their icons, cities, trees, shadows
+    // and railways, all drawn at full detail when zoomed in: 11 fps against 60). Without that hook every
+    // plane is opened while a disc is in view.
+    if (g_space && (!g_discsInView || Engine::GlobeHaveBlocks())) return;
     for (int k = 0; k < 3; ++k) Engine::GlobeOpenFrustum(Engine::GlobeEngineCamera(mapCamera, k));
     if (fresh) Engine::GlobeWidenArea(mapCamera, lx, lz, 50.0f);
     if (!g_loggedActive) {
@@ -562,6 +580,9 @@ bool SkipEdgeClamp(void* mapCamera) {
     Globe::Params p = Current();
     return mapCamera == g_gameCam.load() && p.t() > 0.0f && !p.space();
 }
+
+// Over space with a planet's disc in view: the terrain's block choice sees every plane open.
+bool OpenBlocks(void* mapCamera) { return mapCamera == g_gameCam.load() && g_space && g_discsInView && Current().space(); }
 
 // While bent, the 2D map icons (city names, ports, units, ...) hide by their own cutoffs: they are
 // placed for the flat map. Over the space map they stay (fleets, zones): it is flat.
@@ -996,7 +1017,7 @@ bool GlobeInit() {
         Log("globe: the fog or sky patch could not be registered; globe off");
         return false;
     }
-    if (!GlobeD3D::Install(background, images) || !Engine::GlobeInstall({&AfterUpdate, &ScreenRay, &SkipEdgeClamp, &HideIcons})) {
+    if (!GlobeD3D::Install(background, images) || !Engine::GlobeInstall({&AfterUpdate, &ScreenRay, &SkipEdgeClamp, &HideIcons, &OpenBlocks})) {
         Log("globe: hooks could not be queued; globe off");
         return false;
     }

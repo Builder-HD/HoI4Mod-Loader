@@ -56,6 +56,13 @@ uint32_t g_eyeTarget = 0, g_lookTarget = 0;    // where they are moving to
 uint32_t g_areaPts = 0;                        // the five area points
 uint32_t g_planes = 0;                         // engine camera frustum planes
 bool g_ok = false;
+uint8_t* g_blocks = nullptr;                   // the terrain's per-block camera choice (optional)
+using Blocks_t = void(__fastcall*)(void* renderer, void* mapCamera);
+Blocks_t g_blocksOrig = nullptr;
+uint8_t* g_patches = nullptr;                  // the terrain's per-patch choice (with the blocks)
+using Patches_t = void(__fastcall*)(void* renderer, void* a2, void* mapCamera);
+Patches_t g_patchesOrig = nullptr;
+bool g_blocksHooked = false;
 
 // --- Hooks: no C++ objects, faults in the plugin's callbacks are contained --------------------------
 
@@ -135,6 +142,40 @@ float* __fastcall HookClamp(void* mapCamera, float* out, const float* in) {
         return out;
     }
     return g_clampOrig(mapCamera, out, in);
+}
+
+bool CallOpenBlocks(void* mapCamera) {
+    __try {
+        return g_hooks.openBlocks(mapCamera);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// The terrain's block and patch choices with the main camera's planes open (the planets' terrain is
+// drawn as their discs over space); the planes are put back right after, for everything else.
+struct OpenPlanes {
+    uint8_t* planes = nullptr;
+    uint8_t saved[6 * 16];
+    explicit OpenPlanes(void* mapCamera) {
+        if (!mapCamera || !g_hooks.openBlocks || !CallOpenBlocks(mapCamera)) return;
+        planes = (uint8_t*)mapCamera + g_cam[0] + g_planes;
+        memcpy(saved, planes, sizeof saved);
+        GlobeOpenFrustum((uint8_t*)mapCamera + g_cam[0]);
+    }
+    ~OpenPlanes() {
+        if (planes) memcpy(planes, saved, sizeof saved);
+    }
+};
+
+void __fastcall HookBlocks(void* renderer, void* mapCamera) {
+    OpenPlanes open(mapCamera);
+    g_blocksOrig(renderer, mapCamera);
+}
+
+void __fastcall HookPatches(void* renderer, void* a2, void* mapCamera) {
+    OpenPlanes open(mapCamera);
+    g_patchesOrig(renderer, a2, mapCamera);
 }
 
 bool Fail(const char* why) {
@@ -218,6 +259,28 @@ void ResolveGlobe() {
         return;
     }
     g_ok = true;
+    // Optional: the terrain's block choice (over space only its planets' blocks are opened). Its plane
+    // read must be the planes found above; else the space map opens every plane, as before.
+    uint8_t* blocks = SigFindUnique("terrain_blocks_start", kSigTerrainBlocksCameraStart);
+    uint8_t* lea = blocks ? SigFindIn(blocks, 0x300, kCodeTerrainBlocksPlanes) : nullptr;
+    uint8_t* inPatches = SigFindUnique("terrain_patches", kSigTerrainPatches);
+    uint8_t* lea2 = inPatches ? SigFindIn(inPatches, 0x80, kCodeTerrainBlocksPlanes) : nullptr;
+    uint8_t* patches = nullptr;
+    if (inPatches) {
+        DWORD64 base = 0;
+        PRUNTIME_FUNCTION f = RtlLookupFunctionEntry((DWORD64)inPatches, &base, nullptr);
+        // Not a chained fragment (UNW_FLAG_CHAININFO): its start would not be the function's.
+        if (f && !(f->UnwindData & 1) && !((Rd<uint8_t>((void*)base, f->UnwindData) >> 3) & 4))
+            patches = (uint8_t*)(base + f->BeginAddress);
+    }
+    bool terrainShape = blocks && lea && Rd<uint32_t>(lea, 3) == g_planes + 8 && lea2 && Rd<uint32_t>(lea2, 3) == g_planes + 8 &&
+                 patches && patches < inPatches && inPatches - patches < 0x1000 && g_cam[0] < 0x80;
+    if (terrainShape) {
+        g_blocks = blocks, g_patches = patches;
+    } else {
+        Log("Globe: the terrain's block and patch choices %s; over space every frustum plane is opened",
+            !blocks || !inPatches ? "were not found" : "do not look as analysed");
+    }
     Log("Globe: map %s (+0x%x/+0x%x), cameras +0x%x/+0x%x/+0x%x (in use +0x%x/+0x%x), eye +0x%x, look-at +0x%x, area +0x%x, "
         "planes +0x%x",
         SigDescribe(g_ppMap).c_str(), g_mapW, g_mapH, g_cam[0], g_cam[1], g_cam[2], g_copyFlag[0], g_copyFlag[1], g_eye, g_look,
@@ -225,6 +288,8 @@ void ResolveGlobe() {
 }
 
 bool HaveGlobe() { return g_ok; }
+
+bool GlobeHaveBlocks() { return g_blocksHooked && g_blocksOrig && g_patchesOrig; }
 
 bool GlobeInstall(const GlobeHooks& hooks) {
     if (!g_ok) return false;
@@ -234,6 +299,13 @@ bool GlobeInstall(const GlobeHooks& hooks) {
     ok = ok && HookQueue(g_clamp, (void*)&HookClamp, (void**)&g_clampOrig, "globe_edge_clamp");
     ok = ok && HookQueue(g_point, (void*)&HookPoint, (void**)&g_pointOrig, "globe_map_point");
     ok = ok && HookQueue(g_icons, (void*)&HookIcons, (void**)&g_iconsOrig, "globe_icons");
+    if (ok && g_blocks && g_patches && hooks.openBlocks) {
+        g_blocksHooked = HookQueue(g_blocks, (void*)&HookBlocks, (void**)&g_blocksOrig, "globe_terrain_blocks");
+        if (g_blocksHooked && !HookQueue(g_patches, (void*)&HookPatches, (void**)&g_patchesOrig, "globe_terrain_patches")) {
+            HookUnqueue(g_blocks);
+            g_blocksHooked = false;
+        }
+    }
     if (!ok) {
         HookUnqueue(g_area);
         HookUnqueue(g_ray);

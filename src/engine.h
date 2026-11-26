@@ -323,6 +323,9 @@ struct GlobeHooks {
     bool (*skipEdgeClamp)(void* mapCamera);
     // True: the map icons' update sees the cameras far up (every icon hides by its own cutoff).
     bool (*hideIcons)();
+    // True: the terrain's per-block and per-patch choices see the main camera's planes open (every part
+    // of the terrain drawn) for those calls alone. Only called when GlobeHaveBlocks().
+    bool (*openBlocks)(void* mapCamera);
 };
 bool GlobeInstall(const GlobeHooks& hooks);  // queues the three hooks; init only
 void* GlobeEngineCamera(void* mapCamera, int which);  // 0 main, 1 and 2 the wrap copies
@@ -332,6 +335,7 @@ bool GlobeCameraPose(void* mapCamera, float eye[3], float look[3]);
 void GlobeHideCopies(void* mapCamera);                // the two wrap copies off for this frame
 void GlobeShiftCamera(void* mapCamera, float dx, float dz);  // eye, look-at and their targets moved by (dx, dz)
 void GlobeOpenFrustum(void* engineCamera);            // the six planes accept everything
+bool GlobeHaveBlocks();                               // the terrain's block choice is hooked (openBlocks)
 void GlobeSetCameraHeight(void* mapCamera, float height);  // eye and its target, keeping the camera's angle
 // The visible area's four corners pushed out from (cx, cz) by `factor`.
 void GlobeWidenArea(void* mapCamera, float cx, float cz, float factor);

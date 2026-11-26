@@ -1507,6 +1507,19 @@ static const size_t kSigTerrainBlocksBuildShift1 = 10, kSigTerrainBlocksBuildShi
 // The per-block camera choice (FUN_1413155d0): `... sar r12d, 8` (width) and `... sar ecx, 8` (height).
 SIG(kSigTerrainBlocksCamera, "44 0F B6 E2 44 03 E0 41 8B 40 44 99 41 C1 FC 08 0F B6 CA 03 C8 41 8B 40 40 99 C1 F9 08 41 F7 FC")
 static const size_t kSigTerrainBlocksCameraShift1 = 15, kSigTerrainBlocksCameraShift2 = 28;
+// The same function from its start (globe, NOTES.md Part U): (renderer, map camera); each block's box
+// against the four side planes of the map camera's engine cameras, read as `lea rax, [r8+disp32]`
+// with disp32 = the frustum planes + 8 (kCodeTerrainBlocksPlanes, within its first 0x300 bytes). Over
+// space the globe opens the main camera's planes for this call alone, so the terrain draws the planets'
+// blocks while everything else keeps the real view. Not the bytes large_map rewrites.
+SIG(kSigTerrainBlocksCameraStart, "40 53 41 54 41 57 48 81 EC ?? ?? ?? ?? 4C 8B 05 ?? ?? ?? ?? 48 8B DA 4C 8B D9 44 0F 29 5C 24 ?? F3 44 0F 10 1D ?? ?? ?? ?? F3 44 0F 59 1D ?? ?? ?? ?? 41 8B 40 40 99")
+CODE(kCodeTerrainBlocksPlanes, "49 8D 80 ?? ?? 00 00")  // lea rax, [r8+disp32]
+// The terrain's per-patch detail and camera choice (FUN_1413146e0 on 1.20: (renderer, ?, map camera)):
+// each 64 x 64 patch against the same planes (the `lea rax, [r8+disp32]` of kCodeTerrainBlocksPlanes
+// right after this), written to the renderer's patch array that the terrain draw reads. Found inside
+// (`mov rax, [r14+patches]; mov [rbx+rax+1], dl; ...` then the copy cameras' choice); the function's
+// start comes from the unwind table. Opened over space with the block choice.
+SIG(kSigTerrainPatches, "49 8B 86 ?? ?? ?? ?? 88 54 03 01 4C 8B 45 ?? 41 B1 01 48 8B 85 ?? ?? ?? ?? 0F 1F 00 83 FA 01 75 ?? 80 B8 ?? ?? ?? ?? 00 74 ?? 80 B8 ?? ?? ?? ?? 00 74 ?? 4C 8D 80")
 
 // --- camera_range (NOTES.md Part T; addresses 1.20) -----------------------------------------------
 // The engine camera's set-up (FUN_142358c50(cam, fov, aspect, near, far)): `mov rcx, rbx; movss

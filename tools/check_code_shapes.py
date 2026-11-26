@@ -37,6 +37,21 @@ class Image:
                 return rva - sva + ra
         return None
 
+    def func_start(self, va):
+        """Start of the function holding va from .pdata (as RtlLookupFunctionEntry); None for a chained
+        fragment (UNW_FLAG_CHAININFO) or no entry."""
+        if '.pdata' not in self.secs:
+            return None
+        pva, prs, pra = self.secs['.pdata']
+        rva = va - self.base
+        for i in range(pra, pra + prs - 11, 12):
+            b, e, u = struct.unpack_from('<III', self.d, i)
+            if b <= rva < e:
+                if u & 1 or (self.d[self.va2off(self.base + u)] >> 3) & 4:
+                    return None
+                return self.base + b
+        return None
+
     def is_code(self, va):
         tva, trs, _ = self.secs['.text']
         return self.base + tva <= va < self.base + tva + trs
@@ -962,9 +977,20 @@ def check_globe(img, codes, text_va, text):
     ok = (main == u8(pick + k['kSigGlobePickMain']) and mapA == mapB and cams[2] - cams[1] == stride and stride > planes + 0x60 and
           flags[1] == flags[0] + 1 and eye > flags[1] and lk == eye + 12 and eyeT == eye + 0x18 and lookT == lk + 0x18 and
           pts > lk and planes > pos and h == w + 4 and calls_ok)
+    # Over space (Part U): the terrain's block and patch choices read the main camera's planes as
+    # `lea rax, [r8+planes+8]`, the camera at +main; the patch choice's start from .pdata.
+    blocks, inp = one('kSigTerrainBlocksCameraStart'), one('kSigTerrainPatches')
+    lea = find_in(img, blocks, 0x300, codes['kCodeTerrainBlocksPlanes']) if blocks else None
+    lea2 = find_in(img, inp, 0x80, codes['kCodeTerrainBlocksPlanes']) if inp else None
+    start = img.func_start(inp) if inp else None
+    tok = (bool(lea and lea2 and start) and u32(lea + 3) == planes + 8 and u32(lea2 + 3) == planes + 8 and
+           start < inp and inp - start < 0x1000 and main < 0x80)
     return [('kSigGlobe* / kCodeGlobeAreaStore (cameras +0x%x/+0x%x/+0x%x, in use +0x%x/+0x%x, eye +0x%x, look +0x%x, '
              'area +0x%x, planes +0x%x, map +0x%x/+0x%x, camera rays call it: %s)' % (cams[0], cams[1], cams[2], flags[0], flags[1], eye, lk, pts, planes, w, h, calls_ok),
-             ok, hex(area))]
+             ok, hex(area)),
+            ('kSigTerrainBlocksCameraStart / kSigTerrainPatches / kCodeTerrainBlocksPlanes (planes read at +0x%x / +0x%x, '
+             'patch choice starts %s)' % (u32(lea + 3) if lea else 0, u32(lea2 + 3) if lea2 else 0, hex(start) if start else 'unknown'),
+             tok, hex(blocks) if blocks else 'missing')]
 
 
 def check_large_map(img, codes, text_va, text):
