@@ -234,6 +234,7 @@ def check(path, codes):
     results += check_globe(img, codes, text_va, text)
     results += check_large_map(img, codes, text_va, text)
     results += check_camera_range(img, codes, text_va, text)
+    results += check_ship_domains(img, codes, text_va, text)
     return results
 
 
@@ -1039,6 +1040,47 @@ def check_camera_range(img, codes, text_va, text):
     return [('kSigCameraFar (fov +0x%x, aspect +0x%x, near +0x%x, far +0x%x)' % (fov, asp, nr, far),
              asp == fov + 4 and nr == asp + 4 and far == nr + 4, hex(f)),
             ('kSigCameraMaxHeight (min +0x%x, max +0x%x, define %s)' % (mn, mx, hex(define)), mx == mn + 4, hex(c))]
+
+
+def check_ship_domains(img, codes, text_va, text):
+    """ship_domains (NOTES.md U14): the deploy function's start (unwind table) before its ship branch,
+    the default naval base's shape at the branch's call, the stockpile field in range, the continent
+    trigger's province read, the classes and the five commands' distinct can-execute slots."""
+    hdr = pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h'
+    sigs, _ = cs.load_signatures(hdr)
+    sigs, k = dict(sigs), load_constants(hdr)
+    u32 = lambda va: struct.unpack_from('<I', img.d, img.va2off(va))[0]
+    m = [text_va + x.start() for x in cs.compile_pattern(sigs['kSigShipDeployBranch']).finditer(text)]
+    if len(m) != 1:
+        return [('kSigShipDeployBranch', False, 'missing')]
+    br = m[0]
+    start = img.func_start(br)
+    default = rel32(img, br + k['kSigShipDeployDefault'])
+    disp = u32(br + k['kSigShipDeployStockpileDisp'])
+    ok = bool(start) and br - start < 0x400 and img.match_at(default, codes['kCodeShipDefaultBase']) and 0x100 <= disp <= 0x10000
+    r = img.vtable('.?AVCIsOnContinentTrigger@@')
+    read = find_in(img, r[1][22], 0x200, codes['kCodeContinentRead']) if r and len(r[1]) > 22 else None
+    cont = u32(read + k['kCodeContinentDisp']) if read else 0
+    # The base lookup reads the default base's manager; the access test the same country lookup.
+    def one(name):
+        mm = [text_va + x.start() for x in cs.compile_pattern(sigs[name]).finditer(text)]
+        return mm[0] if len(mm) == 1 else None
+    look, access = one('kSigShipBaseByProvince'), one('kSigShipBaseAccess')
+    bases = rel32(img, default + k['kCodeShipBaseList']) if ok else None
+    country = rel32(img, default + k['kCodeShipBaseCountry']) if ok else None
+    ok = ok and bool(look and access) and rel32(img, look + k['kSigShipBaseManager']) == bases and         rel32(img, access + k['kSigShipBaseAccessCountry']) == country
+    classes = all(img.vtable('.?AV%s@@' % c) for c in ('CShip', 'CTaskForce', 'CFleet', 'CNavalProductionLine'))
+    slots = []
+    for c in ('CMoveShipsCommand', 'CNavyDetachShipsAndMergeCommand', 'CSetFleetCommand', 'CSetFleetHomeBaseCommand',
+              'CSetNavalDeploymentTargetCommand'):
+        v = img.vtable('.?AV%s@@' % c)
+        slots.append(v[1][9] if v and len(v[1]) > 9 else None)
+    cmds = all(slots) and len(set(slots)) == len(slots)
+    return [('kSigShipDeployBranch / kCodeShipDefaultBase / kSigShipBaseByProvince / kSigShipBaseAccess (deploy starts %s, stockpile +0x%x)' % (hex(start) if start else '?', disp),
+             ok, hex(br)),
+            ('kCodeContinentRead (continent +0x%x)' % cont, bool(read) and 0x40 <= cont < 0x1000, hex(read) if read else 'missing'),
+            ('ship_domains classes and commands (CShip, CTaskForce, CFleet, CNavalProductionLine; 5 can-execute slots distinct: %s)'
+             % cmds, classes and cmds, ' '.join(hex(x) for x in slots if x))]
 
 
 def check_province_terrain(img, codes, text_va, text):

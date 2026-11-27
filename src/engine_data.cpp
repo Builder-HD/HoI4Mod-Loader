@@ -453,6 +453,8 @@ void ResolveProduction() {
 }
 
 uint32_t EquipmentTypeOffset() { return g_equipType; }
+uint32_t LineEquipmentOffset() { return g_lineEquipment; }
+void** NavalLineVtable() { return g_navalLineVt; }
 uint32_t TypeArchetypeOffset() { return g_typeArchetype; }
 
 bool HaveProduction() {

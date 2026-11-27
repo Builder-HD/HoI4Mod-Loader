@@ -1521,6 +1521,39 @@ CODE(kCodeTerrainBlocksPlanes, "49 8D 80 ?? ?? 00 00")  // lea rax, [r8+disp32]
 // start comes from the unwind table. Opened over space with the block choice.
 SIG(kSigTerrainPatches, "49 8B 86 ?? ?? ?? ?? 88 54 03 01 4C 8B 45 ?? 41 B1 01 48 8B 85 ?? ?? ?? ?? 0F 1F 00 83 FA 01 75 ?? 80 B8 ?? ?? ?? ?? 00 74 ?? 80 B8 ?? ?? ?? ?? 00 74 ?? 4C 8D 80")
 
+// --- Ship domains (ship_domains; engine_ship_domains.cpp, NOTES.md U14) ----------------------------
+// Where a built ship goes (FUN_140d72900 on 1.20: (naval deployment target, count, line, ?)): every ship
+// that comes into being passes it (production lines, ships delivered as equipment, create_ship). Its
+// ship branch: the target's design info (+0x28; +0x10 set for ships, else the stockpile: country by tag
+// (call +14), its stockpile (+0xf68 at +29) add (call +33)); the target task force (+0xc, the handle
+// lookup call +58, -0x10) and its fleet's base province (call +80), else the target's naval base
+// province (+0x1c), else the default base (call +97, its province +0x10); the delivery (call +130).
+// The function's start from the unwind table.
+SIG(kSigShipDeployBranch, "48 8B 43 28 80 78 10 00 75 ?? 48 8D 4B 08 E8 ?? ?? ?? ?? 48 8B 53 20 44 8B C6 48 8B 88 ?? ?? ?? ?? E8 ?? ?? ?? ?? 33 C0 EB ?? 83 7B 0C 00 48 8D 4B 0C 75 ?? 83 79 04 00 74 ?? E8 ?? ?? ?? ?? 48 85 C0 74 ?? 48 8D 48 F0 8B 43 1C 48 85 C9 74 ?? E8 ?? ?? ?? ?? EB ?? 8B 43 1C 85 C0 75 ?? 48 8B CB E8 ?? ?? ?? ?? 48 85 C0 74 ?? 8B 40 10 85 C0 74 ?? 4D 8B CE 4C 89 7C 24 20 44 8B C6 8B D0 48 8B CB E8")
+static const size_t kSigShipDeployCountry = 14, kSigShipDeployStockpileDisp = 29, kSigShipDeployStockpileAdd = 33,
+                    kSigShipDeployHandle = 58, kSigShipDeployTfBase = 80, kSigShipDeployDefault = 97, kSigShipDeployDeliver = 130;
+// The default naval base (the call at +97): of the bases the country may use (country by tag ptr call +30,
+// its base list call +38: +0x18 data, +0x24 count; may use call +74), the highest level (+0x18), the first
+// on a tie.
+CODE(kCodeShipDefaultBase, "48 89 5C 24 10 48 89 6C 24 18 56 41 56 41 57 48 83 EC 20 4C 8D 79 08 33 F6 49 8B CF 8B EE E8 ?? ?? ?? ?? 48 8B C8 E8 ?? ?? ?? ?? 48 8B 58 18 48 63 40 24 4C 8D 34 C3 49 3B DE 74 ?? 48 89 7C 24 40 48 8B 3B 49 8B D7 48 8B CF E8 ?? ?? ?? ?? 84 C0 74 ?? 8B 4F 18 3B CE 7E")
+static const size_t kCodeShipBaseCountry = 30, kCodeShipBaseList = 38, kCodeShipBaseCanUse = 74;
+// A naval base by its province (FUN_1411ed920, setting a line's deployment target: the country's base
+// manager (call +0, the default base's list getter) and its lookup by province id (call +12)). The
+// manager's list (above) holds the bases the map started with; the lookup finds bases built since.
+SIG(kSigShipBaseByProvince, "E8 ?? ?? ?? ?? 8B 54 24 60 48 8B C8 E8 ?? ?? ?? ?? 48 85 C0 74 ?? 48 8B D0 48 8B CB E8")
+static const size_t kSigShipBaseManager = 0, kSigShipBaseLookup = 12;
+// The game's "may use this naval base" (FUN_140eeefe0, mode 1): the country's access to the base's
+// province (call +6: (province, &tag, &tag, 1)) and the province's area (+0xd0) the same as the
+// country's (call +54, FUN_1407390d0(country by tag (call +36), 0)): a base on another world never
+// passes the second. A domain's own bases need the access only.
+SIG(kSigShipBaseAccess, "41 83 F9 01 75 ?? E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ?? 48 83 BB ?? ?? ?? ?? 00 0F 84 ?? ?? ?? ?? 48 8B CE E8 ?? ?? ?? ?? 48 8B 9B ?? ?? ?? ?? 33 D2 48 8B C8 E8")
+static const size_t kSigShipBaseAccessCall = 6, kSigShipBaseAccessCountry = 36;
+// CIsOnContinentTrigger's evaluate (slot 22): province -> its map province (+0x30) -> its continent
+// (disp32 at +7), compared with the database's (getter call +11) entry for the trigger's token
+// (lookup call +22).
+CODE(kCodeContinentRead, "48 8B 40 30 48 8B 98 ?? ?? ?? ?? E8 ?? ?? ?? ?? 8B 56 58 48 8B C8 E8 ?? ?? ?? ?? 48 3B D8 0F 94 C0")
+static const size_t kCodeContinentDisp = 7, kCodeContinentDb = 11, kCodeContinentLookup = 22;
+
 // --- camera_range (NOTES.md Part T; addresses 1.20) -----------------------------------------------
 // The engine camera's set-up (FUN_142358c50(cam, fov, aspect, near, far)): `mov rcx, rbx; movss
 // [rbx+0x1b0], xmm0 (far); movss [rbx+0x1a4], xmm4 (fov); movss [rbx+0x1a8], xmm2 (aspect); movss

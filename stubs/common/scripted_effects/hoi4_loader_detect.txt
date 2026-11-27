@@ -31,4 +31,5 @@ hoi4_loader_init = {
 	clr_global_flag = hoi4_loader_plugin_globe
 	clr_global_flag = hoi4_loader_plugin_large_map
 	clr_global_flag = hoi4_loader_plugin_camera_range
+	clr_global_flag = hoi4_loader_plugin_ship_domains
 }

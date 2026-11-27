@@ -224,6 +224,8 @@ void LogProductionLines(int tag);
 // Field offsets production_data resolved (0 if not), for other resolvers' cross-checks.
 uint32_t EquipmentTypeOffset();  // design (line equipment) -> CEquipmentType
 uint32_t TypeArchetypeOffset();  // CEquipmentType -> its archetype
+uint32_t LineEquipmentOffset();  // production line -> the design it makes (military and naval lines)
+void** NavalLineVtable();        // CNavalProductionLine, null if its layout differs
 
 // --- Equipment conversion (equipment_conversion; engine_conversion.cpp, NOTES.md Part J) -------
 // Types are CEquipmentType (infantry_equipment_1, light_tank_chassis_2); designs are the variants
@@ -306,6 +308,28 @@ int ProvinceController(int id);              // tag, 0 if unknown
 int StateOwner(int stateId);                 // tag, 0 if unknown
 int StateObjectOwner(const void* state);     // the same for a state object
 bool ProvinceRect(int id, int rect[4]);      // map pixels {x, y, width, height}
+
+// --- Ship domains (ship_domains; engine_ship_domains.cpp, NOTES.md U14) -------------------------
+// A mod's ship domains (e.g. ships in space beside the navy at sea) kept apart: where built ships go,
+// and the naval commands that would put two domains together. Domain 0 is every ship and base no
+// domain claims.
+void ResolveShipDomains();  // after ResolveProduction and ResolveProvinceData
+bool HaveShipDomains();
+struct ShipDomainHooks {
+    int (*archetypeDomain)(const void* archetype);  // a ship archetype's domain (0: none); any thread
+    int (*provinceDomain)(int provinceId);           // a naval base province's domain (0: none); any thread
+    // Ships delivered elsewhere than the game would have (to = 0: into the stockpile, no base of the
+    // domain); any thread the production update runs on.
+    void (*delivered)(int tag, const void* design, int count, int domain, int from, int to);
+    void (*refused)(int command);  // a command refused (0 move ships, 1 detach and merge, 2 set fleet,
+                                   // 3 fleet home base, 4 deployment target); main thread
+    // The provinces of a domain (> 0) in ascending id order, where its naval bases can be; any thread.
+    int (*domainProvinces)(int domain, const int** ids);
+};
+bool HookShipDomains(const ShipDomainHooks& hooks);  // init only: the deploy function and 5 commands
+void* ContinentByToken(int token);    // the continent entry of a name token, null if none (main thread)
+void* StateContinent(int stateId);  // the continent entry a state is on (as the continent trigger reads it)
+int ShipDesignDomain(const void* design);  // its archetype's domain (archetypeDomain), 0 without one
 
 // --- Globe view (globe; engine_globe.cpp, NOTES.md Part S) -------------------------------------
 // The map camera ("map camera": the UI's, UiMapCamera()) holds three engine cameras (the main one
