@@ -1076,12 +1076,30 @@ travel_time = { province = 6521 naval = no days < 10 }   # days to 6521, land ro
 - **Tooltip:** "Has no land route home (Berlin (6521)) (currently only by sea)", "Travel time to
   home (Berlin (6521)) in days below 10 (currently 7.21)".
 
-**Cost.** Each evaluation runs one route search, two when the land search fails and the sea one
-runs. That is microseconds up to about a millisecond for a long route; a different continent
-without a ship is rejected without searching. **Not measured in game yet.** Filter with cheap
-triggers first (where the division stands, its owner), and don't
-evaluate it for every division every day. `[diagnostics] trigger_timing = 1` reports
-`travel_time`'s time per day.
+**Cost.** `has_path_home`, `has_land_path`, `needs_naval_transport` and `travel_time` run the
+game's route search (A*) on **every evaluation**, nothing is cached: one search, two when the land
+search fails and the sea one runs. That is microseconds up to about a millisecond for a long route;
+a different continent without a ship is rejected without searching. **Not measured in game yet.**
+`in_friendly_territory` does no search (one controller and one relation check), so:
+
+- **Don't evaluate the route triggers every day for every division.** Run them from a weekly or
+  monthly on_action, a decision or an event, not from a daily pulse or a `visible` that is
+  re-checked all the time.
+- **Filter first, cheapest first:** the game evaluates an AND block in order and stops at the first
+  false, so put `in_friendly_territory = no` (and the division's owner, ...) before them, and the
+  route triggers last:
+
+```
+every_country_division = {     # in the country's scope, e.g. a weekly on_action
+    limit = {
+        in_friendly_territory = no     # no search: most divisions stop here
+        has_path_home = no             # one route search, only for the rest
+    }
+    send_home = { travel_time = yes }
+}
+```
+
+`[diagnostics] trigger_timing = 1` reports `travel_time`'s time per day.
 
 **Multiplayer:** the same search the move orders and the AI run on every machine, with no cache and
 nothing written, so it gives the same answer everywhere. **Not tested in multiplayer yet.**
