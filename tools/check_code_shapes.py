@@ -1069,14 +1069,28 @@ def check_ship_domains(img, codes, text_va, text):
     bases = rel32(img, default + k['kCodeShipBaseList']) if ok else None
     country = rel32(img, default + k['kCodeShipBaseCountry']) if ok else None
     ok = ok and bool(look and access) and rel32(img, look + k['kSigShipBaseManager']) == bases and         rel32(img, access + k['kSigShipBaseAccessCountry']) == country
-    classes = all(img.vtable('.?AV%s@@' % c) for c in ('CShip', 'CTaskForce', 'CFleet', 'CNavalProductionLine'))
+    # The deploy target list: the builder before its block, the fleet list's shape and its fleet task
+    # forces at +0xb8, the area call the access test's.
+    lst = one('kSigShipDeployList')
+    lok = False
+    if lst and access:
+        bstart = img.func_start(lst)
+        adder = rel32(img, lst + k['kSigShipDeployListFleets'])
+        call = find_in(img, adder, 0x100, codes['kCodeShipFleetListCall'])
+        fl = rel32(img, call + 8) if call else None
+        tfc = find_in(img, fl, 0x80, codes['kCodeShipFleetTaskForces']) if fl and img.match_at(fl, codes['kCodeShipFleetList']) else None
+        tfl = rel32(img, tfc + 3) if tfc else None
+        lok = (bool(bstart) and lst - bstart < 0x400 and bool(tfl) and img.match_at(tfl, codes['kCodeFleetTaskForceList']) and
+               u32(tfl + 3) == 0xb8 and rel32(img, lst + k['kSigShipDeployListArea']) == rel32(img, access + k['kSigShipBaseAccessArea']))
+    ok = ok and lok
+    classes = all(img.vtable('.?AV%s@@' % c) for c in ('CShip', 'CTaskForce', 'CFleet', 'CNavalProductionLine', 'CNavalDeployment'))
     slots = []
     for c in ('CMoveShipsCommand', 'CNavyDetachShipsAndMergeCommand', 'CSetFleetCommand', 'CSetFleetHomeBaseCommand',
               'CSetNavalDeploymentTargetCommand', 'CReorganizeShipsCommand'):
         v = img.vtable('.?AV%s@@' % c)
         slots.append(v[1][9] if v and len(v[1]) > 9 else None)
     cmds = all(slots) and len(set(slots)) == len(slots)
-    return [('kSigShipDeployBranch / kCodeShipDefaultBase / kSigShipBaseByProvince / kSigShipBaseAccess (deploy starts %s, stockpile +0x%x)' % (hex(start) if start else '?', disp),
+    return [('kSigShipDeployBranch / kCodeShipDefaultBase / kSigShipBaseByProvince / kSigShipBaseAccess / kSigShipDeployList (deploy starts %s, stockpile +0x%x)' % (hex(start) if start else '?', disp),
              ok, hex(br)),
             ('kCodeContinentRead (continent +0x%x)' % cont, bool(read) and 0x40 <= cont < 0x1000, hex(read) if read else 'missing'),
             ('ship_domains classes and commands (CShip, CTaskForce, CFleet, CNavalProductionLine; 5 can-execute slots distinct: %s)'

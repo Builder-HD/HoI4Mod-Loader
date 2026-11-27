@@ -1544,10 +1544,23 @@ SIG(kSigShipBaseByProvince, "E8 ?? ?? ?? ?? 8B 54 24 60 48 8B C8 E8 ?? ?? ?? ?? 
 static const size_t kSigShipBaseManager = 0, kSigShipBaseLookup = 12;
 // The game's "may use this naval base" (FUN_140eeefe0, mode 1): the country's access to the base's
 // province (call +6: (province, &tag, &tag, 1)) and the province's area (+0xd0) the same as the
-// country's (call +54, FUN_1407390d0(country by tag (call +36), 0)): a base on another world never
+// country's (call +53, FUN_1407390d0(country by tag (call +36), 0)): a base on another world never
 // passes the second. A domain's own bases need the access only.
 SIG(kSigShipBaseAccess, "41 83 F9 01 75 ?? E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ?? 48 83 BB ?? ?? ?? ?? 00 0F 84 ?? ?? ?? ?? 48 8B CE E8 ?? ?? ?? ?? 48 8B 9B ?? ?? ?? ?? 33 D2 48 8B C8 E8")
-static const size_t kSigShipBaseAccessCall = 6, kSigShipBaseAccessCountry = 36;
+static const size_t kSigShipBaseAccessCall = 6, kSigShipBaseAccessCountry = 36, kSigShipBaseAccessArea = 53;
+// A naval line's "Deploy target" list (FUN_141e3b3c0, view): the line (view +0x5f0 at +3, then +0x4f8
+// at +10), the theater entries (call +41), the fleet entries (call +58: the country's task forces from
+// the fleet list), then the naval bases of the country's area (call +74, the access test's area
+// function), each shown if "may use" says so. The builder's start from the unwind table.
+SIG(kSigShipDeployList, "49 8B 8E ?? ?? ?? ?? 4C 8B B9 ?? ?? ?? ?? 4C 89 7C 24 ?? 41 83 BE ?? ?? ?? ?? 00 75 ?? 4C 8B CB 4C 8B C7 49 8B D7 49 8B CE E8 ?? ?? ?? ?? 4C 8B CB 4C 8B C7 49 8B D7 49 8B CE E8 ?? ?? ?? ?? 45 33 FF 45 8B EF 33 D2 48 8B CF E8")
+static const size_t kSigShipDeployListView = 3, kSigShipDeployListLine = 10, kSigShipDeployListFleets = 58,
+                    kSigShipDeployListArea = 74;
+// In the fleet entries: the country's task forces (FUN_14071c270(country, out)): its fleets (+0x278,
+// count +0x284), each fleet's task forces (call found after the head: `lea rax, [rcx+0xb8]; ret`).
+CODE(kCodeShipFleetListCall, "48 8D 54 24 ?? 49 8B C8 E8")
+CODE(kCodeShipFleetList, "48 89 5C 24 08 48 89 74 24 18 48 89 54 24 10 57 48 83 EC 30 48 8B F2 48 8B D9 C7 44 24 20 00 00 00 00 48 8B CA E8 ?? ?? ?? ?? C7 44 24 20 01 00 00 00 48 8B BB ?? ?? ?? ?? 48 63 83 ?? ?? ?? ?? 48 8D 1C C7 48 3B FB 74")
+CODE(kCodeShipFleetTaskForces, "48 8B 0F E8")
+CODE(kCodeFleetTaskForceList, "48 8D 81 ?? ?? ?? ?? C3")
 // CIsOnContinentTrigger's evaluate (slot 22): province -> its map province (+0x30) -> its continent
 // (disp32 at +7), compared with the database's (getter call +11) entry for the trigger's token
 // (lookup call +22).
