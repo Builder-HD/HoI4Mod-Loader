@@ -1072,7 +1072,7 @@ def check_ship_domains(img, codes, text_va, text):
     classes = all(img.vtable('.?AV%s@@' % c) for c in ('CShip', 'CTaskForce', 'CFleet', 'CNavalProductionLine'))
     slots = []
     for c in ('CMoveShipsCommand', 'CNavyDetachShipsAndMergeCommand', 'CSetFleetCommand', 'CSetFleetHomeBaseCommand',
-              'CSetNavalDeploymentTargetCommand'):
+              'CSetNavalDeploymentTargetCommand', 'CReorganizeShipsCommand'):
         v = img.vtable('.?AV%s@@' % c)
         slots.append(v[1][9] if v and len(v[1]) > 9 else None)
     cmds = all(slots) and len(set(slots)) == len(slots)

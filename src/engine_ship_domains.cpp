@@ -74,10 +74,10 @@ ShipDomainHooks g_hooks = {};
 std::atomic<bool> g_off{false};       // a fault or a layout surprise: everything passes to the game
 std::atomic<int> g_layoutLogs{0};
 
-enum Cmd { kMoveShips, kDetachMerge, kSetFleet, kSetFleetBase, kSetDeployTarget, kCmdCount };
+enum Cmd { kMoveShips, kDetachMerge, kSetFleet, kSetFleetBase, kSetDeployTarget, kReorganize, kCmdCount };
 const char* const kCmdClass[kCmdCount] = {".?AVCMoveShipsCommand@@", ".?AVCNavyDetachShipsAndMergeCommand@@",
                                           ".?AVCSetFleetCommand@@", ".?AVCSetFleetHomeBaseCommand@@",
-                                          ".?AVCSetNavalDeploymentTargetCommand@@"};
+                                          ".?AVCSetNavalDeploymentTargetCommand@@", ".?AVCReorganizeShipsCommand@@"};
 uint8_t* g_canExec[kCmdCount] = {};
 CanExec_t g_canExecOrig[kCmdCount] = {};
 
@@ -383,6 +383,42 @@ bool DeployTargetFits(const uint8_t* cmd) {
     return true;  // a theater, or the default: the delivery picks a base of the domain
 }
 
+// The fleet window's reorganisation (drag and drop): the fleet (+0x48) and its new task forces, each
+// an entry of 0x80 (+0x30, count +0x3c) with its ship handles (+0x58, count +0x64): one domain only.
+bool ReorganizeFits(const uint8_t* cmd) {
+    int n = Rd<int>(cmd, 0x3c);
+    const uint8_t* entries = Rd<const uint8_t*>(cmd, 0x30);
+    if (n < 1 || n > 1000 || !entries) return true;
+    int domain = -1;
+    uint8_t* fleet = Lookup(cmd + 0x48);
+    if (IsA(fleet, g_vtFleet)) {
+        int d = FleetDomain(fleet);
+        if (d >= 0) domain = d;
+    }
+    for (int i = 0; i < n; ++i) {
+        const uint8_t* e = entries + (size_t)i * 0x80;
+        int m = Rd<int>(e, 0x64);
+        const uint8_t* ships = Rd<const uint8_t*>(e, 0x58);
+        if (m < 0 || m > 10000 || (m > 0 && !ships)) {
+            Layout("a reorganize command's entries are not as analysed");
+            return true;
+        }
+        for (int j = 0; j < m; ++j) {
+            if (EmptyHandle(ships + (size_t)j * 8)) continue;
+            uint8_t* ship = ShipOf(ships + (size_t)j * 8);
+            if (!ship) {
+                Layout("a reorganize command's ship is not a ship");
+                return true;
+            }
+            int d = ShipDomain(ship);
+            if (d < 0) return true;
+            if (domain >= 0 && d != domain) return false;
+            domain = d;
+        }
+    }
+    return true;
+}
+
 bool FitsSafe(int which, const uint8_t* cmd) {
     __try {
         switch (which) {
@@ -391,6 +427,7 @@ bool FitsSafe(int which, const uint8_t* cmd) {
             case kSetFleet: return TaskForcesFit(cmd);
             case kSetFleetBase: return BaseFits(cmd);
             case kSetDeployTarget: return DeployTargetFits(cmd);
+            case kReorganize: return ReorganizeFits(cmd);
         }
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -410,7 +447,7 @@ uint64_t __fastcall HookCanExec(void* cmd, void* a2, void* a3, void* a4) {
 }
 
 void* const kCanExecDetours[kCmdCount] = {(void*)&HookCanExec<0>, (void*)&HookCanExec<1>, (void*)&HookCanExec<2>,
-                                          (void*)&HookCanExec<3>, (void*)&HookCanExec<4>};
+                                          (void*)&HookCanExec<3>, (void*)&HookCanExec<4>, (void*)&HookCanExec<5>};
 
 bool Fail(const char* why) {
     Log("ship_domains: %s; ship domains unavailable", why);
