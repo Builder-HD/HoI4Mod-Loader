@@ -191,8 +191,8 @@ def stack_plain_bmp(src, dst, copies, gap_map_rows, map_h, extra_map_rows=0):
 
 def stack_dds(src, dst, copies, gap_map_rows, map_h, extra_map_rows=0):
     """A map-sized DDS: uncompressed 32-bit or DXT1/DXT5, its mip levels stacked as long as every part
-    is a whole number of block rows (the rest of the chain is dropped). Rows are top-down; the copies
-    are identical, so their order does not matter."""
+    is a whole number of block rows (the rest of the chain is dropped). Rows are top-down (north
+    first): the space band's rows go first; the copies are identical, so their order does not matter."""
     with open(src, "rb") as f:
         data = f.read()
     if data[:4] != b"DDS ":
@@ -228,7 +228,9 @@ def stack_dds(src, dst, copies, gap_map_rows, map_h, extra_map_rows=0):
         gap_blocks = int(gap) // block
         row_bytes = bw * bsize
         rows = [pix[r * row_bytes:(r + 1) * row_bytes] for r in range(bh)]
-        out_levels.append(b"".join(stack_rows(rows, copies, gap_blocks, rows[0], extra_rows=int(extra) // block)))
+        # Top-down rows: the space band (the north, above the copies) first, then the copies; a BMP is
+        # bottom-up, so there it comes last.
+        out_levels.append(b"".join([rows[0]] * (int(extra) // block) + stack_rows(rows, copies, gap_blocks, rows[0])))
     if not out_levels:
         fail("%s: the gap does not fit its blocks" % src)
     new_h = h * copies + int(gap0) * (copies - 1) + int(extra0)
