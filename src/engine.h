@@ -435,6 +435,13 @@ bool HookRailwayEntryTitle();
 enum : int { kRailRuleAllies = 1, kRailRuleSubjects = 2, kRailRuleOverlord = 4 };
 using RailwayRules_t = int (*)();
 void SetRailwayDismantleRules(RailwayRules_t rules);
+// The player-facing changes to vanilla railways run only while this is on (a mod's opt-in flag):
+// Alt+Shift on the map badges, the green marker on build entries, badges split where the level
+// changes, lines covering part of a segment, and the hover handler. Off (the default) those hooks
+// pass straight to the engine. Dismantle entries' own display stays on (only a mod creates them).
+// Main thread.
+void SetRailwayDismantleUi(bool on);
+bool RailwayDismantleUi();
 // What dismantling a level costs, in percent of building it (default 30). `cost` is asked once per
 // dismantle line per day and per queue change (main thread); it returns -1 for the default.
 const int kRailwayDismantleDefaultPercent = 30;

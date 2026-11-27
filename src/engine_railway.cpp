@@ -24,6 +24,13 @@ namespace {
 // more, dismantle entries pause (no progress, never finished), and the badges are vanilla again.
 volatile bool g_enabled = true;
 
+// The player-facing changes to vanilla railways: Alt+Shift on the map badges, the green marker on
+// build entries, badges split by level, lines covering part of a segment, the hover handler. Off
+// until a mod opts in (SetRailwayDismantleUi); while off those hooks pass straight to the engine.
+// Dismantle entries' own display (their tooltip, red marker and badge) is not affected: only a mod
+// creates them. Written on the main thread, read on the UI thread.
+volatile bool g_uiOn = false;
+
 template <typename T>
 T Rd(const void* base, size_t offset) {
     T v;
@@ -661,7 +668,7 @@ RailwayHover_t g_hoverHandler = nullptr;
 uint64_t __fastcall TooltipDetour(void* item, void* element, void* out) {
     void* line = item ? g_lookupLine((uint8_t*)item + g_tooltipId) : nullptr;
     // Hover: the tooltip is built while the player points at the entry (UI, main thread).
-    if (g_hoverHandler && line && *(void***)line == g_vtLine) {
+    if (g_hoverHandler && g_uiOn && line && *(void***)line == g_vtLine) {
         int count = 0;
         const int* path = LinePath(line, &count);
         if (path && count > 0) g_hoverHandler(path, count);
@@ -743,8 +750,10 @@ void __fastcall SetTextDetour(void* element, EngineString* text) {
 void __fastcall EntryUpdateDetour(void* item) {
     void* line = item ? g_lookupLine((uint8_t*)item + g_entryId) : nullptr;
     if (!line || *(void***)line != g_vtLine) return g_entryUpdateOrig(item);
+    bool dismantle = IsDismantleLine(line);
+    if (!dismantle && !g_uiOn) return g_entryUpdateOrig(item);  // build entries: vanilla title
     g_markTitle = Rd<void*>(item, g_entryTitle);
-    g_markDismantle = IsDismantleLine(line);
+    g_markDismantle = dismantle;
     g_entryUpdateOrig(item);
     g_markTitle = nullptr;
 }
@@ -871,7 +880,7 @@ const int* IconPathRaw(void* icon, int* n) {
 // The target to show on a badge whose segment has no line of its own but shares links with one of
 // the player's upgrade lines; 0 to leave the badge as the engine set it.
 int PartialTarget(void* icon) {
-    if (!g_enabled || !g_iconTarget || (MainThreadQueueAvailable() && !IsMainThread())) return 0;
+    if (!g_enabled || !g_uiOn || !g_iconTarget || (MainThreadQueueAvailable() && !IsMainThread())) return 0;
     int level = Rd<int>(icon, g_iconLevel);
     if (Rd<int>(icon, g_iconTarget) > level) return 0;  // the engine already shows a line here
     int n;
@@ -902,7 +911,7 @@ void LogPartialFaultOnce(const char* where) {
 // Vanilla's lookup first; without an exact match, an upgrade line sharing a link with the segment.
 void* __fastcall FindLineDetour(const void* path, const int* tag) {
     void* line = g_findLineOrig(path, tag);
-    if (line || !g_enabled || !tag) return line;
+    if (line || !g_enabled || !g_uiOn || !tag) return line;
     __try {
         const PathArray* p = (const PathArray*)path;
         if (p && p->data && p->count >= 2 && p->count <= 4096) line = OverlappingLine(*tag, p->data, p->count, false);
@@ -1058,7 +1067,7 @@ void __fastcall IconUpdateDetour(void* icon) {
         g_iconUpdateOrig(icon);
     }
     if (!g_enabled) return;
-    if (!DismantleKeyHeld()) return MarkDismantle(icon);
+    if (!g_uiOn || !DismantleKeyHeld()) return MarkDismantle(icon);
     std::vector<int> path;
     void* text = Rd<void*>(icon, g_iconText);
     if (!text || !IconPath(icon, &path) || PathMaxLevel(path) <= 0 || !IconDismantleAllowed(icon, path)) return;
@@ -1086,10 +1095,11 @@ std::string DismantleTooltipLine(int target) {
 }
 std::string DismantleHints() {
     const EngineString* custom = LocalizeKey(kRailwayDismantleHintsKey);
-    return custom ? custom->c_str()
-                  : "\x11GClick\x11! or \x11GRight-Click\x11! to dismantle one level less\n"
-                    "\x11GShift+Click\x11! to stop dismantling\n"
-                    "\x11GAlt+Shift+Click\x11! to dismantle one more level";
+    if (custom) return custom->c_str();
+    std::string s = "\x11GClick\x11! or \x11GRight-Click\x11! to dismantle one level less\n"
+                    "\x11GShift+Click\x11! to stop dismantling";
+    if (g_uiOn) s += "\n\x11GAlt+Shift+Click\x11! to dismantle one more level";  // only with the opt-in
+    return s;
 }
 
 void AppendDismantleTooltip(void* out, int target) {
@@ -1127,7 +1137,7 @@ bool LessenClick(void* icon) {
 }
 
 void __fastcall IconClickDetour(void* icon) {
-    if (g_enabled && g_onIconClick && DismantleKeyHeld()) {
+    if (g_enabled && g_uiOn && g_onIconClick && DismantleKeyHeld()) {
         std::vector<int> path;
         if (IconPath(icon, &path) && IconDismantleAllowed(icon, path) && g_onIconClick(path, RailwayClick::kDeepen))
             return;
@@ -1138,7 +1148,7 @@ void __fastcall IconClickDetour(void* icon) {
 }
 
 void __fastcall IconRightClickDetour(void* icon) {
-    if (!DismantleKeyHeld() && LessenClick(icon)) return;
+    if ((!g_uiOn || !DismantleKeyHeld()) && LessenClick(icon)) return;
     g_iconRightClickOrig(icon);
 }
 
@@ -1240,7 +1250,7 @@ void KeepRemovalBadges(void* table) {
 void SplitAndBuild(void* a1, void* supplyArray, void* a3, void* a4, void* a5, void* a6, void* a7, void* a8,
                    void* a9, uintptr_t a10, uintptr_t a11) {
     const EngineArray* src = (const EngineArray*)supplyArray;
-    if (!g_enabled || !g_nodeFlag || !src || !src->data || src->count <= 0 || src->count > 1000000)
+    if (!g_enabled || !g_uiOn || !g_nodeFlag || !src || !src->data || src->count <= 0 || src->count > 1000000)
         return g_builderOrig(a1, supplyArray, a3, a4, a5, a6, a7, a8, a9, a10, a11);
     // Two passes when the first one overflows the buffer (more level changes than last time).
     int found = 0;
@@ -1274,6 +1284,13 @@ void __fastcall SegmentBuilderDetour(void* a1, void* supplyArray, void* a3, void
 }  // namespace
 
 void SetRailwayDismantleRules(RailwayRules_t rules) { g_rulesFn = rules; }
+
+void SetRailwayDismantleUi(bool on) {
+    if (on == g_uiOn) return;
+    g_uiOn = on;
+    Log("railway_queue: player-facing railway changes %s", on ? "ON (a mod opted in)" : "off: vanilla railway UI");
+}
+bool RailwayDismantleUi() { return g_uiOn; }
 
 void DisableRailways() {
     if (g_enabled) Log("railways: switched off for this session; no railway is changed any more");
