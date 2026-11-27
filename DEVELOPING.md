@@ -127,6 +127,7 @@ PLAYERS.md                    pointer to README.md (0.5.0-beta shipped it as the
 1.19.4.2_vanilla = bccc62909b6a1ec2c1d5a46ef18608e4d0c7cdc89ad341b7402a23c40f7a8037
 1.19.5_vanilla = 709f916afbebcfe64a26678702691aeb40945d206074c2a80de8e9d601fce148
 1.20_vanilla = 1beb2a38fe2d747e5b7adb9b9648e350b0b851845dd228ffb87d2d2ac1b63a9f
+1.20.1_vanilla = b6eac19f0ebf966a2bf2025c0fd1baa187468e4078ad15bcfbb712a26f65e432
 ```
 
 The label is free text and is printed in `loader.log` when it matches. Before adding a new build,

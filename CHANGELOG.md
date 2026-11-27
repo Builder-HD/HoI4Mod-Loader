@@ -6,10 +6,18 @@ A–F; NOTES.md has the findings and test results behind each.
 
 ## Unreleased
 
-- **Game 1.20.1** (`v1.20.1.0.0fd1`, Steam update of 2026-11-26) is listed in `loader_config.ini`:
-  every signature (202/202) and code shape (104/104) matches exactly once (checked offline on a copy);
-  tested in game. Unlisted, the engine features were off, and a mod that needs `large_map` crashed
-  loading its map.
+- **Game 1.20.1** (`v1.20.1.0.0fd1`, Steam update of 2026-11-26) is listed in `loader_config.ini`.
+  A data-only hotfix: the code section is identical to 1.20, so every signature and anchor
+  (185/185) and every code shape (97/97) matches at the same address as on 1.20 (checked offline on
+  a copy). The vanilla files the loader patches are unchanged. No code changes. Tested in game on
+  1.20.1 (2026-11-26).
+- **Railway UI opt-in** (`railway_queue`; NOTES.md H8). The loader now leaves the railway UI
+  vanilla until a mod sets the global flag `hoi4_loader_railway_dismantling`: without it there is
+  no Alt+Shift dismantling on the railway map, no green marker on railway build entries, no badge
+  splitting by level, no partial-line badges and no railway hover outline. Script commands and
+  dismantle entries a mod queues work as before. **Players:** update HoI4Mod Loader: Railway
+  Dismantle (it sets the flag); with an older copy of it, Alt+Shift dismantling is off. The test
+  mod sets the flag at `on_startup` and has decisions to clear and set it.
 - **New feature `camera_range`** (engine tier, needs `lifecycle`; guard
   `hoi4_loader_feature_camera_range`; MODDING.md "Camera range"). A mod's raised
   `NFrontend.CAMERA_MAX_HEIGHT` works: the map camera's far plane (fixed 4000) follows it. 2 new

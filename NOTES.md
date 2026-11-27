@@ -53,6 +53,7 @@ Addresses below are for orientation in the named build only. Code uses the signa
 | **1.19.4.2** | **vanilla (`v1.19.4.2.2da5`), Steam update of 2026-11-05** | `bccc62909b6a1ec2c1d5a46ef18608e4d0c7cdc89ad341b7402a23c40f7a8037` |
 | **1.19.5** | **vanilla (`v1.19.5.0.7c6c`), Steam update of 2026-11-12** | `709f916afbebcfe64a26678702691aeb40945d206074c2a80de8e9d601fce148` |
 | **1.20** | **vanilla (`v1.20.0.0.8873`), Steam update of 2026-11-19** | `1beb2a38fe2d747e5b7adb9b9648e350b0b851845dd228ffb87d2d2ac1b63a9f` |
+| **1.20.1** | **vanilla (`v1.20.1.0.0fd1`), Steam update of 2026-11-26** | `b6eac19f0ebf966a2bf2025c0fd1baa187468e4078ad15bcfbb712a26f65e432` |
 
 **What changed from 1.19.4.2 to 1.19.5 (compared 2026-11-13):**
 - No checksum patch (`E8 ?? ?? ?? ?? 31 C0 0F 94 C3`: 0 matches), so vanilla.
@@ -79,6 +80,17 @@ Addresses below are for orientation in the named build only. Code uses the signa
   speed 5 to 1936.11 the engine on_actions fired (battles, focuses, captures, research, training,
   construction incl. two queued GER military factories typed right); no fault, no crash. The stat
   table size is read at runtime, so that offset is covered.
+
+**What changed from 1.20 to 1.20.1 (compared 2026-11-27):**
+- No checksum patch (`E8 ?? ?? ?? ?? 31 C0 0F 94 C3`: 0 matches), so vanilla.
+- Same file size as 1.20 (56,556,664 bytes); 1,334 bytes differ in 24 runs: 393 bytes in `.rdata`
+  (build and version strings), the rest outside the sections (header and signature). `.text` is
+  byte-for-byte identical, so every function keeps its 1.20 address.
+- `tools/check_signatures.py`: 185/185 match exactly once. `tools/check_code_shapes.py`: 97/97 ok.
+  Every reported address equals the one on 1.20.
+- The vanilla files patched at load still carry the file date 2026-10-15, so they are unchanged.
+- Listed as `1.20.1_vanilla`; not run in game yet. With identical code, the 1.20 in-game test
+  above carries over.
 
 **Vanilla 1.19.3 verified (2026-10-12 23:01):**
 - After Steam's "Verify integrity", `hoi4.exe` is `v1.19.3.0.c01a`, the same size as the
@@ -4003,6 +4015,43 @@ upgrading ... to level N") when a segment is being dismantled.
      Alt+Shift+click right after a Shift+click cancel logged "one level deeper", because
      `QueueOrDeepenRailwayDismantle` still found the cancelled entry (it stays in the list until the
      next daily update). It now skips cancelled entries, as `LessenRailwayDismantle` does.
+
+## H8: vanilla railway UI unless a mod opts in (requested 2026-11-25)
+
+The owner wants vanilla railway behaviour unless a mod actively switches dismantling on, as
+`equipment_conversion` does (its flags). Every railway hook sorted by what a player sees:
+
+- **Changes vanilla things** (visible with no dismantling at all), now behind the global flag
+  `hoi4_loader_railway_dismantling`:
+  1. Alt+Shift on the badges (cross, click): `IconUpdateDetour`, `IconClickDetour`; the right click
+     ignores Alt+Shift without the flag.
+  2. The green marker on build entries: `EntryUpdateDetour` returns to the engine for a build line.
+  3. Badges split where the level changes (H6): `SplitAndBuild` passes the engine's array.
+  4. Lines covering part of a segment (H6): `PartialTarget` and `FindLineDetour` return the
+     engine's answer.
+  5. The `attention_area` hover outline (M7): `TooltipDetour` does not call the handler.
+- **Only acts on dismantle entries**, which only a mod creates, so it stays on: the line hooks
+  (daily step, progress, finished), the dismantle tooltip and red marker, the badge of a segment
+  being dismantled (H7) with its click and right click, and `KeepRemovalBadges`. The badge hints
+  drop the Alt+Shift line without the flag.
+- **The switch:** `Engine::SetRailwayDismantleUi`, a volatile bool written on the main thread.
+  Hooks stay installed so the flag can change mid-game; while off each detour costs one load. The
+  plugin reads the flag at game entry (off during `OnGameEntering`, so a previous game's choice
+  never leaks into the next), and in single player every 30 frames, like `equipment_conversion`.
+  Multiplayer: game entry only. The UI parts are local to one machine, but a partial-line click
+  posts a synced command, so the flag should not differ between machines at click time.
+- **Test mod:** `hoi4_loader_test_railway_on_actions.txt` sets the flag at `on_startup`; decisions
+  "vanilla railway UI" / "loader railway UI" clear and set it.
+- **In-game test plan:**
+  1. New game with the test mod: `loader.log` has no "not set" line; Alt+Shift shows crosses, build
+     entries have the green marker.
+  2. "Railway test: vanilla railway UI": within a second, Alt+Shift shows nothing and
+     Alt+Shift+click upgrades to the maximum (vanilla); build entries lose the marker; a queued
+     dismantle entry keeps its red marker, tooltip and badge, and a click on that badge still
+     dismantles one level less.
+  3. "Railway test: loader railway UI": everything is back.
+  4. Without the test mod (and without the rules mod): the log says the flag is not set; everything
+     in 2.
 
 # Part I: province building removal (supply hubs first)
 

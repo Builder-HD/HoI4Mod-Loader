@@ -97,6 +97,25 @@ hoi4_loader_railway_category = {
 		ai_will_do = { base = 0 }
 	}
 
+	# The opt-in flag (set at on_startup by hoi4_loader_test_railway_on_actions.txt): without it the
+	# railway UI is vanilla (no Alt+Shift on the map, no marker on build entries). In single player a
+	# change counts within a second.
+	hoi4_rail_test_ui_off = {
+		icon = generic_construction
+		cost = 0
+		visible = { hoi4_loader_feature_railway_queue = yes has_global_flag = hoi4_loader_railway_dismantling }
+		complete_effect = { clr_global_flag = hoi4_loader_railway_dismantling }
+		ai_will_do = { base = 0 }
+	}
+
+	hoi4_rail_test_ui_on = {
+		icon = generic_construction
+		cost = 0
+		visible = { hoi4_loader_feature_railway_queue = yes NOT = { has_global_flag = hoi4_loader_railway_dismantling } }
+		complete_effect = { set_global_flag = hoi4_loader_railway_dismantling }
+		ai_will_do = { base = 0 }
+	}
+
 	# Vanilla only: adds 3 levels along the same provinces, to rebuild after the tests.
 	hoi4_rail_test_rebuild = {
 		icon = generic_construction

@@ -1,0 +1,10 @@
+# The railway dismantling opt-in: without this global flag the loader leaves the railway UI vanilla
+# (MODDING.md "Dismantling through the construction queue"). Global flags are saved with the game,
+# so setting it once at game start is enough; the test mod's decisions can clear and set it again.
+on_actions = {
+	on_startup = {
+		effect = {
+			set_global_flag = hoi4_loader_railway_dismantling
+		}
+	}
+}
