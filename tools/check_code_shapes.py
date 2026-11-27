@@ -1045,7 +1045,7 @@ def check_camera_range(img, codes, text_va, text):
 def check_ship_domains(img, codes, text_va, text):
     """ship_domains (NOTES.md U14): the deploy function's start (unwind table) before its ship branch,
     the default naval base's shape at the branch's call, the stockpile field in range, the continent
-    trigger's province read, the classes and the five commands' distinct can-execute slots."""
+    trigger's province read, the classes and the commands' distinct can-execute slots."""
     hdr = pathlib.Path(__file__).parent.parent / 'src' / 'signatures.h'
     sigs, _ = cs.load_signatures(hdr)
     sigs, k = dict(sigs), load_constants(hdr)
@@ -1092,15 +1092,17 @@ def check_ship_domains(img, codes, text_va, text):
     classes = all(img.vtable('.?AV%s@@' % c) for c in ('CShip', 'CTaskForce', 'CFleet', 'CNavalProductionLine', 'CNavalDeployment'))
     slots = []
     for c in ('CMoveShipsCommand', 'CNavyDetachShipsAndMergeCommand', 'CSetFleetCommand', 'CSetFleetHomeBaseCommand',
-              'CSetNavalDeploymentTargetCommand', 'CReorganizeShipsCommand', 'CCreateFleetCommand'):
+              'CSetNavalDeploymentTargetCommand', 'CReorganizeShipsCommand', 'CCreateFleetCommand', 'CMergeNaviesCommand',
+              'CSetNavyTheaterGroupForCommand'):
         v = img.vtable('.?AV%s@@' % c)
         slots.append(v[1][9] if v and len(v[1]) > 9 else None)
     cmds = all(slots) and len(set(slots)) == len(slots)
+    cmds = cmds and find_in(img, slots[-1], 0x20, codes['kCodeTheaterFleetCanExec']) == slots[-1]
     return [('kSigShipDeployBranch / kCodeShipDefaultBase / kSigShipBaseByProvince / kSigShipBaseAccess / kSigShipDeployList (deploy starts %s, stockpile +0x%x)' % (hex(start) if start else '?', disp),
              ok, hex(br)),
             ('kCodeContinentRead (continent +0x%x)' % cont, bool(read) and 0x40 <= cont < 0x1000, hex(read) if read else 'missing'),
-            ('ship_domains classes and commands (CShip, CTaskForce, CFleet, CNavalProductionLine; 5 can-execute slots distinct: %s)'
-             % cmds, classes and cmds, ' '.join(hex(x) for x in slots if x))]
+            ('ship_domains classes and commands (CShip, CTaskForce, CFleet, CNavalProductionLine; %d can-execute slots distinct: %s)'
+             % (len(slots), cmds), classes and cmds, ' '.join(hex(x) for x in slots if x))]
 
 
 def check_province_terrain(img, codes, text_va, text):

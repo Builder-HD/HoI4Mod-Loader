@@ -1561,6 +1561,11 @@ CODE(kCodeShipFleetListCall, "48 8D 54 24 ?? 49 8B C8 E8")
 CODE(kCodeShipFleetList, "48 89 5C 24 08 48 89 74 24 18 48 89 54 24 10 57 48 83 EC 30 48 8B F2 48 8B D9 C7 44 24 20 00 00 00 00 48 8B CA E8 ?? ?? ?? ?? C7 44 24 20 01 00 00 00 48 8B BB ?? ?? ?? ?? 48 63 83 ?? ?? ?? ?? 48 8D 1C C7 48 3B FB 74")
 CODE(kCodeShipFleetTaskForces, "48 8B 0F E8")
 CODE(kCodeFleetTaskForceList, "48 8D 81 ?? ?? ?? ?? C3")
+// CSetNavyTheaterGroupForCommand's can-execute (slot 9): a country tag at +0x28, fleets (handles +0x38,
+// count +0x44) and task forces (handles +0x50, count +0x5c; minus 0x10) for the theater. The execute
+// moves whole fleets as they are and makes one new fleet of the task forces (unless they are one
+// fleet's all).
+CODE(kCodeTheaterFleetCanExec, "83 79 28 00 7E ?? 83 79 44 00 75 ?? 83 79 5C 00 0F 95 C0 C3")
 // The list's naval base entries (in the builder): an entry made (the pool's count at +3; the size at
 // +14, operator new call +18, the constructor (entry, gui, window) call +44), filled with its base (the
 // pool's data at +3; call +33), then sorted (up to 32: call +24; more: call +9). The pool is a CPdxArray

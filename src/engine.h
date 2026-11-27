@@ -322,7 +322,7 @@ struct ShipDomainHooks {
     // domain); any thread the production update runs on.
     void (*delivered)(int tag, const void* design, int count, int domain, int from, int to);
     void (*refused)(int command);  // a command refused (0 move ships, 1 detach and merge, 2 set fleet,
-                                   // 3 fleet home base, 4 deployment target, 5 reorganize, 6 create fleet); main thread
+                                   // 3 fleet home base, 4 deployment target, 5 reorganize, 6 create fleet, 7 merge task forces, 8 a theater's new fleet); main thread
     // The provinces of a domain (> 0) in ascending id order, where its naval bases can be; any thread.
     int (*domainProvinces)(int domain, const int** ids);
 };

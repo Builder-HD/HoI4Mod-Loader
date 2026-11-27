@@ -92,7 +92,8 @@ void Delivered(int tag, const void* design, int count, int domain, int from, int
 void Refused(int command) {
     static const char* const kNames[] = {"moving ships into a task force", "detaching ships into a task force",
                                          "putting task forces into a fleet", "a fleet's home base", "a naval line's deployment target",
-                                         "reorganizing a fleet's ships", "a new fleet from task forces and ships"};
+                                         "reorganizing a fleet's ships", "a new fleet from task forces and ships",
+                                         "merging task forces", "a new fleet in a theater"};
     // The game asks again while its UI shows the choice: one line per command and second.
     static int lastCommand = -1;
     static ULONGLONG lastTick = 0;
@@ -100,7 +101,7 @@ void Refused(int command) {
     if (command == lastCommand && now - lastTick < 1000) return;
     lastCommand = command, lastTick = now;
     if (g_logged.fetch_add(1) >= 40) return;
-    Log("%s: %s refused: it would put two ship domains together", kFeature, command >= 0 && command < 7 ? kNames[command] : "a command");
+    Log("%s: %s refused: it would put two ship domains together", kFeature, command >= 0 && command < 9 ? kNames[command] : "a command");
 }
 
 // --- The definitions ----------------------------------------------------------------------------

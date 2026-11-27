@@ -100,11 +100,12 @@ const size_t kLineDeployment = 0x110;  // a naval line's CNavalDeployment (the t
 std::atomic<bool> g_off{false};       // a fault or a layout surprise: everything passes to the game
 std::atomic<int> g_layoutLogs{0};
 
-enum Cmd { kMoveShips, kDetachMerge, kSetFleet, kSetFleetBase, kSetDeployTarget, kReorganize, kCreateFleet, kCmdCount };
+enum Cmd { kMoveShips, kDetachMerge, kSetFleet, kSetFleetBase, kSetDeployTarget, kReorganize, kCreateFleet, kMergeNavies, kTheaterFleet, kCmdCount };
 const char* const kCmdClass[kCmdCount] = {".?AVCMoveShipsCommand@@", ".?AVCNavyDetachShipsAndMergeCommand@@",
                                           ".?AVCSetFleetCommand@@", ".?AVCSetFleetHomeBaseCommand@@",
                                           ".?AVCSetNavalDeploymentTargetCommand@@", ".?AVCReorganizeShipsCommand@@",
-                                          ".?AVCCreateFleetCommand@@"};
+                                          ".?AVCCreateFleetCommand@@", ".?AVCMergeNaviesCommand@@",
+                                          ".?AVCSetNavyTheaterGroupForCommand@@"};
 uint8_t* g_canExec[kCmdCount] = {};
 CanExec_t g_canExecOrig[kCmdCount] = {};
 
@@ -494,22 +495,19 @@ bool ShipsFit(const uint8_t* cmd, size_t arrayAt, size_t countAt, size_t tfAt) {
     return there < 0 ? there != -2 : there == ships;
 }
 
-bool TaskForcesFit(const uint8_t* cmd) {
-    uint8_t* fleet = Lookup(cmd + 0x28);
-    if (!IsA(fleet, g_vtFleet)) {
-        if (fleet) Layout("a set-fleet command's fleet is not a fleet");
-        return true;
-    }
-    int domain = FleetDomain(fleet);
+// Task forces (handles at arrayAt, count at countAt) of one domain, and of the fleet's if one is given
+// (none: a new fleet).
+bool TaskForceListFits(const uint8_t* cmd, uint8_t* fleet, size_t arrayAt, size_t countAt, const char* what) {
+    int domain = fleet ? FleetDomain(fleet) : -1;
     if (domain == -2) domain = -1;  // already mixed (from before): no worse
-    int n = Rd<int>(cmd, 0x3c);
-    const uint8_t* arr = Rd<const uint8_t*>(cmd, 0x30);
+    int n = Rd<int>(cmd, countAt);
+    const uint8_t* arr = Rd<const uint8_t*>(cmd, arrayAt);
     if (n < 1 || n > 10000 || !arr) return true;
     for (int i = 0; i < n; ++i) {
         uint8_t* tf = TaskForceOf(arr + (size_t)i * 8);
         if (!tf) continue;
         if (!IsA(tf, g_vtTaskForce)) {
-            Layout("a set-fleet command's task force is not a task force");
+            Layout(what);
             return true;
         }
         int d = TaskForceDomain(tf);
@@ -519,6 +517,16 @@ bool TaskForcesFit(const uint8_t* cmd) {
         domain = d;
     }
     return true;
+}
+
+// Task forces into a fleet (fleet handle +0x28; empty: a new fleet), task force handles +0x30 / +0x3c.
+bool TaskForcesFit(const uint8_t* cmd) {
+    uint8_t* fleet = Lookup(cmd + 0x28);
+    if (fleet && !IsA(fleet, g_vtFleet)) {
+        Layout("a set-fleet command's fleet is not a fleet");
+        return true;
+    }
+    return TaskForceListFits(cmd, fleet, 0x30, 0x3c, "a set-fleet command's task force is not a task force");
 }
 
 bool BaseFits(const uint8_t* cmd) {
@@ -656,6 +664,9 @@ bool FitsSafe(int which, const uint8_t* cmd) {
             case kSetDeployTarget: return DeployTargetFits(cmd);
             case kReorganize: return ReorganizeFits(cmd);
             case kCreateFleet: return CreateFleetFits(cmd);
+            case kMergeNavies: return TaskForceListFits(cmd, nullptr, 0x28, 0x34, "a merge command's task force is not a task force");
+            // Into a theater: whole fleets (+0x38) as they are; task forces (+0x50 / +0x5c) into a new fleet.
+            case kTheaterFleet: return TaskForceListFits(cmd, nullptr, 0x50, 0x5c, "a theater command's task force is not a task force");
         }
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -684,7 +695,8 @@ uint64_t __fastcall HookCanExec(void* cmd, void* a2, void* a3, void* a4) {
 
 void* const kCanExecDetours[kCmdCount] = {(void*)&HookCanExec<0>, (void*)&HookCanExec<1>, (void*)&HookCanExec<2>,
                                           (void*)&HookCanExec<3>, (void*)&HookCanExec<4>, (void*)&HookCanExec<5>,
-                                          (void*)&HookCanExec<6>};
+                                          (void*)&HookCanExec<6>, (void*)&HookCanExec<7>,
+                                          (void*)&HookCanExec<8>};
 
 bool Fail(const char* why) {
     Log("ship_domains: %s; ship domains unavailable", why);
@@ -775,6 +787,8 @@ bool ResolveAll() {
         void** vt = FindVtableByRtti(kCmdClass[i], &n);
         g_canExec[i] = vt && n > 9 ? (uint8_t*)vt[9] : nullptr;
         if (!g_canExec[i]) return Fail("a naval command's can-execute was not found");
+        if (i == kTheaterFleet && !SigMatchAt(g_canExec[i], kCodeTheaterFleetCanExec))
+            return Fail("the theater command's can-execute does not read its task forces as analysed");
         for (int j = 0; j < i; ++j)
             if (g_canExec[j] == g_canExec[i]) return Fail("two naval commands share their can-execute");
     }
