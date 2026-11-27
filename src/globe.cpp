@@ -555,12 +555,21 @@ const char kHlsl[] =
     "\treturn float4( q * vPos.w, vPos.w );\n"
     "}\n"
     "// The game's map names: as HL_GlobeCull, and gone while the overview shows (the planets' names instead).\n"
+    "// Over space the names on planets go (their discs show their own); on a planet's globe every name not\n"
+    "// on it goes (the space map's zone names, other planets'): it would be bent round the horizon.\n"
     "float4 HL_GlobeLabel( float4 vPos )\n"
     "{\n"
     "\tif ( HL_GlobeA.x <= 0.0f || vPos.w == 0.0f )\n"
     "\t\treturn vPos;\n"
-    "\tif ( HL_GlobeA.y > 0.0f || ( HL_GlobeU.x > 0.5f && HL_GlobePlanetOf( vPos.xyz / vPos.w ) >= 0 ) )\n"
+    "\tfloat3 p = vPos.xyz / vPos.w;\n"
+    "\tint nOn = HL_GlobePlanetOf( p );\n"
+    "\tif ( HL_GlobeA.y > 0.0f || ( HL_GlobeU.x > 0.5f ? nOn >= 0 : nOn != (int)HL_GlobeB.y ) )\n"
     "\t\treturn float4( vCamPos + float3( 0.0f, -1000000.0f, 0.0f ), 1.0f );\n"
+    "\t// Over space its names lie flat on it, also where one crosses a planet's disc: drawn over the planet\n"
+    "\t// whole (names have no depth test) instead of torn where the ground there is dropped.\n"
+    "\tif ( HL_GlobeU.x > 0.5f && p.x >= HL_GlobeS.x && p.x <= HL_GlobeS.x + HL_GlobeS.z && p.z >= HL_GlobeS.y &&\n"
+    "\t     p.z <= HL_GlobeS.y + HL_GlobeS.w && round( ( vCamPos.x - HL_GlobeU.y ) * HL_GlobeA.w ) == 0.0f )\n"
+    "\t\treturn vPos;\n"
     "\treturn HL_GlobeCull( vPos );\n"
     "}\n"
     "// Nothing of it is drawn while bent (every vertex in one point): the game's water, whose coarse grid\n"
@@ -752,6 +761,22 @@ const char kHlsl[] =
     "\tfloat fMix = fOn * fCover;\n"
     "\treturn float4( lerp( vBack, vSurface, fMix ), 1.0f - fMix );\n"
     "}\n"
+    "// A name's pixel at flat point p: 0 over the space map inside a planet's disc (the planet is drawn\n"
+    "// there: the space map's names under it, such as its hidden docks', are hidden by it), else 1.\n"
+    "float HL_GlobeSpaceCover( float3 p )\n"
+    "{\n"
+    "\tif ( HL_GlobeA.x <= 0.0f || HL_GlobeU.x <= 0.5f )\n"
+    "\t\treturn 1.0f;\n"
+    "\tfor ( int h = 0; h < 16; ++h )\n"
+    "\t{\n"
+    "\t\tif ( h >= (int)HL_GlobeB.x )\n"
+    "\t\t\tbreak;\n"
+    "\t\tfloat4 vC = HL_GlobeP[ h * 8 + 1 ];\n"
+    "\t\tif ( HL_GlobeP[ h * 8 + 3 ].w > 0.5f && distance( p.xz, vC.xz ) < vC.w )\n"
+    "\t\t\treturn 0.0f;\n"
+    "\t}\n"
+    "\treturn 1.0f;\n"
+    "}\n"
     "#else\n"
     "float4 HL_Globe( float4 vPos ) { return vPos; }\n"
     "float4 HL_GlobeCull( float4 vPos ) { return vPos; }\n"
@@ -764,6 +789,7 @@ const char kHlsl[] =
     "float3 HL_GlobeSea( float3 vDiffuse, float3 vTint, float fHeight ) { return vDiffuse; }\n"
     "float3 HL_GlobeSpaceGround( float3 vDiffuse, float3 vPrepos ) { return vDiffuse; }\n"
     "float4 HL_GlobeNameOut( float4 vOut, float3 vPrepos ) { return vOut; }\n"
+    "float HL_GlobeSpaceCover( float3 p ) { return 1.0f; }\n"
     "#endif\n"
     "#endif\n";
 
@@ -894,6 +920,18 @@ std::string InsertAndReplace(const std::string& text, const std::string& anchor,
 
 const char* HlslCode() { return kHlsl; }
 
+// The map names' pixel shader: a name's texel (`float4 vSample = tex2D( DiffuseTexture, v.vTexCoord );`)
+// hidden over a planet's disc in space (`vSample.a *= HL_GlobeSpaceCover( v.vPrepos );`), with its
+// vertices kept flat there (HL_GlobeLabel): a zone's name crossing a disc reads whole up to the planet.
+std::string LabelPixelCode(const std::string& code, int* count) {
+    static const std::regex rx(R"((?:float4\s+)?([A-Za-z_]\w*)\s*=\s*tex2D\s*\(\s*DiffuseTexture\s*,\s*([A-Za-z_]\w*)\.vTexCoord\s*\)\s*;)");
+    std::smatch m;
+    if (!std::regex_search(code, m, rx) || code.find(m[2].str() + ".vPrepos") == std::string::npos) return code;
+    size_t end = (size_t)m.position() + (size_t)m.length();
+    ++*count;
+    return code.substr(0, end) + " " + m[1].str() + ".a *= HL_GlobeSpaceCover( " + m[2].str() + ".vPrepos );" + code.substr(end);
+}
+
 std::string PatchVertexCode(const std::string& code, int mode, int* count) {
     *count = 0;
     return PatchCode(code, mode, count);
@@ -924,6 +962,7 @@ std::string PatchMapShader(const std::string& shader, int mode, int* count) {
         int n = 0;
         std::string block = shader.substr(codeStart, codeEnd - codeStart);
         std::string code = vertex ? PatchCode(block, mode, &n) : PixelCode(block, &n);
+        if (!vertex && mode == kLabel) code = LabelPixelCode(code, &n);
         if (n == 0) continue;
         out.append(shader, pos, codeStart - pos);
         out += kHlsl;
