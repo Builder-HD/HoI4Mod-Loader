@@ -8875,3 +8875,26 @@ delivered there too. Both selected, right-click on the fleet list: `a new fleet 
 refused`; "New Theater": refused; destroyer selected, right-click on the space task force: `merging
 task forces refused`; nothing changed. Checks: 108/108 shapes, 208/208 signatures on 1.20.1, 1.20,
 1.19.5, 1.19.4.2; smoke passed.
+
+## U18: planets of different sizes in space (2026-11-27)
+
+Owner: "can we have different sizes for planets?" The loader had it already: a planet's disc in
+space is its `orbit` radius, and everything over space reads it per planet (the camera's height
+factor `orbitR / (width / 2 pi)` both ways, the disc's culling margin, its name). What was fixed is
+the generator, which made every hole 5 x 5 cells:
+
+- `--planet-sizes 5,3`: per tag the hole's side in cells (odd, 3 to 9; default 5): its 4n - 4 border
+  cells the docks (16 for 5, 8 for 3), the inner cells the lake, the disc's radius half the hole's
+  diagonal + 4 (348 for 5, 210 for 3). Refused when the holes don't fit the band.
+- **Found on the way:** with 5,3 the game said "Failed to load the map: some errors are present in
+  the map definition", nothing in error.log: the generator never emptied `--out`, so the 8 dock states
+  Earth B no longer has (`2187-...2194-Spaceport dock 9..16 PLB.txt`) stayed, on provinces that are now
+  space. A run now empties `--out` first, only when its `descriptor.mod` is this script's (anything
+  else: refused).
+
+**In game (1.20.1, `--planet-sizes 5,3`):** the map loads (24 docks); over space Earth B is drawn at
+about 0.6 of Earth A's size, its name scaled with it, its docks out of sight under it.
+
+**The zone name in the planet** (owner's report): not found yet. Over space no zone names are drawn
+at any height the camera reaches there (zooming in over a disc goes to the globe); asked the owner
+for a screenshot.

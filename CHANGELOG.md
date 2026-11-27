@@ -52,7 +52,9 @@ A–F; NOTES.md has the findings and test results behind each.
   over space keeps its frame rate. `tools/make_planets_map.py --space-height` builds a space band with space zones,
   hidden spaceport docks per planet, a spaceport building, spaceship hulls and units, a
   spaceships production tab, the spaceships' ship domain and test decisions that build a spaceship
-  and a destroyer. Fixed: the map's DDS textures (colour map, water) put the space band's rows at
+  and a destroyer; `--planet-sizes` gives each planet its own size in space (its hole's side in
+  cells, its disc's radius from it), and a run now replaces the generator's earlier output (stale
+  dock states from a bigger planet broke the map). Fixed: the map's DDS textures (colour map, water) put the space band's rows at
   the south, so Earth A's were the texture's north edge repeated (dark stripes along the meridians).
 - **`globe`: several planets and the overview** (NOTES.md Part T, MODDING.md "Planets"). `planet = {
   name x y width height north south polar_cap_* overview = { x y size } image }` blocks (up to 16) make

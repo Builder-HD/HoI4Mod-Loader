@@ -2385,8 +2385,10 @@ in their own strategic regions (space zones), with a hole for each planet (`orbi
 the planet's block: the hole's centre and the radius of the planet's disc there). The disc covers
 everything within its radius from any angle, so whatever lies in the hole (provinces that are only
 there for the game, such as spaceport docks) is out of sight when the radius reaches the hole's
-corners. The planets test (`tools/make_planets_map.py`) builds one: a grid of space provinces, each
-hole ringed by hidden ports (their spaceports' naval bases, see the generator) under a disc reaching
+corners. **A planet's size in space** is its `radius` (the camera's change of height between its
+globe and space follows it, as does its name); its hole should be as big. The planets test
+(`tools/make_planets_map.py`, `--planet-sizes 5,3`: each hole's side in cells) builds one: a grid of
+space provinces, each hole ringed by hidden ports (their spaceports' naval bases, see the generator) under a disc reaching
 its corners, spaceship hulls and units, and a production tab of their own (`production_tabs`: the
 space hulls out of the naval tab, a button at x = 265 in its copy of the production view).
 - **Planet -> space:** zoomed out past `space_height` over a planet's globe, the camera moves over the
