@@ -1542,10 +1542,10 @@ static const size_t kCodeShipBaseCountry = 30, kCodeShipBaseList = 38, kCodeShip
 // manager's list (above) holds the bases the map started with; the lookup finds bases built since.
 SIG(kSigShipBaseByProvince, "E8 ?? ?? ?? ?? 8B 54 24 60 48 8B C8 E8 ?? ?? ?? ?? 48 85 C0 74 ?? 48 8B D0 48 8B CB E8")
 static const size_t kSigShipBaseManager = 0, kSigShipBaseLookup = 12;
-// The game's "may use this naval base" (FUN_140eeefe0, mode 1): the country's access to the base's
-// province (call +6: (province, &tag, &tag, 1)) and the province's area (+0xd0) the same as the
-// country's (call +53, FUN_1407390d0(country by tag (call +36), 0)): a base on another world never
-// passes the second. A domain's own bases need the access only.
+// The game's "may use this naval base" (FUN_140eeefe0, mode 1): the province has a naval base (call +6:
+// the game's base table by province id) and its area (+0xd0) is the country's (call +53,
+// FUN_1407390d0(country by tag (call +36), 0)): a base on another world never passes the second. A
+// domain's own bases: a base there and the province controlled by the country.
 SIG(kSigShipBaseAccess, "41 83 F9 01 75 ?? E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ?? 48 83 BB ?? ?? ?? ?? 00 0F 84 ?? ?? ?? ?? 48 8B CE E8 ?? ?? ?? ?? 48 8B 9B ?? ?? ?? ?? 33 D2 48 8B C8 E8")
 static const size_t kSigShipBaseAccessCall = 6, kSigShipBaseAccessCountry = 36, kSigShipBaseAccessArea = 53;
 // A naval line's "Deploy target" list (FUN_141e3b3c0, view): the line (view +0x5f0 at +3, then +0x4f8
@@ -1561,6 +1561,17 @@ CODE(kCodeShipFleetListCall, "48 8D 54 24 ?? 49 8B C8 E8")
 CODE(kCodeShipFleetList, "48 89 5C 24 08 48 89 74 24 18 48 89 54 24 10 57 48 83 EC 30 48 8B F2 48 8B D9 C7 44 24 20 00 00 00 00 48 8B CA E8 ?? ?? ?? ?? C7 44 24 20 01 00 00 00 48 8B BB ?? ?? ?? ?? 48 63 83 ?? ?? ?? ?? 48 8D 1C C7 48 3B FB 74")
 CODE(kCodeShipFleetTaskForces, "48 8B 0F E8")
 CODE(kCodeFleetTaskForceList, "48 8D 81 ?? ?? ?? ?? C3")
+// The list's naval base entries (in the builder): an entry made (the pool's count at +3; the size at
+// +14, operator new call +18, the constructor (entry, gui, window) call +44), filled with its base (the
+// pool's data at +3; call +33), then sorted (up to 32: call +24; more: call +9). The pool is a CPdxArray
+// at the window: data, capacity +8, count +0xc, allocator +0x10 (vtable +8 alloc(size, 8), +0x10 free).
+CODE(kCodeShipListEntryNew, "45 39 AE ?? ?? ?? ?? 0F 8C ?? ?? ?? ?? B9 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 89 44 24 ?? 48 85 C0 74 ?? 4D 8B C6 48 8B 54 24 ?? 48 8B C8 E8")
+CODE(kCodeShipListEntrySet, "49 8B 86 ?? ?? ?? ?? 48 8B 0C 03 41 FF C5 48 83 C3 08 48 89 9D ?? ?? ?? ?? 48 8B 46 18 4A 8B 14 E0 E8")
+CODE(kCodeShipListSortSmall, "4C 8D 24 FE 48 83 FF 20 7F ?? 44 0F B6 85 ?? ?? ?? ?? 49 8B D4 48 8B CE E8")
+CODE(kCodeShipListSortLarge, "4C 8B C7 49 8B D4 48 8B CE E8 ?? ?? ?? ?? 90 48 81 7C 24 ?? 00 02 00 00")
+static const size_t kCodeShipListEntryCount = 3, kCodeShipListEntrySize = 14, kCodeShipListEntryAlloc = 18,
+                    kCodeShipListEntryCtor = 44, kCodeShipListEntryData = 3, kCodeShipListEntrySetCall = 33,
+                    kCodeShipListSortSmallCall = 24, kCodeShipListSortLargeCall = 9;
 // CIsOnContinentTrigger's evaluate (slot 22): province -> its map province (+0x30) -> its continent
 // (disp32 at +7), compared with the database's (getter call +11) entry for the trigger's token
 // (lookup call +22).

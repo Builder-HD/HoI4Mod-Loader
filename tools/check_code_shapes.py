@@ -1082,11 +1082,17 @@ def check_ship_domains(img, codes, text_va, text):
         tfl = rel32(img, tfc + 3) if tfc else None
         lok = (bool(bstart) and lst - bstart < 0x400 and bool(tfl) and img.match_at(tfl, codes['kCodeFleetTaskForceList']) and
                u32(tfl + 3) == 0xb8 and rel32(img, lst + k['kSigShipDeployListArea']) == rel32(img, access + k['kSigShipBaseAccessArea']))
+        # The base entries: made, filled, sorted (both sorts distinct), the pool's data 0xc before its count.
+        mk = find_in(img, bstart, 0x1000, codes['kCodeShipListEntryNew']) if bstart else None
+        st = find_in(img, mk, 0x200, codes['kCodeShipListEntrySet']) if mk else None
+        sm = find_in(img, st, 0x200, codes['kCodeShipListSortSmall']) if st else None
+        lg = find_in(img, sm, 0x200, codes['kCodeShipListSortLarge']) if sm else None
+        lok = lok and bool(lg) and u32(st + k['kCodeShipListEntryData']) + 0xc == u32(mk + k['kCodeShipListEntryCount']) and             rel32(img, sm + k['kCodeShipListSortSmallCall']) != rel32(img, lg + k['kCodeShipListSortLargeCall'])
     ok = ok and lok
     classes = all(img.vtable('.?AV%s@@' % c) for c in ('CShip', 'CTaskForce', 'CFleet', 'CNavalProductionLine', 'CNavalDeployment'))
     slots = []
     for c in ('CMoveShipsCommand', 'CNavyDetachShipsAndMergeCommand', 'CSetFleetCommand', 'CSetFleetHomeBaseCommand',
-              'CSetNavalDeploymentTargetCommand', 'CReorganizeShipsCommand'):
+              'CSetNavalDeploymentTargetCommand', 'CReorganizeShipsCommand', 'CCreateFleetCommand'):
         v = img.vtable('.?AV%s@@' % c)
         slots.append(v[1][9] if v and len(v[1]) > 9 else None)
     cmds = all(slots) and len(set(slots)) == len(slots)

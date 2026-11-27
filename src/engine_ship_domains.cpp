@@ -42,6 +42,10 @@ using ContinentDb_t = void*(__fastcall*)();
 using ContinentLookup_t = void*(__fastcall*)(void* db, int token);
 using CanExec_t = uint64_t(__fastcall*)(void* cmd, void* a2, void* a3, void* a4);
 using Builder_t = void(__fastcall*)(void* view);
+using EntryNew_t = void*(__fastcall*)(size_t size);
+using EntryCtor_t = void*(__fastcall*)(void* entry, void* gui, void* view);
+using EntrySet_t = void(__fastcall*)(void* entry, void* base);
+using Sort_t = void(__fastcall*)(void* a, void* b, void* c, void* d, void* e, void* f);
 using FleetList_t = void*(__fastcall*)(void* country, uint8_t* out);
 
 // The naval deployment target (CNavalDeployment, built per line and per delivery).
@@ -82,13 +86,25 @@ FleetList_t g_fleetListOrig = nullptr;
 CanUse_t g_canUseOrig = nullptr;
 void** g_vtDeployment = nullptr;
 thread_local int t_listDomain = -1;
+thread_local void* t_listView = nullptr;
+// The list's naval base entries: a domain's own bases added after the game's are sorted.
+uint32_t g_viewGui = 0, g_guiObject = 0;     // view -> +a -> +b: the game GUI the entries are made with
+uint32_t g_poolData = 0, g_poolCount = 0;    // the window's naval base entries (CPdxArray)
+uint32_t g_entrySize = 0;
+EntryNew_t g_entryNew = nullptr;
+EntryCtor_t g_entryCtor = nullptr;
+EntrySet_t g_entrySet = nullptr;
+uint8_t* g_sort[2] = {nullptr, nullptr};
+Sort_t g_sortOrig[2] = {nullptr, nullptr};
+const size_t kLineDeployment = 0x110;  // a naval line's CNavalDeployment (the target command's execute)
 std::atomic<bool> g_off{false};       // a fault or a layout surprise: everything passes to the game
 std::atomic<int> g_layoutLogs{0};
 
-enum Cmd { kMoveShips, kDetachMerge, kSetFleet, kSetFleetBase, kSetDeployTarget, kReorganize, kCmdCount };
+enum Cmd { kMoveShips, kDetachMerge, kSetFleet, kSetFleetBase, kSetDeployTarget, kReorganize, kCreateFleet, kCmdCount };
 const char* const kCmdClass[kCmdCount] = {".?AVCMoveShipsCommand@@", ".?AVCNavyDetachShipsAndMergeCommand@@",
                                           ".?AVCSetFleetCommand@@", ".?AVCSetFleetHomeBaseCommand@@",
-                                          ".?AVCSetNavalDeploymentTargetCommand@@", ".?AVCReorganizeShipsCommand@@"};
+                                          ".?AVCSetNavalDeploymentTargetCommand@@", ".?AVCReorganizeShipsCommand@@",
+                                          ".?AVCCreateFleetCommand@@"};
 uint8_t* g_canExec[kCmdCount] = {};
 CanExec_t g_canExecOrig[kCmdCount] = {};
 
@@ -175,6 +191,15 @@ uint8_t* TaskForceOf(const uint8_t* h) {
     return p && p != (uint8_t*)0x10 ? p - 0x10 : nullptr;
 }
 
+// A base of a domain is usable by the country that controls its province (and has a naval base there:
+// the game's base table). The game's own rule (the province's area the country's) never passes for a
+// base on another world.
+bool DomainBaseUsable(int id, const int* tag) {
+    void* province = ProvinceById(id);
+    return province && ProvinceIdOf(province) == id && g_access(province, tag, tag, 1) &&
+           IsSameCountry(ProvinceController(id), *tag);
+}
+
 // The best naval base of a domain the target's country may use, as the game's default picks one:
 // the highest level, the first on a tie. 0 if none.
 int BestBase(uint8_t* target, int domain) {
@@ -193,9 +218,7 @@ int BestBase(uint8_t* target, int domain) {
         for (int i = 0; i < m && ids; ++i) {
             void* base = g_baseLookup(list, ids[i]);
             if (!base || Rd<int>(base, kBaseProvince) != ids[i]) continue;
-            // The game's access to the province, without its "same area as the country" (another world).
-            void* province = ProvinceById(ids[i]);
-            if (!province || ProvinceIdOf(province) != ids[i] || !g_access(province, tag, tag, 1)) continue;
+            if (!DomainBaseUsable(ids[i], tag)) continue;
             int level = Rd<int>(base, kBaseLevel);
             if (level > bestLevel) best = ids[i], bestLevel = level;
         }
@@ -319,9 +342,72 @@ int ListDomainSafe(void* view) {
 void __fastcall HookBuilder(void* view) {
     int domain = g_off || !g_hooks.archetypeDomain ? -1 : ListDomainSafe(view);
     int saved = t_listDomain;
-    t_listDomain = domain;
+    void* savedView = t_listView;
+    t_listDomain = domain, t_listView = view;
     g_builderOrig(view);
-    t_listDomain = saved;
+    t_listDomain = saved, t_listView = savedView;
+}
+
+// After the game's naval base entries are sorted: one more for each base of the line's domain the
+// country can use (DomainBaseUsable; the game lists only bases connected to the capital), made as the game makes
+// them, appended to the window's entries (the list is filled from them right after).
+void AddDomainBases(void* view, int domain) {
+    uint8_t* line = Lookup((const uint8_t*)view + kListLineHandle);
+    uint8_t* deployment = IsA(line, NavalLineVtable()) ? Rd<uint8_t*>(line, kLineDeployment) : nullptr;
+    if (!IsA(deployment, g_vtDeployment)) return;
+    const int* tag = (const int*)(deployment + kTargetTag);
+    void* country = g_countryOfBases(tag);
+    void* manager = country ? g_bases(country) : nullptr;
+    void* inner = Rd<void*>(view, g_viewGui);
+    void* gui = inner ? Rd<void*>(inner, g_guiObject) : nullptr;
+    const int* ids = nullptr;
+    int m = g_hooks.domainProvinces ? g_hooks.domainProvinces(domain, &ids) : 0;
+    if (!manager || !gui || !ids) return;
+    uint8_t* pool = (uint8_t*)view + g_poolData;  // data, capacity +8, count +0xc, allocator +0x10
+    for (int i = 0; i < m; ++i) {
+        void* base = g_baseLookup(manager, ids[i]);
+        if (!base || Rd<int>(base, kBaseProvince) != ids[i]) continue;
+        if (!DomainBaseUsable(ids[i], tag)) continue;
+        int count = Rd<int>(pool, 0xc), cap = Rd<int>(pool, 8);
+        void** data = Rd<void**>(pool, 0);
+        if (count < 0 || cap < count || count > 100000) return;
+        if (count == cap) {
+            void** alloc = Rd<void**>(pool, 0x10);
+            if (!alloc) return;
+            using Alloc_t = void*(__fastcall*)(void* self, size_t size, size_t align);
+            using Free_t = void(__fastcall*)(void* self, void* p);
+            int grown = cap < 8 ? 8 : cap * 2;
+            void** fresh = (void**)((Alloc_t)(*(void***)alloc)[1])(alloc, (size_t)grown * 8, 8);
+            if (!fresh) return;
+            if (count) memcpy(fresh, data, (size_t)count * 8);
+            if (data) ((Free_t)(*(void***)alloc)[2])(alloc, data);
+            Wr<void**>(pool, 0, fresh);
+            Wr<int>(pool, 8, grown);
+            data = fresh;
+        }
+        void* entry = g_entryNew(g_entrySize);
+        if (!entry) return;
+        entry = g_entryCtor(entry, gui, view);
+        g_entrySet(entry, base);
+        data[count] = entry;
+        Wr<int>(pool, 0xc, count + 1);
+    }
+}
+
+void AddDomainBasesSafe(void* view, int domain) {
+    __try {
+        AddDomainBases(view, domain);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_off = true;
+        Log("ERROR: ship_domains: fault while adding a domain's bases to a deploy target list; ship domains are off for this session");
+    }
+}
+
+template <int W>
+void __fastcall HookSort(void* a, void* b, void* c, void* d, void* e, void* f) {
+    g_sortOrig[W](a, b, c, d, e, f);
+    void* view = t_listView;
+    if (view && t_listDomain > 0 && !g_off && a == Rd<void*>(view, g_poolData)) AddDomainBasesSafe(view, t_listDomain);
 }
 
 // The country's task forces for the list: those of another domain out (unknown ones stay).
@@ -356,10 +442,17 @@ void* __fastcall HookFleetList(void* country, uint8_t* out) {
     return r;
 }
 
+// While a deploy target list is built or a deployment target command is checked for a line of a known
+// domain: bases of other domains can't be used, the domain's own by DomainBaseUsable. Everywhere else
+// the game's.
 bool __fastcall HookCanUse(void* base, const int* tag) {
     bool r = g_canUseOrig(base, tag);
-    if (!r || t_listDomain < 0 || g_off || !base) return r;
-    return ProvinceDomainOf(Rd<int>(base, kBaseProvince)) == t_listDomain;
+    if (t_listDomain < 0 || g_off || !base) return r;
+    int id = Rd<int>(base, kBaseProvince);
+    int d = ProvinceDomainOf(id);
+    if (d != t_listDomain) return false;
+    if (r || d == 0) return r;
+    return DomainBaseUsable(id, tag);
 }
 
 // --- The commands: refused when they would put two domains together --------------------------------
@@ -499,6 +592,60 @@ bool ReorganizeFits(const uint8_t* cmd) {
     return true;
 }
 
+// A new fleet from selected task forces (handles +0x38, count +0x44) and ships (+0x50, count +0x5c):
+// all of one domain.
+bool CreateFleetFits(const uint8_t* cmd) {
+    int domain = -1;
+    int n = Rd<int>(cmd, 0x44);
+    const uint8_t* arr = Rd<const uint8_t*>(cmd, 0x38);
+    if (n < 0 || n > 10000 || (n > 0 && !arr)) return true;
+    for (int i = 0; i < n; ++i) {
+        uint8_t* tf = TaskForceOf(arr + (size_t)i * 8);
+        if (!tf) continue;
+        if (!IsA(tf, g_vtTaskForce)) {
+            Layout("a create-fleet command's task force is not a task force");
+            return true;
+        }
+        int d = TaskForceDomain(tf);
+        if (d == -2) return false;
+        if (d < 0) continue;
+        if (domain >= 0 && d != domain) return false;
+        domain = d;
+    }
+    n = Rd<int>(cmd, 0x5c);
+    arr = Rd<const uint8_t*>(cmd, 0x50);
+    if (n < 0 || n > 10000 || (n > 0 && !arr)) return true;
+    for (int i = 0; i < n; ++i) {
+        if (EmptyHandle(arr + (size_t)i * 8)) continue;
+        uint8_t* ship = ShipOf(arr + (size_t)i * 8);
+        if (!ship) {
+            Layout("a create-fleet command's ship is not a ship");
+            return true;
+        }
+        int d = ShipDomain(ship);
+        if (d < 0) return true;
+        if (domain >= 0 && d != domain) return false;
+        domain = d;
+    }
+    return true;
+}
+
+// The domain of a deployment target command's line (for the game's own check of a base), -1 unknown.
+int DeployCommandDomain(const uint8_t* cmd) {
+    uint8_t* line = Lookup(cmd + 0x28);
+    if (!IsA(line, NavalLineVtable())) return -1;
+    const void* design = Rd<const void*>(line, LineEquipmentOffset());
+    return design ? ShipDesignDomain(design) : -1;
+}
+
+int DeployCommandDomainSafe(const uint8_t* cmd) {
+    __try {
+        return DeployCommandDomain(cmd);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return -1;
+    }
+}
+
 bool FitsSafe(int which, const uint8_t* cmd) {
     __try {
         switch (which) {
@@ -508,6 +655,7 @@ bool FitsSafe(int which, const uint8_t* cmd) {
             case kSetFleetBase: return BaseFits(cmd);
             case kSetDeployTarget: return DeployTargetFits(cmd);
             case kReorganize: return ReorganizeFits(cmd);
+            case kCreateFleet: return CreateFleetFits(cmd);
         }
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -519,7 +667,15 @@ bool FitsSafe(int which, const uint8_t* cmd) {
 
 template <int W>
 uint64_t __fastcall HookCanExec(void* cmd, void* a2, void* a3, void* a4) {
+    int context = -1;
+    if constexpr (W == kSetDeployTarget) {
+        // The game's own check of a naval base target: a base of the line's domain counts as usable.
+        if (g_canUseOrig && !g_off && g_hooks.archetypeDomain) context = DeployCommandDomainSafe((const uint8_t*)cmd);
+    }
+    int saved = t_listDomain;
+    if (context >= 0) t_listDomain = context;
     uint64_t r = g_canExecOrig[W](cmd, a2, a3, a4);
+    t_listDomain = saved;
     if (!(r & 0xff) || g_off || !g_hooks.archetypeDomain || !g_hooks.provinceDomain) return r;
     if (FitsSafe(W, (const uint8_t*)cmd)) return r;
     if (g_hooks.refused) g_hooks.refused(W);
@@ -527,7 +683,8 @@ uint64_t __fastcall HookCanExec(void* cmd, void* a2, void* a3, void* a4) {
 }
 
 void* const kCanExecDetours[kCmdCount] = {(void*)&HookCanExec<0>, (void*)&HookCanExec<1>, (void*)&HookCanExec<2>,
-                                          (void*)&HookCanExec<3>, (void*)&HookCanExec<4>, (void*)&HookCanExec<5>};
+                                          (void*)&HookCanExec<3>, (void*)&HookCanExec<4>, (void*)&HookCanExec<5>,
+                                          (void*)&HookCanExec<6>};
 
 bool Fail(const char* why) {
     Log("ship_domains: %s; ship domains unavailable", why);
@@ -586,6 +743,25 @@ bool ResolveAll() {
         if (builder && list - builder < 0x400 && tfList && SigMatchAt(tfList, kCodeFleetTaskForceList) &&
             Rd<uint32_t>(tfList, 3) == kFleetTaskForces && SigFollowRel32(list + kSigShipDeployListArea) == areaOf) {
             g_builder = builder, g_fleetList = fleets;
+            g_viewGui = Rd<uint32_t>(list, kSigShipDeployListView);
+            g_guiObject = Rd<uint32_t>(list, kSigShipDeployListLine);
+            // The base entries (optional: without them a domain's bases are not offered).
+            uint8_t* mk = SigFindIn(builder, 0x1000, kCodeShipListEntryNew);
+            uint8_t* set = mk ? SigFindIn(mk, 0x200, kCodeShipListEntrySet) : nullptr;
+            uint8_t* small = set ? SigFindIn(set, 0x200, kCodeShipListSortSmall) : nullptr;
+            uint8_t* large = small ? SigFindIn(small, 0x200, kCodeShipListSortLarge) : nullptr;
+            if (mk && set && small && large && Rd<uint32_t>(set, kCodeShipListEntryData) + 0xc == Rd<uint32_t>(mk, kCodeShipListEntryCount)) {
+                g_poolData = Rd<uint32_t>(set, kCodeShipListEntryData);
+                g_poolCount = Rd<uint32_t>(mk, kCodeShipListEntryCount);
+                g_entrySize = Rd<uint32_t>(mk, kCodeShipListEntrySize);
+                g_entryNew = (EntryNew_t)SigFollowRel32(mk + kCodeShipListEntryAlloc);
+                g_entryCtor = (EntryCtor_t)SigFollowRel32(mk + kCodeShipListEntryCtor);
+                g_entrySet = (EntrySet_t)SigFollowRel32(set + kCodeShipListEntrySetCall);
+                g_sort[0] = SigFollowRel32(small + kCodeShipListSortSmallCall);
+                g_sort[1] = SigFollowRel32(large + kCodeShipListSortLargeCall);
+            } else {
+                Log("ship_domains: the deploy target list's base entries are not as analysed; a domain's bases are not offered");
+            }
             g_vtDeployment = FindVtableByRtti(".?AVCNavalDeployment@@", &n);
         } else {
             Log("ship_domains: the deploy target list is not as analysed; it shows every target (the commands still refuse)");
@@ -633,6 +809,13 @@ bool HookShipDomains(const ShipDomainHooks& hooks) {
         if (!list) {
             HookUnqueue(g_builder), HookUnqueue(g_fleetList), HookUnqueue((void*)g_canUse);
             Log("ship_domains: the deploy target list could not be hooked; it shows every target");
+        } else if (g_sort[0] && g_sort[1] && g_sort[0] != g_sort[1] && g_entrySize >= 0x100 && g_entrySize < 0x10000) {
+            if (!HookQueue(g_sort[0], (void*)&HookSort<0>, (void**)&g_sortOrig[0], "ship_domains_list_sort_small") ||
+                !HookQueue(g_sort[1], (void*)&HookSort<1>, (void**)&g_sortOrig[1], "ship_domains_list_sort_large")) {
+                HookUnqueue(g_sort[0]), HookUnqueue(g_sort[1]);
+                g_sort[0] = g_sort[1] = nullptr;
+                Log("ship_domains: the deploy target list's sort could not be hooked; a domain's bases are not offered");
+            }
         }
     }
     if (!ok) {
