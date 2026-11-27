@@ -8848,3 +8848,30 @@ province(s) in states on the domains' continents (2194 of 2194 state(s) with a c
 - **In game (1.20.1):** the Orbital Frigate line lists Earth A Theater 1, the First Space Fleet and
   Spaceport Dock 1 (Earth A) (10), not Earth B's dock; choosing the dock sets it ("Spaceport D...")
   and it stays after 18 days.
+
+## U17: merging task forces and a theater's new fleet (2026-11-27)
+
+The owner could still mix them: two task forces selected and a right-click on the theater's fleet
+list made a new fleet; a navy task force selected and a right-click on a space task force merged
+them. A temporary build logged every naval command's can-execute to find which ones these are
+(and the reserve route the test needed):
+
+- **Merge** (`CMergeNaviesCommand`, can-execute `FUN_1414038e0`): task force handles +0x28, count
+  +0x34 (minus 0x10), all into one task force (`FUN_140727b20`). Now: all of one domain.
+- **A theater's fleets** (`CSetNavyTheaterGroupForCommand`, can-execute `FUN_141b17c10`, 16 bytes on all
+  four builds, `kCodeTheaterFleetCanExec`): country tag +0x28, new-theater flag +0x2c, theater handle
+  +0x30, fleets +0x38 / +0x44 (moved whole), task forces +0x50 / +0x5c (minus 0x10): unless they are
+  one fleet's all, they become a new fleet (`FUN_140dbe050(tag)`, `FUN_140dbaa80(fleet, tf, 1)`). The
+  right-click on the fleet list and "New Theater" both send it. Now: the task forces of one domain.
+- **The set-fleet command without a fleet** (a new one) was let through; now its task forces must
+  be of one domain too.
+- **Reserve fleets** (`CSetAsReserveFleetCommand`: fleet +0x28, task forces +0x30 / +0x3c, ships +0x48
+  / +0x54, theater +0x60; `FUN_1413efeb0`) are left alone: the game also delivers new ships of any
+  kind into a theater's reserve fleet, so it stays a pool that may hold both; nothing can make a
+  fleet or a task force of both out of it.
+
+**In game (1.20.1):** the space fleet's task force assigned to Earth A's reserve, a test destroyer
+delivered there too. Both selected, right-click on the fleet list: `a new fleet in a theater
+refused`; "New Theater": refused; destroyer selected, right-click on the space task force: `merging
+task forces refused`; nothing changed. Checks: 108/108 shapes, 208/208 signatures on 1.20.1, 1.20,
+1.19.5, 1.19.4.2; smoke passed.

@@ -2464,8 +2464,9 @@ space = {
   stockpile.
 - **Refused** (the command can't be executed, as any command the game refuses): moving ships into a
   task force of another domain (also detach and merge), putting task forces of two domains into one
-  fleet (also the fleet window's reorganisation and a new fleet from selected task forces and ships),
-  a fleet's home base in another domain, and a naval
+  fleet (also the fleet window's reorganisation, a new fleet from selected task forces and ships, and
+  a new fleet in a theater: right-click on a theater's fleet list, "New Theater"), merging task forces
+  of two domains, a fleet's home base in another domain, and a naval
   line's deployment target in another domain (a fleet or a naval base). A theater or "Auto" stays
   allowed: the delivery picks a base.
 - **The "Deploy target" list** of a naval line shows only fleets and naval bases of the line's domain,
@@ -2489,6 +2490,10 @@ domains together`), at most 40 lines per game. Without definitions nothing is ho
 **Multiplayer:** the delivery runs in the game's own update on every machine with the same inputs;
 the refused commands are refused by every machine (the same check on the same state). The domains
 come from the mods, which multiplayer requires to match. **Saves:** nothing of the loader's is saved.
+
+**Reserve fleets** stay a pool, as the game uses them: new ships of any domain land in a theater's
+reserve fleet, and "assign all task forces to the reserve fleet" is allowed, so one reserve fleet can
+hold task forces of two domains. Nothing can form a fleet or task force out of them together.
 
 **Not yet:** the AI's own fleet organisation is not checked; allies' bases of a domain are not used.
 
