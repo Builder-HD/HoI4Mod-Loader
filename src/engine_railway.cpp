@@ -630,14 +630,11 @@ bool HookRailwayLines() {
 // mod-defined key instead of RAILWAY_UPGRADE_TOOLTIP (same placeholders). Without that key in the
 // loaded localisation the vanilla text stays.
 namespace {
-using Localize_t = EngineString*(__fastcall*)(EngineString* out, const char* key, void* args, int count);
 using TooltipBuilder_t = uint64_t(__fastcall*)(void* item, void* element, void* out);
 using LookupLine_t = void*(__fastcall*)(const void* id);
-Localize_t g_localizeOrig = nullptr;
 TooltipBuilder_t g_tooltipOrig = nullptr;
 LookupLine_t g_lookupLine = nullptr;
 uint8_t* g_tooltipFn = nullptr;
-uint8_t* g_localizeFn = nullptr;
 uint32_t g_tooltipId = 0;  // item -> line id
 const char kUpgradeKey[] = "RAILWAY_UPGRADE_TOOLTIP";
 thread_local int g_inDismantleTooltip = 0;
@@ -653,14 +650,9 @@ bool DismantleKeyKnown() {
     return g_dismantleKeyKnown == 1;
 }
 
-EngineString* __fastcall LocalizeDetour(EngineString* out, const char* key, void* args, int count) {
-    if (g_inDismantleTooltip && key && strcmp(key, kUpgradeKey) == 0) {
-        g_inDismantleTooltip = 0;  // LocalizeKey below goes through here too
-        bool swap = DismantleKeyKnown();
-        g_inDismantleTooltip = 1;
-        if (swap) key = kRailwayDismantleTooltipKey;
-    }
-    return g_localizeOrig(out, key, args, count);
+// Engine Localize key filter (no filter runs inside, so DismantleKeyKnown's own lookup is plain).
+const char* RailwayKeyFilter(const char* key) {
+    return g_inDismantleTooltip && strcmp(key, kUpgradeKey) == 0 && DismantleKeyKnown() ? kRailwayDismantleTooltipKey : nullptr;
 }
 
 RailwayHover_t g_hoverHandler = nullptr;
@@ -763,8 +755,7 @@ bool HookRailwayTooltip() {
     if (!HaveRailwayLines()) return false;
     uint8_t* p = SigFindUnique("rail_tooltip", kSigRailTooltip);
     uint8_t* lea = AnchorFindLea("rail_upgrade_tooltip", kAnchorRailUpgradeTooltip);
-    g_localizeFn = SigFindUnique("rail_localize", kSigLocalize);
-    if (!p || !lea || !g_localizeFn || lea < p || lea > p + 0x1000) {
+    if (!p || !lea || !HaveLocalize() || lea < p || lea > p + 0x1000) {
         Log("railway_queue: tooltip builder not found or not where expected; the queue keeps the vanilla text");
         return false;
     }
@@ -772,7 +763,7 @@ bool HookRailwayTooltip() {
     g_tooltipId = Rd<uint8_t>(p, kSigRailTooltipIdDisp);
     g_lookupLine = (LookupLine_t)SigFollowRel32(p + kSigRailTooltipLookupCall);
     return HookQueue(g_tooltipFn, (void*)&TooltipDetour, (void**)&g_tooltipOrig, "railway_tooltip") &&
-           HookQueue(g_localizeFn, (void*)&LocalizeDetour, (void**)&g_localizeOrig, "localize");
+           AddLocalizeKeyFilter(&RailwayKeyFilter);
 }
 
 bool SetRailwayHoverHandler(RailwayHover_t handler) {

@@ -83,6 +83,12 @@ struct LocalizeArg {
     const char* value;
 };
 bool LocalizeWithArgs(const char* key, const LocalizeArg* args, int count, std::string* out);
+// A key filter on every Localize() call: the key to read instead (a string that stays valid), or null
+// to leave it. Filters run in the order added, the first replacement wins; while they run (and the
+// Localize calls they make) no filter runs. Init only (one shared hook, queued with the first filter);
+// at most 8. Any thread the game localises on.
+using LocalizeKeyFilter_t = const char* (*)(const char* key);
+bool AddLocalizeKeyFilter(LocalizeKeyFilter_t filter);
 void MarkMapNamesDirty();  // the refresh set_state_name triggers
 
 // --- Effect registry -------------------------------------------------------------------------

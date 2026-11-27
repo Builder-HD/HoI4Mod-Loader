@@ -609,6 +609,35 @@ int RegionTemplateId(void* region) {
     return tmpl ? Read<int>(tmpl, kTemplateId) : -1;
 }
 
+namespace {
+LocalizeKeyFilter_t g_localizeFilters[8] = {};
+int g_localizeFilterCount = 0;
+Localize_t g_localizeFilterOrig = nullptr;
+thread_local bool t_inLocalizeFilter = false;
+
+EngineString* __fastcall LocalizeFilterDetour(EngineString* out, const char* key, void* p3, int p4) {
+    if (key && !t_inLocalizeFilter) {
+        t_inLocalizeFilter = true;
+        for (int i = 0; i < g_localizeFilterCount; ++i)
+            if (const char* r = g_localizeFilters[i](key)) {
+                key = r;
+                break;
+            }
+        t_inLocalizeFilter = false;
+    }
+    return g_localizeFilterOrig(out, key, p3, p4);
+}
+}  // namespace
+
+bool AddLocalizeKeyFilter(LocalizeKeyFilter_t filter) {
+    if (!g_localize || !filter || g_localizeFilterCount >= 8) return false;
+    if (g_localizeFilterCount == 0 &&
+        !HookQueue((void*)g_localize, (void*)&LocalizeFilterDetour, (void**)&g_localizeFilterOrig, "localize"))
+        return false;
+    g_localizeFilters[g_localizeFilterCount++] = filter;
+    return true;
+}
+
 const EngineString* LocalizeKey(const char* key) {
     if (!g_localize || !key || !*key) return nullptr;
     auto* out = new EngineString{};
