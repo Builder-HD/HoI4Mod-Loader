@@ -4,6 +4,14 @@ Release versions name the DLL package. The script version is the number script r
 `global.hoi4_loader_version` (MODDING.md "Versions and compatibility"). Development went in parts
 A–F; NOTES.md has the findings and test results behind each.
 
+## Unreleased
+
+- **Game 1.20.1** (`v1.20.1.0.0fd1`, Steam update of 2026-11-26) is listed in `loader_config.ini`.
+  A data-only hotfix: the code section is identical to 1.20, so every signature and anchor
+  (185/185) and every code shape (97/97) matches at the same address as on 1.20 (checked offline on
+  a copy). The vanilla files the loader patches are unchanged. No code changes. Not yet tested in
+  game on this build.
+
 ## 0.7.1-beta (2026-11-23), script version 3
 
 - **Game 1.20** (`v1.20.0.0.8873`, Steam update of 2026-11-19) is listed in `loader_config.ini`.

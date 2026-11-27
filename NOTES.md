@@ -53,6 +53,7 @@ Addresses below are for orientation in the named build only. Code uses the signa
 | **1.19.4.2** | **vanilla (`v1.19.4.2.2da5`), Steam update of 2026-11-05** | `bccc62909b6a1ec2c1d5a46ef18608e4d0c7cdc89ad341b7402a23c40f7a8037` |
 | **1.19.5** | **vanilla (`v1.19.5.0.7c6c`), Steam update of 2026-11-12** | `709f916afbebcfe64a26678702691aeb40945d206074c2a80de8e9d601fce148` |
 | **1.20** | **vanilla (`v1.20.0.0.8873`), Steam update of 2026-11-19** | `1beb2a38fe2d747e5b7adb9b9648e350b0b851845dd228ffb87d2d2ac1b63a9f` |
+| **1.20.1** | **vanilla (`v1.20.1.0.0fd1`), Steam update of 2026-11-26** | `b6eac19f0ebf966a2bf2025c0fd1baa187468e4078ad15bcfbb712a26f65e432` |
 
 **What changed from 1.19.4.2 to 1.19.5 (compared 2026-11-13):**
 - No checksum patch (`E8 ?? ?? ?? ?? 31 C0 0F 94 C3`: 0 matches), so vanilla.
@@ -79,6 +80,17 @@ Addresses below are for orientation in the named build only. Code uses the signa
   speed 5 to 1936.11 the engine on_actions fired (battles, focuses, captures, research, training,
   construction incl. two queued GER military factories typed right); no fault, no crash. The stat
   table size is read at runtime, so that offset is covered.
+
+**What changed from 1.20 to 1.20.1 (compared 2026-11-27):**
+- No checksum patch (`E8 ?? ?? ?? ?? 31 C0 0F 94 C3`: 0 matches), so vanilla.
+- Same file size as 1.20 (56,556,664 bytes); 1,334 bytes differ in 24 runs: 393 bytes in `.rdata`
+  (build and version strings), the rest outside the sections (header and signature). `.text` is
+  byte-for-byte identical, so every function keeps its 1.20 address.
+- `tools/check_signatures.py`: 185/185 match exactly once. `tools/check_code_shapes.py`: 97/97 ok.
+  Every reported address equals the one on 1.20.
+- The vanilla files patched at load still carry the file date 2026-10-15, so they are unchanged.
+- Listed as `1.20.1_vanilla`; not run in game yet. With identical code, the 1.20 in-game test
+  above carries over.
 
 **Vanilla 1.19.3 verified (2026-10-12 23:01):**
 - After Steam's "Verify integrity", `hoi4.exe` is `v1.19.3.0.c01a`, the same size as the
