@@ -331,7 +331,14 @@ struct ShipDomainHooks {
                                    // 3 fleet home base, 4 deployment target, 5 reorganize, 6 create fleet, 7 merge task forces, 8 a theater's new fleet); main thread
     // The provinces of a domain (> 0) in ascending id order, where its naval bases can be; any thread.
     int (*domainProvinces)(int domain, const int** ids);
+    // A sea zone's domain (its provinces are the domain's waters) by its CStrategicRegion or that
+    // region's CNavalRegionDominance (RegionDominanceObject), 0: none; UI thread. Optional.
+    int (*regionDomain)(const void* regionOrDominance);
+    // While a tooltip of a zone of a domain's waters is written: the localisation key to read
+    // instead of `key` (null: `key`). UI thread. Optional.
+    const char* (*waterKey)(int domain, const char* key);
 };
+const void* RegionDominanceObject(int regionId);  // the region's CNavalRegionDominance, null if unresolved
 bool HookShipDomains(const ShipDomainHooks& hooks);  // init only: the deploy function and 5 commands
 void* ContinentByToken(int token);    // the continent entry of a name token, null if none (main thread)
 void* StateContinent(int stateId);  // the continent entry a state is on (as the continent trigger reads it)

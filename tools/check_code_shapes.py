@@ -1098,7 +1098,14 @@ def check_ship_domains(img, codes, text_va, text):
         slots.append(v[1][9] if v and len(v[1]) > 9 else None)
     cmds = all(slots) and len(set(slots)) == len(slots)
     cmds = cmds and find_in(img, slots[-1], 0x20, codes['kCodeTheaterFleetCanExec']) == slots[-1]
-    return [('kSigShipDeployBranch / kCodeShipDefaultBase / kSigShipBaseByProvince / kSigShipBaseAccess / kSigShipDeployList (deploy starts %s, stockpile +0x%x)' % (hex(start) if start else '?', disp),
+    # The map's province tooltip: the convoy line's single reference, its function's prologue.
+    trefs, _ = cs.anchor_refs(img.d, text_va, text, 'CONVOY_DOMINANCE_COST_REDUCTION_EXPLANATION')
+    tstart = img.func_start(trefs[0]) if len(trefs) == 1 else None
+    tok = bool(tstart) and find_in(img, tstart, 0x20, codes['kCodeProvinceTooltipStart']) == tstart
+    rd = find_in(img, tstart, 0x4000, codes['kCodeTooltipRegionDominance']) if tok else None
+    tok = tok and bool(rd) and 0x10 <= u32(rd + 3) <= 0x1000 and rel32(img, rd + 42) != rel32(img, rd + 82)
+    return [('kAnchorProvinceTooltipConvoy / kCodeProvinceTooltipStart / kCodeTooltipRegionDominance (the province tooltip)', tok, hex(tstart) if tstart else 'missing'),
+            ('kSigShipDeployBranch / kCodeShipDefaultBase / kSigShipBaseByProvince / kSigShipBaseAccess / kSigShipDeployList (deploy starts %s, stockpile +0x%x)' % (hex(start) if start else '?', disp),
              ok, hex(br)),
             ('kCodeContinentRead (continent +0x%x)' % cont, bool(read) and 0x40 <= cont < 0x1000, hex(read) if read else 'missing'),
             ('ship_domains classes and commands (CShip, CTaskForce, CFleet, CNavalProductionLine; %d can-execute slots distinct: %s)'

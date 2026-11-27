@@ -6,18 +6,23 @@
 //   the country may use (the game's own rule: the highest level), else into the stockpile;
 // - moving ships into a task force, task forces into a fleet, a fleet's home base and a naval line's
 //   deployment target are refused when they would put two domains together (the command can't be
-//   executed, as for any command the game refuses).
+//   executed, as for any command the game refuses);
+// - the map's tooltips of a sea zone of the domain's waters (provinces of its terrains) read any
+//   localisation key K as K_<domain> when the mod defines that (NOTES.md U20).
 //
 //   # in a mod: common/hoi4_loader_ship_domains/*.txt
 //   space = {
 //       archetypes = { space_hull_light space_hull_cruiser space_hull_heavy }   # ship archetypes
 //       continents = { space }                         # continents (map/continent.txt) of its bases
+//       terrains = { space_deep space_asteroids }      # its waters: sea provinces of these terrains
 //   }
 #include <windows.h>
 
 #include <algorithm>
 #include <atomic>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -39,7 +44,7 @@ struct Entry {
 };
 struct Domain {
     std::string name;
-    std::vector<Entry> archetypes, continents;
+    std::vector<Entry> archetypes, continents, terrains;
 };
 std::vector<Domain> g_domains;  // domain i + 1
 
@@ -49,6 +54,13 @@ std::vector<std::pair<const void*, int>> g_archetypes;
 std::vector<unsigned char> g_provinces;
 std::vector<std::vector<int>> g_domainProvinces;  // per domain (index domain - 1), ascending ids
 std::vector<std::pair<void*, int>> g_continents;  // continent entry -> domain
+std::vector<std::pair<const void*, int>> g_terrains;  // terrain category -> domain (its waters)
+std::vector<unsigned char> g_waters;                   // per province id: the domain whose waters it is
+std::vector<std::pair<const void*, int>> g_regions;    // a zone of waters (its region, its dominance) -> domain
+// Per domain: a key -> the key read instead in its waters' tooltips ("" none). Values never move
+// (node-based map), so their c_str() can be handed to the game.
+std::vector<std::unordered_map<std::string, std::string>> g_waterKeys;
+std::mutex g_waterKeyLock;
 std::atomic<bool> g_ready{false};
 std::atomic<int> g_logged{0};
 
@@ -73,6 +85,26 @@ int DomainProvinces(int domain, const int** ids) {
     const std::vector<int>& v = g_domainProvinces[(size_t)domain - 1];
     *ids = v.data();
     return (int)v.size();
+}
+
+int RegionDomain(const void* region) {
+    if (!g_ready.load(std::memory_order_acquire) || !region) return 0;
+    auto it = std::lower_bound(g_regions.begin(), g_regions.end(), std::make_pair(region, 0));
+    return it != g_regions.end() && it->first == region ? it->second : 0;
+}
+
+const char* WaterKey(int domain, const char* key) {
+    if (domain < 1 || (size_t)domain > g_waterKeys.size() || !key || !*key) return nullptr;
+    std::lock_guard<std::mutex> lock(g_waterKeyLock);
+    std::unordered_map<std::string, std::string>& m = g_waterKeys[(size_t)domain - 1];
+    auto it = m.find(key);
+    if (it == m.end()) {
+        std::string alt = std::string(key) + "_" + g_domains[(size_t)domain - 1].name;
+        bool has = Engine::LocalizeKey(alt.c_str()) != nullptr;  // the filter does not run inside
+        if (has) Log("%s: %s's waters: %s read as %s", kFeature, g_domains[(size_t)domain - 1].name.c_str(), key, alt.c_str());
+        it = m.emplace(key, has ? alt : std::string()).first;
+    }
+    return it->second.empty() ? nullptr : it->second.c_str();
 }
 
 const char* DomainName(int d) { return d > 0 && (size_t)d <= g_domains.size() ? g_domains[(size_t)d - 1].name.c_str() : "none"; }
@@ -127,12 +159,13 @@ void ParseFile(const std::string& text, const std::string& shown) {
                 Log("%s: %s line %d: more than %d domains; %s skipped", kFeature, shown.c_str(), n.line, kMaxDomains, n.key.c_str());
                 continue;
             }
-            g_domains.push_back({n.key, {}, {}});
+            g_domains.push_back({n.key, {}, {}, {}});
             d = &g_domains.back();
         }
         for (const ScriptTree::Node& c : n.children) {
             std::vector<Entry>* list = ScriptTree::EqualsNoCase(c.key, "archetypes")   ? &d->archetypes
                                        : ScriptTree::EqualsNoCase(c.key, "continents") ? &d->continents
+                                       : ScriptTree::EqualsNoCase(c.key, "terrains")   ? &d->terrains
                                                                                         : nullptr;
             std::vector<std::string> names;
             std::string why;
@@ -171,6 +204,7 @@ void ResolveBeforeEntry() {
     g_logged = 0;
     g_archetypes.clear();
     g_continents.clear();
+    g_terrains.clear();
     std::vector<std::pair<void*, int>>& continents = g_continents;
     for (size_t i = 0; i < g_domains.size(); ++i) {
         const Domain& d = g_domains[i];
@@ -207,7 +241,18 @@ void ResolveBeforeEntry() {
             continents.push_back({c, domain});
             ++found;
         }
-        Log("%s: %s: %d archetype(s), %d continent(s)", kFeature, d.name.c_str(), archetypes, found);
+        int terrains = 0;
+        for (const Entry& e : d.terrains) {
+            const void* t = Engine::HaveTerrain() ? Engine::TerrainByToken(Engine::Intern(e.name.c_str())) : nullptr;
+            if (!t) {
+                Log("%s: %s (%s line %d): terrain %s %s; skipped", kFeature, d.name.c_str(), e.file.c_str(), e.line, e.name.c_str(),
+                    Engine::HaveTerrain() ? "not found (common/terrain)" : "can't be read (the terrain parts are missing)");
+                continue;
+            }
+            g_terrains.push_back({t, domain});
+            ++terrains;
+        }
+        Log("%s: %s: %d archetype(s), %d continent(s), %d terrain(s)", kFeature, d.name.c_str(), archetypes, found, terrains);
     }
     std::sort(g_archetypes.begin(), g_archetypes.end());
 }
@@ -236,6 +281,33 @@ void ResolveAfterEntry(bool) {
     }
     for (int pid = 1; pid < count; ++pid)
         if (g_provinces[(size_t)pid]) g_domainProvinces[(size_t)g_provinces[(size_t)pid] - 1].push_back(pid);
+    // The domains' waters: provinces of their terrains.
+    g_waters.assign(count > 0 ? (size_t)count : 0, 0);
+    g_regions.clear();
+    int waters = 0;
+    if (!g_terrains.empty()) {
+        for (int pid = 1; pid < count; ++pid) {
+            const void* t = Engine::ProvinceTerrain(pid);
+            for (const auto& x : g_terrains)
+                if (t && x.first == t) g_waters[(size_t)pid] = (unsigned char)x.second, ++waters;
+        }
+        // The zones of waters: a sea region whose first province is a domain's water (the map maker
+        // keeps a zone of one terrain), by its region object and its dominance object.
+        std::vector<void*> provs;
+        for (int rid = 1; rid < Engine::RegionCount(); ++rid) {
+            provs.clear();
+            if (!Engine::AreaProvinceObjects(Engine::AreaKind::StrategicRegion, rid, &provs) || provs.empty()) continue;
+            int pid = Engine::ProvinceIdOf(provs[0]);
+            int d = pid > 0 && pid < count ? g_waters[(size_t)pid] : 0;
+            if (!d) continue;
+            if (void* r = Engine::RegionById(rid)) g_regions.push_back({r, d});
+            if (const void* dom = Engine::RegionDominanceObject(rid)) g_regions.push_back({dom, d});
+        }
+        std::sort(g_regions.begin(), g_regions.end());
+        g_regions.erase(std::unique(g_regions.begin(), g_regions.end()), g_regions.end());
+        Log("%s: %d province(s) in the domains' waters, %zu zone object(s) (regions and their dominance)", kFeature, waters,
+            g_regions.size());
+    }
     Log("%s: %d province(s) in states on the domains' continents (%d of %d state(s) with a continent)", kFeature, bases, readable,
         states > 0 ? states - 1 : 0);
     g_ready.store(true, std::memory_order_release);
@@ -253,7 +325,8 @@ bool ShipDomainsInit() {
         Log("%s: required engine functions or fields missing", kFeature);
         return false;
     }
-    if (!Engine::HookShipDomains({&ArchetypeDomain, &ProvinceDomain, &Delivered, &Refused, &DomainProvinces})) {
+    g_waterKeys.assign(g_domains.size(), {});
+    if (!Engine::HookShipDomains({&ArchetypeDomain, &ProvinceDomain, &Delivered, &Refused, &DomainProvinces, &RegionDomain, &WaterKey})) {
         Log("%s: hooks could not be queued", kFeature);
         return false;
     }

@@ -456,6 +456,52 @@ bool __fastcall HookCanUse(void* base, const int* tag) {
     return DomainBaseUsable(id, tag);
 }
 
+// --- A domain's waters in the map's sea zone tooltips -------------------------------------------------
+
+using RegionTooltip_t = uint64_t(__fastcall*)(void* kind, void* out, void* region, uint64_t flag);
+using RegionText_t = uint64_t(__fastcall*)(void* dominance, void* out, void* a3, void* a4);
+uint8_t* g_provinceTooltip = nullptr;
+uint32_t g_regionDominance = 0;  // CStrategicRegion -> its CNavalRegionDominance
+uint8_t* g_regionText[2] = {nullptr, nullptr};  // a zone's dominance text, its minimum line
+RegionText_t g_regionTextOrig[2] = {nullptr, nullptr};
+RegionTooltip_t g_provinceTooltipOrig = nullptr;
+thread_local int t_waterDomain = 0;  // while a tooltip of a zone of a domain's waters is written
+
+int RegionDomainSafe(const void* regionOrDominance) {
+    __try {
+        return g_hooks.regionDomain(regionOrDominance);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+
+// The zone's tooltip (a CStrategicRegion; pointers not in the plugin's table have no domain).
+uint64_t __fastcall HookProvinceTooltip(void* kind, void* out, void* region, uint64_t flag) {
+    int saved = t_waterDomain;
+    t_waterDomain = g_off || !region ? 0 : RegionDomainSafe(region);
+    uint64_t r = g_provinceTooltipOrig(kind, out, region, flag);
+    t_waterDomain = saved;
+    return r;
+}
+
+// A zone's dominance lines, wherever written (a CNavalRegionDominance).
+template <int W>
+uint64_t __fastcall HookRegionText(void* dominance, void* out, void* a3, void* a4) {
+    int saved = t_waterDomain;
+    if (!g_off && dominance) {
+        int d = RegionDomainSafe(dominance);
+        if (d > 0) t_waterDomain = d;
+    }
+    uint64_t r = g_regionTextOrig[W](dominance, out, a3, a4);
+    t_waterDomain = saved;
+    return r;
+}
+
+const char* WaterKeyFilter(const char* key) {
+    int d = t_waterDomain;
+    return d > 0 && !g_off ? g_hooks.waterKey(d, key) : nullptr;
+}
+
 // --- The commands: refused when they would put two domains together --------------------------------
 
 uint8_t* ShipOf(const uint8_t* h) {
@@ -832,6 +878,38 @@ bool HookShipDomains(const ShipDomainHooks& hooks) {
             }
         }
     }
+    // The tooltip's text for a domain's waters (optional: without it the game's text stays).
+    if (ok && hooks.regionDomain && hooks.waterKey) {
+        uint8_t* lea = AnchorFindLea("province_tooltip_convoy", kAnchorProvinceTooltipConvoy);
+        DWORD64 base = 0;
+        PRUNTIME_FUNCTION f = lea ? RtlLookupFunctionEntry((DWORD64)lea, &base, nullptr) : nullptr;
+        uint8_t* start = f && !(f->UnwindData & 1) && !((Rd<uint8_t>((void*)base, f->UnwindData) >> 3) & 4)
+                             ? (uint8_t*)(base + f->BeginAddress) : nullptr;
+        if (!start || !SigMatchAt(start, kCodeProvinceTooltipStart)) {
+            Log("ship_domains: the map's sea zone tooltip is not as analysed; a domain's waters keep the game's text");
+        } else if (!HookQueue(start, (void*)&HookProvinceTooltip, (void**)&g_provinceTooltipOrig, "ship_domains_province_tooltip")) {
+            Log("ship_domains: the map's sea zone tooltip could not be hooked; a domain's waters keep the game's text");
+        } else if (!AddLocalizeKeyFilter(&WaterKeyFilter)) {
+            HookUnqueue(start);
+            Log("ship_domains: the localisation filter could not be added; a domain's waters keep the game's text");
+        } else {
+            g_provinceTooltip = start;
+            // The zone's dominance lines, also where other tooltips write them (optional).
+            uint8_t* at = SigFindIn(start, 0x4000, kCodeTooltipRegionDominance);
+            uint32_t disp = at ? Rd<uint32_t>(at, kCodeTooltipRegionDisp) : 0;
+            uint8_t* text = at ? SigFollowRel32(at + kCodeTooltipRegionDominanceCall) : nullptr;
+            uint8_t* minimum = at ? SigFollowRel32(at + kCodeTooltipRegionMinimumCall) : nullptr;
+            if (!at || disp < 0x10 || disp > 0x1000 || !text || !minimum || text == minimum) {
+                Log("ship_domains: a sea zone's dominance lines are not as analysed; they keep the game's text over other tooltips");
+            } else if (!HookQueue(text, (void*)&HookRegionText<0>, (void**)&g_regionTextOrig[0], "ship_domains_zone_dominance") ||
+                       !HookQueue(minimum, (void*)&HookRegionText<1>, (void**)&g_regionTextOrig[1], "ship_domains_zone_minimum")) {
+                HookUnqueue(text), HookUnqueue(minimum);
+                Log("ship_domains: a sea zone's dominance lines could not be hooked; they keep the game's text over other tooltips");
+            } else {
+                g_regionDominance = disp, g_regionText[0] = text, g_regionText[1] = minimum;
+            }
+        }
+    }
     if (!ok) {
         HookUnqueue(g_deploy);
         for (int i = 0; i < kCmdCount; ++i)
@@ -841,6 +919,11 @@ bool HookShipDomains(const ShipDomainHooks& hooks) {
         HookUnqueue((void*)g_canUse);
     }
     return ok;
+}
+
+const void* RegionDominanceObject(int regionId) {
+    void* r = g_regionDominance ? RegionById(regionId) : nullptr;
+    return r ? Rd<const void*>(r, g_regionDominance) : nullptr;
 }
 
 void* ContinentByToken(int token) {

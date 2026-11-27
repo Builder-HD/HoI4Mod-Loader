@@ -1565,6 +1565,16 @@ CODE(kCodeFleetTaskForceList, "48 8D 81 ?? ?? ?? ?? C3")
 // count +0x44) and task forces (handles +0x50, count +0x5c; minus 0x10) for the theater. The execute
 // moves whole fleets as they are and makes one new fleet of the task forces (unless they are one
 // fleet's all).
+// The map's tooltip of a strategic region (FUN_140e7e970(kind, out text, CStrategicRegion, flag)): the
+// only reference to the convoy line of a sea zone's tooltip; its start (the unwind table's) begins
+// with this prologue.
+ANCHOR(kAnchorProvinceTooltipConvoy, "CONVOY_DOMINANCE_COST_REDUCTION_EXPLANATION")
+CODE(kCodeProvinceTooltipStart, "48 8B C4 48 89 58 20 4C 89 40 18 48 89 50 10 55 56 57 41 54 41 55 41 56")
+// In it, a sea zone's dominance lines: the region's CNavalRegionDominance (disp at +3), its dominance
+// text (FUN_14108d910(dominance, out, country), call +42) and its minimum line (FUN_14108e150(dominance,
+// out), call +82). Other tooltips (the zone's map icon) call the two with a zone's dominance as well.
+CODE(kCodeTooltipRegionDominance, "49 8B 9F ?? ?? ?? ?? B9 ?? ?? ?? ?? 41 B8 ?? ?? ?? ?? 83 B8 ?? ?? ?? ?? 00 44 0F 4F C1 4C 03 C0 48 8D 95 ?? ?? ?? ?? 48 8B CB E8 ?? ?? ?? ?? 90 48 8B D0 49 8B CE E8 ?? ?? ?? ?? 90 48 8D 8D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8D 95 ?? ?? ?? ?? 48 8B CB E8")
+static const size_t kCodeTooltipRegionDisp = 3, kCodeTooltipRegionDominanceCall = 42, kCodeTooltipRegionMinimumCall = 82;
 CODE(kCodeTheaterFleetCanExec, "83 79 28 00 7E ?? 83 79 44 00 75 ?? 83 79 5C 00 0F 95 C0 C3")
 // The list's naval base entries (in the builder): an entry made (the pool's count at +3; the size at
 // +14, operator new call +18, the constructor (entry, gui, window) call +44), filled with its base (the
