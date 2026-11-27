@@ -53,6 +53,7 @@ Current features:
 | `attention_area` | engine (needs `lifecycle`) | `hoi4_loader_plugin_attention_area` | `add_attention_area`, `remove_attention_area`, `focus_attention_area`, `has_attention_area`: mark any set of provinces on the map (a line and a fill shader each, built-in or a mod's own) and move the camera to it; display only, not saved, see below |
 | `globe` | engine (needs `lifecycle`) | `hoi4_loader_plugin_globe` | the map as a planet when zoomed out, turned on by a mod's `common/hoi4_loader_globe/` file; `set_globe_view` (saved), `is_globe_view`; display only, DX11 only, see below |
 | `camera_range` | engine (needs `lifecycle`) | `hoi4_loader_plugin_camera_range` | a raised `NFrontend.CAMERA_MAX_HEIGHT` works: the map camera's far plane follows it, see below |
+| `ship_domains` | engine (needs `lifecycle`) | `hoi4_loader_plugin_ship_domains` | navies that never mix (e.g. ships in space beside the navy at sea): built ships go to bases and fleets of their own domain, commands that would mix them are refused, see below |
 | `large_map` | engine | `hoi4_loader_plugin_large_map` | maps with more pixels than vanilla's (more than about 5632 x 2327): the engine's 50 MB map scratch buffer is sized to the map, see below |
 
 On an unknown build the file tier stays on, the engine tier is off, and `loader.log` lists the
@@ -170,6 +171,7 @@ when the loader is missing or a feature is off. Without them, using a loader tri
 | `set_globe_view`, `is_globe_view` | `scripted_triggers/hoi4_loader_feature_globe.txt` |
 | `large_map` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_large_map.txt` |
 | `camera_range` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_camera_range.txt` |
+| `ship_domains` (no commands; for guards only) | `scripted_triggers/hoi4_loader_feature_ship_domains.txt` |
 
 - **Combinations:** a block that combines features needs each feature's stub and guard, e.g.
   `air_superiority` inside `strategic_region` needs both `region_control` and `region_scope`.
@@ -2438,6 +2440,54 @@ the map is cut off. With the loader the far plane follows the define (vanilla's 
 highest camera; 6000 gives 8000). Nothing to turn on; at vanilla's height nothing changes. `loader.log`:
 `camera_range: CAMERA_MAX_HEIGHT 6000: the map camera's far plane 8000 instead of 4000` (in the first
 game frame).
+
+## Ship domains (`ship_domains`)
+
+A mod can have navies that never mix: ships in space beside the navy at sea, river boats beside it,
+an airship fleet. Each **domain** names its ship archetypes and the continents its naval bases are on;
+every other ship and base belongs to no domain (the ordinary navy).
+
+```
+# common/hoi4_loader_ship_domains/*.txt
+space = {
+    archetypes = { space_hull_light space_hull_cruiser space_hull_heavy }   # ship archetypes
+    continents = { space }               # map/continent.txt: the states its naval bases are in
+}
+```
+
+- **Built ships** (production lines, ships delivered as equipment, `create_ship`) go to a naval base,
+  task force or fleet of their own domain. A line's deployment target is used if it fits; otherwise
+  the ships go to the best base of their domain the country may use (the game's own rule: the
+  highest level, the first on a tie). A domain's bases need only the game's access test (owned,
+  controlled or with docking rights), not its "connected to the capital" one, which a base on
+  another world could never pass. With no base of their domain the ships go into the stockpile.
+- **Refused** (the command can't be executed, as any command the game refuses): moving ships into a
+  task force of another domain (also detach and merge), putting task forces of two domains into one
+  fleet, a fleet's home base in another domain, and a naval line's deployment target in another
+  domain (a fleet or a naval base). A theater or "Auto" stays allowed: the delivery picks a base.
+- **Domains of things:** a ship's by its hull's archetype, a task force's by its ships, a fleet's by
+  its task forces (an empty one by its home base), a naval base's by its state's continent.
+- Archetypes are archetypes (`is_archetype = yes`): listing an equipment type takes its archetype
+  (logged). An archetype can be in one domain only. At most 15 domains.
+- Same name in several files or mods: the lists add up.
+
+**Mod advice:** a country can only use a domain's ships where it has a base of that domain, so make
+building them depend on one (e.g. `is_buildable` / a technology or decision that needs the base).
+Ships of the domain that find no base go into the stockpile.
+
+`loader.log`: `ship_domains: 1 domain(s) from common/hoi4_loader_ship_domains`, per game `space: 3
+archetype(s), 1 continent(s)`, `32 province(s) in states on the domains' continents`; every delivery
+moved elsewhere (`PLA: 1 space ship(s) delivered at province 26872 (a base of their domain) instead of
+9498`) and every refused command (`a naval line's deployment target refused: it would put two ship
+domains together`), at most 40 lines per game. Without definitions nothing is hooked.
+
+**Multiplayer:** the delivery runs in the game's own update on every machine with the same inputs;
+the refused commands are refused by every machine (the same check on the same state). The domains
+come from the mods, which multiplayer requires to match. **Saves:** nothing of the loader's is saved.
+
+**Not yet:** the deployment target list doesn't offer a domain's bases (the game's "connected to the
+capital" rule hides them; "Auto" or a fleet of the domain delivers there); the AI's own fleet
+organisation is not checked.
 
 ## Large maps (`large_map`)
 

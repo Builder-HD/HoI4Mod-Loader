@@ -8737,3 +8737,63 @@ Steps from here: step 2 the space map as the zoomed-out view (U2); step 3 the se
   only (convoy to submarines).
 - Next (3b): deployment and fleets kept apart in the engine (spaceship lines only to spaceports and
   space fleets, regular ships never there, no mixed fleets).
+
+## U14: step 3b, the two navies kept apart (`ship_domains`, 2026-11-27)
+
+A general feature: domains of ships (archetypes) and of naval bases (continents of their states);
+domain 0 is everything else.
+
+**Where built ships go (1.20 addresses).** A finished ship is equipment until a naval deployment
+target (`CNavalDeployment`, vtable `0x1429e11f8`: tag +8, task force handle +0xc, theater group handle
++0x14, naval base province +0x1c, design +0x20, the country's design info +0x28 with +0x10 "is a ship")
+delivers it: `FUN_140d72900(target, count, line, ?)`, called by the naval production line
+(`FUN_140ff6b30`), the delivery of equipment lists (`FUN_141078790`) and `create_ship`
+(`FUN_14036aa60`). Not a ship: into the stockpile (country +0xf68, `FUN_140ed4ee0(stockpile, design,
+count)`). A ship: the province is the target task force's fleet's base (`FUN_140dd9520`: task force
++0x340 fleet, +0xd8 base, +0xa4 id), else the target's base (+0x1c), else the default
+(`FUN_140d76200`: the country's base manager `FUN_1407426c0(country)`, its list +0x18 / +0x24, `may
+use` `FUN_140f1fcf0(base, &tag)`, the highest level +0x18, base province +0x10); then
+`FUN_140d74410(target, province, count, line, ?)` puts the ships into a task force at that province
+(an existing one of the target, or of the theater, else a new one in a reserve fleet).
+- The hook: from the ship branch's code (`kSigShipDeployBranch`, the function's start from the unwind
+  table) the ships' domain (design +0x3f0 type, +0x538 archetype: production_data's offsets) against
+  where the game would put them (the same order, calling the game's functions); if that is another
+  domain: the target's task force and theater cleared and its base set to the best base of the
+  domain for the one call (put back after); with none: the stockpile.
+- **The domain's bases:** the manager's list holds only the bases the map started with (535 on the
+  twin map: none of the docks, whose bases the start script builds); the lookup by province
+  (`func_0x140f16250(manager, id)`, a hash; `kSigShipBaseByProvince`, its manager call cross-checked
+  with the default base's) finds them. And `may use` is `FUN_140eeefe0(province, &tag, &tag, 1)`:
+  the access test `FUN_140ef28d0` and the province's area +0xd0 equal to the country's
+  (`FUN_1407390d0(country, 0)`): a dock is never in the capital's area, which is why in step 1 the
+  spaceships could not be deployed to the docks. A domain's bases need the access test only
+  (`kSigShipBaseAccess`, its country call cross-checked).
+- **Continents:** `CIsOnContinentTrigger` (slot 22) reads a STATE's continent: the states array (game
+  state +0x2c8 / +0x2d4, the loader's StateById), state +0x30, +0x140, compared with the database's
+  entry for the token (`kCodeContinentRead`). Province +0x30 is something else (null), the static map
+  province +0x140 faults. So: per state its continent, its provinces the domain.
+
+**The commands** (lockstep `CCommand`s, slot 9 can execute, hooked by RTTI; refused = the low byte
+cleared): `CMoveShipsCommand` and `CNavyDetachShipsAndMergeCommand` (ship handles +0x28, count +0x34,
+target task force handle +0x40, minus 0x10), `CSetFleetCommand` (fleet handle +0x28, task force handles
++0x30 / +0x3c), `CSetFleetHomeBaseCommand` (fleet +0x28, province +0x30), `CSetNavalDeploymentTargetCommand`
+(line +0x28, task force +0x30, theater group +0x38, base province +0x40). Every object read is checked
+by its class (`CShip`, `CTaskForce`, `CFleet`, `CNavalProductionLine`) and a task force's ships must
+point back to it (ship +0x728); a ship's archetypes are its equipment's (ship +0x40: +8 entries of
+0x18 with the archetype first, +0x14 count); task force ships +0x348 / +0x354; fleet task forces
++0xb8 / +0xc4. Anything unexpected lets the command through (logged).
+
+**Checks:** signatures 207/207 and code shapes 108/108 on 1.20.1, 1.20, 1.19.5, 1.19.4.2.
+
+**In game (1.20.1, the planets test regenerated):** `space: 3 archetype(s), 1 continent(s)`, `32
+province(s) in states on the domains' continents (2194 of 2194 state(s) with a continent)`.
+- "Test: build a spaceship" (`create_ship`, Orbital Frigate): `PLA: 1 space ship(s) delivered at
+  province 26872 (a base of their domain) instead of 9498`: a new "Earth A Reserve fleet 2" docked in
+  Spaceport Dock 1 (Earth A) with the Light Space Hull 1 (Orbital Frigate). Before the access test
+  was split off it went into the stockpile (no usable base).
+- "Test: build a destroyer" (a regular Test Destroyer design): kept where the game put it, "Earth A
+  Reserve fleet 1" docked in Holland (Rotterdam).
+- An Orbital Frigate line's deploy target: the destroyer's reserve fleet and Abruzzo (a regular base)
+  refused (the line stays as it was; the log line once), the First Space Fleet accepted.
+- Not tested yet: the commands that need drag and drop (ships between task forces, task forces into
+  fleets, a fleet's home base); the AI over months.

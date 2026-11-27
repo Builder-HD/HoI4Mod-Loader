@@ -6,6 +6,14 @@ A–F; NOTES.md has the findings and test results behind each.
 
 ## Unreleased
 
+- **New feature `ship_domains`** (engine tier, needs `lifecycle`; guard
+  `hoi4_loader_feature_ship_domains`; MODDING.md "Ship domains", NOTES.md U14). Navies that never mix:
+  a mod names domains (ship archetypes, the continents of their bases); built ships (production,
+  delivered equipment, `create_ship`) go only to bases, task forces and fleets of their domain (else
+  into the stockpile), and moving ships or task forces, a fleet's home base and a naval line's
+  deployment target are refused when they would mix two domains. 4 new signatures and 2 code
+  shapes, checked on 1.20.1, 1.20, 1.19.5 and 1.19.4.2; tested in game on 1.20.1 (the planets test's
+  spaceships).
 - **Game 1.20.1** (`v1.20.1.0.0fd1`, Steam update of 2026-11-26) is listed in `loader_config.ini`.
   A data-only hotfix: the code section is identical to 1.20, so every signature and anchor
   (185/185) and every code shape (97/97) matches at the same address as on 1.20 (checked offline on
@@ -39,8 +47,9 @@ A–F; NOTES.md has the findings and test results behind each.
   last looked. Over space the game draws only the planets' terrain for the discs (2 new signatures on
   the terrain's block and patch choices, checked on 1.20.1, 1.20, 1.19.5 and 1.19.4.2), so zooming in
   over space keeps its frame rate. `tools/make_planets_map.py --space-height` builds a space band with space zones,
-  hidden spaceport docks per planet, a spaceport building, spaceship hulls and units, and a
-  spaceships production tab.
+  hidden spaceport docks per planet, a spaceport building, spaceship hulls and units, a
+  spaceships production tab, the spaceships' ship domain and test decisions that build a spaceship
+  and a destroyer.
 - **`globe`: several planets and the overview** (NOTES.md Part T, MODDING.md "Planets"). `planet = {
   name x y width height north south polar_cap_* overview = { x y size } image }` blocks (up to 16) make
   rectangles of the map separate worlds: the flat camera stays on its planet, the globe is that
