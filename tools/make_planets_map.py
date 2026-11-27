@@ -298,12 +298,26 @@ def plan_space(map_w, z0, hs, sizes, next_id, free_colour, cell=96):
         next_id += 1
     for pt in ports:
         pt["sea"] = info[pt["out"]]
+    # Asteroid belts: between two neighbouring planets the column of space zones (6 cells wide) halfway
+    # between their holes, unless a hole reaches into it.
+    belt_cols = set()
+    for k in range(copies - 1):
+        (ax, _, an), (bx, _, bn) = holes[k], holes[k + 1]
+        col = int((ax + an / 2.0 + bx + bn / 2.0) / 2.0) // 6
+        if all(x // 6 != col for hx, _, hn in holes for x in range(hx, hx + hn)):
+            belt_cols.add(col)
 
     def centre(c):
         return (xb[c[0]] + xb[c[0] + 1]) / 2.0, z0 + (yb[c[1]] + yb[c[1] + 1]) / 2.0
 
     return {"next_id": next_id, "nx": nx, "ny": ny, "xb": xb, "yb": yb, "ws": ws, "hs": hs, "z0": z0, "info": info,
-            "colour": colour, "ports": ports, "inner": inner, "sea": sea, "edge": edge, "holes": holes, "centre": centre}
+            "colour": colour, "ports": ports, "inner": inner, "sea": sea, "edge": edge, "holes": holes, "centre": centre,
+            "belt_cols": belt_cols}
+
+
+def space_terrain(sp, cell):
+    """A space cell's naval terrain: an asteroid belt in a belt column, else deep space."""
+    return "space_asteroids" if cell[0] // 6 in sp["belt_cols"] else "space_deep"
 
 
 def space_rows(sp, map_w):
@@ -336,7 +350,7 @@ def space_definitions(sp, continent):
         lines.append("%d;%d;%d;%d;land;true;plains;%d" % (pt["id"], r, g, b, continent))
     for c in sp["sea"]:
         r, g, b = sp["colour"][c["id"]]
-        lines.append("%d;%d;%d;%d;sea;false;ocean;0" % (c["id"], r, g, b))
+        lines.append("%d;%d;%d;%d;sea;false;%s;0" % (c["id"], r, g, b, space_terrain(sp, c["cell"])))
     for pid in sp["edge"]:
         r, g, b = sp["colour"][pid]
         lines.append("%d;%d;%d;%d;lake;false;lakes;0" % (pid, r, g, b))
@@ -362,9 +376,10 @@ SPACE_WEATHER = """	weather={
 """
 
 
-def region_text(rid, name, provinces):
-    return "strategic_region={\n\tid=%d\n\tname=\"%s\"\n\tprovinces={\n\t\t%s\n\t}\n%s}\n" % (
-        rid, name, " ".join(str(p) for p in provinces), SPACE_WEATHER)
+def region_text(rid, name, provinces, naval_terrain=None):
+    return "strategic_region={\n\tid=%d\n\tname=\"%s\"\n\tprovinces={\n\t\t%s\n\t}\n%s%s}\n" % (
+        rid, name, " ".join(str(p) for p in provinces),
+        "\tnaval_terrain=%s\n" % naval_terrain if naval_terrain else "", SPACE_WEATHER)
 
 
 def find_blocks(items, key, out):
@@ -464,13 +479,42 @@ def write_space_content(out, game, sp, tags, loc):
     write_text(os.path.join(out, "common", "scripted_effects", "hoi4_loader_space_effects.txt"), "\n".join(eff))
     write_text(os.path.join(out, "common", "on_actions", "hoi4_loader_space_on_actions.txt"),
                "on_actions = {\n\ton_weekly = {\n\t\teffect = {\n\t\t\trandom_country = { hl_space_port_sync = yes }\n\t\t}\n\t}\n}\n")
-    for n, (rid, _) in enumerate(sp["zones"]):
-        loc.append(' SPACE_ZONE_%d:0 "Space Zone %d"' % (n + 1, n + 1))
+    belts = 0
+    for n, (rid, cells) in enumerate(sp["zones"]):
+        if space_terrain(sp, cells[0]["cell"]) == "space_asteroids":
+            belts += 1
+            loc.append(' SPACE_ZONE_%d:0 "Asteroid Belt %d"' % (n + 1, belts))
+        else:
+            loc.append(' SPACE_ZONE_%d:0 "Space Zone %d"' % (n + 1, n + 1))
+    write_space_terrain(out, game, loc)
     for k, tag in enumerate(tags):
         loc.append(' SPACE_ORBIT_%s:0 "Orbit of Earth %s"' % (tag, chr(ord("A") + k)))
     for pt in sp["ports"]:
         loc.append(' STATE_%d:0 "Spaceport Dock %d (Earth %s)"' % (pt["state"], pt["n"] + 1, chr(ord("A") + pt["k"])))
     loc.append(' space:0 "Space"')
+
+
+def write_space_terrain(out, game, loc):
+    """Two naval terrains for the space map (vanilla's terrain file with them added; a strategic region
+    picks one with naval_terrain, its provinces' terrain in definition.csv is the same): deep space,
+    and asteroid belts, where spaceships are slower, fight worse and are harder to see."""
+    text = read_text(os.path.join(game, "common", "terrain", "00_terrain.txt"))
+    m = re.search(r"categories\s*=\s*\{", text)
+    if not m:
+        fail("common/terrain/00_terrain.txt: no categories block")
+    slow = "".join("\t\t%s = {\n\t\t\tunits = {\n\t\t\t\tmovement = -0.3\n\t\t\t\tattack = -0.1\n"
+                   "\t\t\t\tdefence = -0.1\n\t\t\t}\n\t\t}\n" % u
+                   for u in ("space_destroyer", "space_light_cruiser", "space_battleship"))
+    added = ("\n\tspace_deep = {\n\t\tnaval_terrain = yes\n\t\tcolor = { 10 10 40 }\n\t\tmovement_cost = 1.0\n"
+             "\t\tis_water = yes\n\t\tsound_type = sea\n\t\tminimum_seazone_dominance = 250\n\t}\n"
+             "\n\tspace_asteroids = {\n\t\tnaval_terrain = yes\n\t\tcolor = { 90 80 70 }\n\t\tmovement_cost = 1.0\n"
+             "\t\tis_water = yes\n\t\tsound_type = sea\n" + slow +
+             "\t\tnavy_visibility = -0.3\n\t\tpositioning = -0.15\n\t\tminimum_seazone_dominance = 100\n\t}\n")
+    write_text(os.path.join(out, "common", "terrain", "00_terrain.txt"), text[:m.end()] + added + text[m.end():])
+    loc.append(' space_deep:0 "Deep Space"')
+    loc.append(' space_deep_desc:0 "The empty space between the worlds."')
+    loc.append(' space_asteroids:0 "Asteroid Belt"')
+    loc.append(' space_asteroids_desc:0 "A field of rocks: spaceships move and fight slower here, and are harder to spot."')
 
 
 def write_space_tab(out, game, loc):
@@ -497,13 +541,27 @@ def write_space_tab(out, game, loc):
     loc.append(' HL_SPACE_TAB:0 "Spaceships\\nAdd a production line for ships built for space."')
 
 
-def write_space_domain(out):
+def write_space_domain(out, loc):
     """The spaceships' domain (hoi4_loader's ship_domains): the space hulls, their bases on the space
-    continent (the hidden spaceport docks). Built spaceships go only to the docks and space fleets,
-    regular ships never there, and the two never share a task force or fleet."""
+    continent (the hidden spaceport docks), its waters (the space terrains). Built spaceships go only to
+    the docks and space fleets, regular ships never there, and the two never share a task force or
+    fleet; the map tooltip over space reads the keys below (KEY_space) instead of the navy's."""
     write_text(os.path.join(out, "common", "hoi4_loader_ship_domains", "hoi4_loader_space_domain.txt"),
                "# The spaceships' domain (hoi4_loader ship_domains, MODDING.md).\n"
-               "space = {\n\tarchetypes = { space_hull_light space_hull_cruiser space_hull_heavy }\n\tcontinents = { space }\n}\n")
+               "space = {\n\tarchetypes = { space_hull_light space_hull_cruiser space_hull_heavy }\n\tcontinents = { space }\n"
+               "\tterrains = { space_deep space_asteroids }\n}\n")
+    loc.extend([
+        ' MINIMUM_SEAZONE_DOMINANCE_NEEDED_space:0 "This space zone needs at least $VALUE|0Y$ \u00a3naval_dominance_texticon\u00a3 '
+        '\u00a7HSpace Dominance\u00a7! to count as under friendly control."',
+        ' NAVAL_DOMINANCE_CONTESTED_space:0 "\u00a7YContested space\u00a7!"',
+        ' NAVAL_DOMINANCE_CURRENT_VALUE_space:0 "Control ratio: $RATIO|%2G$\\nCurrent space dominance: '
+        '\u00a3naval_dominance_texticon\u00a3$CURRENT|0Y$"',
+        ' NAVAL_DOMINANCE_BASE_space:0 "- Base value from spaceships on \u00a7YPatrol Missions\u00a7!: '
+        '\u00a3naval_dominance_texticon\u00a3 $VALUE|0Y$"',
+        ' SEAZONE_MINIMUM_DOMINANCE_space:0 "Minimum \u00a3naval_dominance_texticon\u00a3 for space control: $VALUE|H0$"',
+        ' CONVOY_DOMINANCE_COST_REDUCTION_EXPLANATION_space:0 "\u00a3naval_dominance_texticon\u00a3 \u00a7YSpace Dominance\u00a7! '
+        'keeps the routes between the worlds open. \\n"',
+    ])
 
 
 def write_space_tests(out, loc):
@@ -834,7 +892,8 @@ def main():
                 c["zone"] = rid
             space["zones"].append((rid, zones[zk]))
             write_text(os.path.join(omap, "strategicregions", "%d-Space zone %d.txt" % (rid, len(space["zones"]))),
-                       region_text(rid, "SPACE_ZONE_%d" % len(space["zones"]), [c["id"] for c in zones[zk]]))
+                       region_text(rid, "SPACE_ZONE_%d" % len(space["zones"]), [c["id"] for c in zones[zk]],
+                                   space_terrain(space, zones[zk][0]["cell"])))
         space["orbits"] = []
         for k in range(copies):
             rid = next_region
@@ -1058,7 +1117,7 @@ def main():
     if space:
         write_space_content(out, game, space, tags, loc)
         write_space_tab(out, game, loc)
-        write_space_domain(out)
+        write_space_domain(out, loc)
         write_space_tests(out, loc)
         write_space_start(out, space, tags, capitals, variants)
     # Character names (generals, admirals, ministers), the same plain list for every planet.
