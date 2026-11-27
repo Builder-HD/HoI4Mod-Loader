@@ -8822,3 +8822,29 @@ province(s) in states on the domains' continents (2194 of 2194 state(s) with a c
   meridians, strongest at sea). The band's rows now go first. The BMPs (bottom-up) were right.
 - **Owner's test (2026-11-27):** everything works: the deploy target lists, the fleet window, the
   stripes gone.
+
+## U16: a new fleet of two domains, the domain's bases in the deploy list (2026-11-27)
+
+- **New fleet** (`CCreateFleetCommand`, slot 9): the selected task forces (handles +0x38, count +0x44,
+  as `FUN_1413e6d30` reads them) and ships (+0x50, count +0x5c) must be of one domain. Not tested in
+  game (it needs a selection across fleets).
+- **Correction:** `FUN_140ef28d0(province)` is not an access test: it only looks the province up in
+  the game's naval base table (game state +0x698, a hash by province id). The game's "may use" is
+  "has a base" and "its area (+0xd0) is the country's"; there is no ownership check of its own. With
+  only the first, Earth B's dock showed in Earth A's list. A domain's base is now usable by the
+  country that controls the province (`DomainBaseUsable`: the base table and `ProvinceController`),
+  in the delivery, the list and the command check alike.
+- **The domain's bases in the list:** the builder makes its base entries in a pool at the window
+  (CPdxArray +0x5a8: count +0x5b4, capacity +0x5b0, allocator +0x5b8 with alloc(size, 8) at vtable +8
+  and free at +0x10): an entry from `operator new(0x5d8)` and `FUN_141e346e0(entry, gui, window)`
+  (gui = window +0x5f0 +0x4f8), filled by `FUN_141e39860(entry, base)`; then sorted (`FUN_141e32a60`
+  up to 32, else `FUN_141e32d00`, both with (begin, end, ...)) and added to the list widget from the
+  pool. Hooked: both sorts; after the game's sort, when the sorted array is the window's pool and the
+  line has a domain, one entry per usable base of the domain is made the game's way and appended (the
+  widget is filled from the pool right after; the entries stay in the pool for the next build).
+- **Choosing it:** the target command's can-execute checks the base with the game's "may use"; while
+  that runs for a line of a known domain, "may use" says yes to the domain's usable bases and no to
+  other domains' (only then; the AI and other ships still never use the docks).
+- **In game (1.20.1):** the Orbital Frigate line lists Earth A Theater 1, the First Space Fleet and
+  Spaceport Dock 1 (Earth A) (10), not Earth B's dock; choosing the dock sets it ("Spaceport D...")
+  and it stays after 18 days.

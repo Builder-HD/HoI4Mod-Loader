@@ -12,7 +12,8 @@ A–F; NOTES.md has the findings and test results behind each.
   delivered equipment, `create_ship`) go only to bases, task forces and fleets of their domain (else
   into the stockpile), and moving ships or task forces, a fleet's home base and a naval line's
   deployment target are refused when they would mix two domains (also the fleet window's
-  reorganisation); a naval line's "Deploy target" list shows only its domain's fleets and bases. 4 new signatures and 2 code
+  reorganisation, a new fleet from task forces and ships); a naval line's "Deploy target" list shows
+  only its domain's fleets and bases, a domain's own bases included. 4 new signatures and 2 code
   shapes, checked on 1.20.1, 1.20, 1.19.5 and 1.19.4.2; tested in game on 1.20.1 (the planets test's
   spaceships).
 - **Game 1.20.1** (`v1.20.1.0.0fd1`, Steam update of 2026-11-26) is listed in `loader_config.ini`.

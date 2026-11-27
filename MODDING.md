@@ -2458,16 +2458,18 @@ space = {
 - **Built ships** (production lines, ships delivered as equipment, `create_ship`) go to a naval base,
   task force or fleet of their own domain. A line's deployment target is used if it fits; otherwise
   the ships go to the best base of their domain the country may use (the game's own rule: the
-  highest level, the first on a tie). A domain's bases need only the game's access test (owned,
-  controlled or with docking rights), not its "connected to the capital" one, which a base on
-  another world could never pass. With no base of their domain the ships go into the stockpile.
+  highest level, the first on a tie). A domain's base is usable by the country that controls its
+  province (the game's own rule, "in the capital's area", never passes for a base on another world;
+  allies' bases of a domain are not used). With no base of their domain the ships go into the
+  stockpile.
 - **Refused** (the command can't be executed, as any command the game refuses): moving ships into a
   task force of another domain (also detach and merge), putting task forces of two domains into one
-  fleet (also the fleet window's reorganisation), a fleet's home base in another domain, and a naval
+  fleet (also the fleet window's reorganisation and a new fleet from selected task forces and ships),
+  a fleet's home base in another domain, and a naval
   line's deployment target in another domain (a fleet or a naval base). A theater or "Auto" stays
   allowed: the delivery picks a base.
-- **The "Deploy target" list** of a naval line shows only fleets and naval bases of the line's domain
-  (UI only).
+- **The "Deploy target" list** of a naval line shows only fleets and naval bases of the line's domain,
+  and for a domain also its bases the country controls (UI only; choosing one works).
 - **Domains of things:** a ship's by its hull's archetype, a task force's by its ships, a fleet's by
   its task forces (an empty one by its home base), a naval base's by its state's continent.
 - Archetypes are archetypes (`is_archetype = yes`): listing an equipment type takes its archetype
@@ -2488,9 +2490,7 @@ domains together`), at most 40 lines per game. Without definitions nothing is ho
 the refused commands are refused by every machine (the same check on the same state). The domains
 come from the mods, which multiplayer requires to match. **Saves:** nothing of the loader's is saved.
 
-**Not yet:** the deployment target list doesn't offer a domain's bases themselves (the game lists only
-bases connected to the capital; "Auto" or a fleet of the domain delivers there); creating a fleet from
-task forces of two domains and the AI's own fleet organisation are not checked.
+**Not yet:** the AI's own fleet organisation is not checked; allies' bases of a domain are not used.
 
 ## Large maps (`large_map`)
 
