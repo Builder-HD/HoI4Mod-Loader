@@ -2463,8 +2463,11 @@ space = {
   another world could never pass. With no base of their domain the ships go into the stockpile.
 - **Refused** (the command can't be executed, as any command the game refuses): moving ships into a
   task force of another domain (also detach and merge), putting task forces of two domains into one
-  fleet, a fleet's home base in another domain, and a naval line's deployment target in another
-  domain (a fleet or a naval base). A theater or "Auto" stays allowed: the delivery picks a base.
+  fleet (also the fleet window's reorganisation), a fleet's home base in another domain, and a naval
+  line's deployment target in another domain (a fleet or a naval base). A theater or "Auto" stays
+  allowed: the delivery picks a base.
+- **The "Deploy target" list** of a naval line shows only fleets and naval bases of the line's domain
+  (UI only).
 - **Domains of things:** a ship's by its hull's archetype, a task force's by its ships, a fleet's by
   its task forces (an empty one by its home base), a naval base's by its state's continent.
 - Archetypes are archetypes (`is_archetype = yes`): listing an equipment type takes its archetype
@@ -2485,9 +2488,9 @@ domains together`), at most 40 lines per game. Without definitions nothing is ho
 the refused commands are refused by every machine (the same check on the same state). The domains
 come from the mods, which multiplayer requires to match. **Saves:** nothing of the loader's is saved.
 
-**Not yet:** the deployment target list doesn't offer a domain's bases (the game's "connected to the
-capital" rule hides them; "Auto" or a fleet of the domain delivers there); the AI's own fleet
-organisation is not checked.
+**Not yet:** the deployment target list doesn't offer a domain's bases themselves (the game lists only
+bases connected to the capital; "Auto" or a fleet of the domain delivers there); creating a fleet from
+task forces of two domains and the AI's own fleet organisation are not checked.
 
 ## Large maps (`large_map`)
 

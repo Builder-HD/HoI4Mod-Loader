@@ -8797,3 +8797,26 @@ province(s) in states on the domains' continents (2194 of 2194 state(s) with a c
   refused (the line stays as it was; the log line once), the First Space Fleet accepted.
 - Not tested yet: the commands that need drag and drop (ships between task forces, task forces into
   fleets, a fleet's home base); the AI over months.
+
+## U15: the owner's test of step 3b: the deploy list, the fleet window, Earth A's stripes (2026-11-27)
+
+- **Deploy target list (owner: both kinds listed in both lines' lists, choosing the wrong one just does
+  nothing).** The list is built by `FUN_141e3b3c0(view)` (`kSigShipDeployList`: the theater entries,
+  then the fleet entries from `FUN_14071c270(country, out)`, the country's task forces (fleets +0x278 /
+  +0x284, each fleet's task forces via `lea rax, [rcx+0xb8]`), then the bases of the capital's area that
+  "may use" (`FUN_140f1fcf0`) allows). The window holds its naval line's handle at +0x600 (a refit
+  line's at +0x608), as the entries' click handlers (`FUN_141e38d60` ...) read it for the command (the
+  builder's own +0x5f0 / +0x4f8 is the game GUI, not the line). While the list is built for a line of
+  a known domain the task force list drops those of other domains and "may use" says no to bases of
+  other domains. In game (1.20.1): the Orbital Frigate line lists Earth A Theater 1 and the First Space
+  Fleet only; a Test Destroyer line the theater, the destroyer's reserve fleet and the Earth bases, not
+  the First Space Fleet.
+- **The fleet window (owner: regular ships could be put into a space fleet there).** Its drag and drop
+  is `CReorganizeShipsCommand`: the fleet (+0x48) and its new task forces, entries of 0x80 (+0x30, count
+  +0x3c) with their ship handles (+0x58, count +0x64) and an existing task force (+0x70); refused when
+  its ships are of two domains, or of another than the fleet's. Not tested in game (drag and drop).
+- **Earth A's dark stripes:** the generator stacked the DDS textures (colour map, water colour, water
+  spec) with the space band's filler rows after the copies, but DDS rows are top-down (north first),
+  so everything moved south by the band: Earth B (identical copies) by chance in place, Earth A's
+  rows the filler (the texture's north edge row repeated down every column: stripes along the
+  meridians, strongest at sea). The band's rows now go first. The BMPs (bottom-up) were right.
