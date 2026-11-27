@@ -54,7 +54,11 @@ A–F; NOTES.md has the findings and test results behind each.
   spaceships production tab, the spaceships' ship domain and test decisions that build a spaceship
   and a destroyer; `--planet-sizes` gives each planet its own size in space (its hole's side in
   cells, its disc's radius from it), and a run now replaces the generator's earlier output (stale
-  dock states from a bigger planet broke the map). Fixed: the map's DDS textures (colour map, water) put the space band's rows at
+  dock states from a bigger planet broke the map). Fixed: a space zone's name crossing a planet's
+  disc was torn into wedges (its letters over the disc were dropped one vertex at a time); the space
+  map's names now lie flat and the planet hides what lies under it, per pixel (also the hidden
+  docks' names); on a planet's globe the space map's and other planets' names are no longer bent
+  round its horizon. Fixed: the map's DDS textures (colour map, water) put the space band's rows at
   the south, so Earth A's were the texture's north edge repeated (dark stripes along the meridians).
 - **`globe`: several planets and the overview** (NOTES.md Part T, MODDING.md "Planets"). `planet = {
   name x y width height north south polar_cap_* overview = { x y size } image }` blocks (up to 16) make

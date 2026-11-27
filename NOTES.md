@@ -8895,6 +8895,24 @@ the generator, which made every hole 5 x 5 cells:
 **In game (1.20.1, `--planet-sizes 5,3`):** the map loads (24 docks); over space Earth B is drawn at
 about 0.6 of Earth A's size, its name scaled with it, its docks out of sight under it.
 
-**The zone name in the planet** (owner's report): not found yet. Over space no zone names are drawn
-at any height the camera reaches there (zooming in over a disc goes to the globe); asked the owner
-for a screenshot.
+**The zone name in the planet** (owner's report): see U19.
+
+## U19: the space map's names at a planet's disc (2026-11-27)
+
+The owner's screenshot: over space, "Space Zone 24" arcing round Earth A's top with only "E 24"
+readable, the rest wedges reaching into the planet. The zone's cells wrap round the hole, so the
+game curves its name along them, partly over the disc (which reaches past the hole to its corners).
+`HL_GlobeLabel` sent every name vertex through `HL_GlobePoint`, which pushes a space point inside a
+disc away (the ground there is dropped): a letter with one edge inside was stretched off.
+
+- **Over space** the space map's names now stay flat (unless in a wrap copy), and the map name
+  shader's pixel stage hides a name's texels over a disc (`HL_GlobeSpaceCover(v.vPrepos)`, patched
+  after `vSample = tex2D( DiffuseTexture, v.vTexCoord )`, only in `mapname.shader`): the planet
+  hides what lies under it. Keeping them flat alone showed the docks' own names (their owner
+  "Earth A", twice) over the planet.
+- **On a planet's globe** every name not on that planet is dropped (the space map's, other
+  planets'); before, they were bent round its horizon by `HL_GlobePoint`'s "on no planet" branch.
+
+**In game (1.20.1):** over space the zone names stand flat in their grid, "Space Zone 24" reads whole
+along Earth A's top edge, its letters cut where the planet covers them; no dock names over the
+planets; Earth A's globe from 2300 shows no zone names at its pole. Smoke passed.
