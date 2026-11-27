@@ -8820,3 +8820,5 @@ province(s) in states on the domains' continents (2194 of 2194 state(s) with a c
   so everything moved south by the band: Earth B (identical copies) by chance in place, Earth A's
   rows the filler (the texture's north edge row repeated down every column: stripes along the
   meridians, strongest at sea). The band's rows now go first. The BMPs (bottom-up) were right.
+- **Owner's test (2026-11-27):** everything works: the deploy target lists, the fleet window, the
+  stripes gone.
