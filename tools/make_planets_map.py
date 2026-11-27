@@ -2,14 +2,15 @@
 """Build a test map mod with several copies of the vanilla map ("planets"), stacked in z.
 
     python -I tools/make_planets_map.py --game "<HoI4 folder>" --out "<Documents>/mod/hoi4_loader_planets_test"
-        [--tags PLA,PLB] [--gap 256] [--background <image>] [--space-height 2048]
+        [--tags PLA,PLB] [--gap 256] [--background <image>] [--space-height 2048] [--planet-sizes 5,3]
 
 Reads the owner's own vanilla install and writes a total-conversion map mod (NOTES Part T): copy k of
 the map lies at z = k * (map height + gap), its provinces, states and strategic regions numbered after
 the copies before it; the gaps between the copies are lake provinces (neither land nor sea for
 movement, so nothing walks or sails from one copy to another). Above the copies a space band (NOTES.md
-Part U): sea provinces in space zones, a hole per planet holding 16 hidden port provinces (each its
-own state, given to a country's spaceport by script) around a lake; spaceship hulls and units. Every copy is owned entirely by one new
+Part U): sea provinces in space zones, a hole per planet (its size in space: --planet-sizes) holding
+hidden port provinces round its border (each its own state, given to a country's spaceport by
+script) around a lake; spaceship hulls and units. Every copy is owned entirely by one new
 country (one tag per copy). The generated files are copies of game data: never commit them.
 """
 import argparse
@@ -245,33 +246,38 @@ def stack_dds(src, dst, copies, gap_map_rows, map_h, extra_map_rows=0):
 
 # --- Space (NOTES.md Part U) ---------------------------------------------------------------------------
 
-def plan_space(map_w, z0, hs, copies, next_id, free_colour, cell=96):
+def plan_space(map_w, z0, hs, sizes, next_id, free_colour, cell=96):
     """The space band at z0..z0+hs: a grid of sea cells (about cell x cell), and per planet a hole of
-    5 x 5 cells: its 16 border cells hidden ports (land, each its own state), its inner 3 x 3 cells a
-    lake. A column of lake tiles at the map's east edge keeps the band from wrapping."""
+    n x n cells (n = its size, odd, 3 or more): its 4n - 4 border cells hidden ports (land, each its own
+    state), its inner cells a lake. A column of lake tiles at the map's east edge keeps the band from
+    wrapping."""
+    copies = len(sizes)
     ws = map_w - 256
     nx, ny = max(7, round(ws / cell)), max(7, round(hs / cell))
+    if max(sizes) + 2 > ny or sum(sizes) + 2 * copies > nx:
+        fail("--planet-sizes: the holes (%s cells) do not fit the space band's %d x %d cells" % (sizes, nx, ny))
     xb = [round(i * ws / nx) for i in range(nx + 1)]
     yb = [round(j * hs / ny) for j in range(ny + 1)]
     info, colour = {}, {}
     ports, inner, sea, edge = [], [], [], []
     holes = []
     for k in range(copies):
-        ix0 = min(max(round(nx * (k + 1) / (copies + 1)) - 2, 1), nx - 6)
-        iy0 = ny // 2 - 2
-        holes.append((ix0, iy0))
+        n5 = sizes[k]
+        ix0 = min(max(round(nx * (k + 1) / (copies + 1)) - n5 // 2, 1), nx - n5 - 1)
+        iy0 = ny // 2 - n5 // 2
+        holes.append((ix0, iy0, n5))
         lake = next_id
         next_id += 1
         colour[lake] = free_colour(lake * 7919)
         inner.append((lake, k))
         n = 0
-        for dy in range(5):
-            for dx in range(5):
+        for dy in range(n5):
+            for dx in range(n5):
                 c = (ix0 + dx, iy0 + dy)
-                if 1 <= dx <= 3 and 1 <= dy <= 3:
+                if 1 <= dx <= n5 - 2 and 1 <= dy <= n5 - 2:
                     info[c] = lake
                     continue
-                out = (ix0 - 1, c[1]) if dx == 0 else (ix0 + 5, c[1]) if dx == 4 else (c[0], iy0 - 1) if dy == 0 else (c[0], iy0 + 5)
+                out = (ix0 - 1, c[1]) if dx == 0 else (ix0 + n5, c[1]) if dx == n5 - 1 else                     (c[0], iy0 - 1) if dy == 0 else (c[0], iy0 + n5)
                 ports.append({"id": next_id, "k": k, "n": n, "cell": c, "out": out})
                 info[c] = next_id
                 colour[next_id] = free_colour(next_id * 7919)
@@ -568,6 +574,9 @@ def main():
     ap.add_argument("--background", default="", help="an image (PNG, JPEG) shown behind the planets")
     ap.add_argument("--space-height", type=int, default=2048,
                     help="map rows of the space band (a multiple of 256; 0: no space)")
+    ap.add_argument("--planet-sizes", default="",
+                    help="each planet's size in space: its hole's side in cells of about 96 pixels, odd, 3 to 9, "
+                         "in the order of --tags (default 5 each; a 3 has 8 docks, a 5 16, a 7 24)")
     args = ap.parse_args()
     game, out = args.game, args.out
     tags = [t.strip().upper() for t in args.tags.split(",") if t.strip()]
@@ -577,6 +586,14 @@ def main():
     if args.gap <= 0 or args.gap % 256:
         fail("--gap: a positive multiple of 256")
     gap = args.gap
+    sizes = [5] * copies
+    if args.planet_sizes:
+        try:
+            sizes = [int(v) for v in args.planet_sizes.split(",")]
+        except ValueError:
+            fail("--planet-sizes: numbers, e.g. 5,3")
+        if len(sizes) != copies or any(v < 3 or v > 9 or v % 2 == 0 for v in sizes):
+            fail("--planet-sizes: one odd number from 3 to 9 per tag (%d)" % copies)
     space_h = args.space_height
     if space_h < 0 or space_h % 256:
         fail("--space-height: 0 or a multiple of 256")
@@ -639,7 +656,7 @@ def main():
             next_id += 1
     space = None
     if space_h:
-        space = plan_space(map_w, copies * (map_h + gap), space_h, copies, next_id, free_colour)
+        space = plan_space(map_w, copies * (map_h + gap), space_h, sizes, next_id, free_colour)
         next_id = space["next_id"]
     rows = []
     for k in range(copies):
@@ -891,8 +908,8 @@ def main():
             xs = [space["centre"](c["cell"]) for c in cells]
             weather.append("%d;%s;10.00;%s;small" % (rid, fnum(sum(a for a, _ in xs) / len(xs)), fnum(sum(b for _, b in xs) / len(xs))))
         for k, rid in enumerate(space["orbits"]):
-            ix0, iy0 = space["holes"][k]
-            x, z = space["centre"]((ix0 + 2, iy0 + 2))
+            ix0, iy0, n5 = space["holes"][k]
+            x, z = space["centre"]((ix0 + n5 // 2, iy0 + n5 // 2))
             weather.append("%d;%s;10.00;%s;small" % (rid, fnum(x), fnum(z)))
         weather.append("%d;%s;10.00;%s;small" % (gap_region, fnum(map_w / 2), fnum(space["z0"] - gap / 2)))
     for k in range(1, copies):  # one in the middle of each gap
@@ -1062,11 +1079,12 @@ def main():
         ox = (k - (copies - 1) / 2.0) * 1.4
         orbit = ""
         if space:
-            # Its hole in the space map: the centre of its 5 x 5 cells; the disc reaches the hole's corners,
+            # Its hole in the space map: the centre of its n x n cells; the disc reaches the hole's corners,
             # so its spaceport docks (only there for their naval bases) lie under the planet, out of sight.
-            ix0, iy0 = space["holes"][k]
-            cx, cz = space["centre"]((ix0 + 2, iy0 + 2))
-            half = max(space["ws"] / space["nx"], space["hs"] / space["ny"]) * 2.5  # half the hole's side
+            # The planet's size in space is its hole's.
+            ix0, iy0, n5 = space["holes"][k]
+            cx, cz = space["centre"]((ix0 + n5 // 2, iy0 + n5 // 2))
+            half = max(space["ws"] / space["nx"], space["hs"] / space["ny"]) * n5 / 2.0  # half the hole's side
             radius = int(half * 1.4142136) + 4
             orbit = "\t\torbit = { x = %.0f y = %.0f radius = %d }\n" % (cx, cz, radius)
         planets.append("\tplanet = {\n\t\tname = PLANET_EARTH_%s\n\t\tx = 0  y = %d  width = %d  height = %d\n"
