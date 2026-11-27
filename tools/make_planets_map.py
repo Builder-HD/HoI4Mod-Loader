@@ -17,6 +17,7 @@ import argparse
 import glob
 import os
 import re
+import shutil
 import struct
 import sys
 
@@ -599,6 +600,18 @@ def main():
         fail("--space-height: 0 or a multiple of 256")
     if os.path.abspath(out).lower().startswith(os.path.abspath(game).lower()):
         fail("--out must not be inside the game folder")
+    # A run writes the whole mod: what an earlier run wrote and this one does not (e.g. the states of
+    # docks a smaller planet no longer has) must go. Only a folder this script made is emptied.
+    if os.path.isdir(out) and os.listdir(out):
+        try:
+            made = 'name="hoi4_loader planets test"' in read_text(os.path.join(out, "descriptor.mod"))
+        except OSError:
+            made = False
+        if not made:
+            fail("--out: %s is not empty and not a planets test mod (no descriptor.mod of this script)" % out)
+        for name in os.listdir(out):
+            path = os.path.join(out, name)
+            shutil.rmtree(path) if os.path.isdir(path) and not os.path.islink(path) else os.remove(path)
     vmap = os.path.join(game, "map")
 
     # Provinces.
