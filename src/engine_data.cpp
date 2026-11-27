@@ -210,6 +210,10 @@ static bool AlliedWith(int owner, int tag) {
     return r && g_isFriendly(r);
 }
 
+// The IsFriendly test (FUN_140d8a410 on 1.20): the other country is in the relation owner's ally
+// list (faction), or one of the two is the other's subject.
+bool IsAllied(int a, int b) { return HaveCountries() && g_diplomacyOffset && a > 0 && b > 0 && AlliedWith(a, b); }
+
 static bool OwnerMatches(int owner, const UnitFilter& f) {
     if (f.owner && !SameCountry(owner, f.owner)) return false;
     if (f.enemyOf && !AtWar(f.enemyOf, owner)) return false;
@@ -339,6 +343,27 @@ bool CountryDivisionList(int tag, std::vector<void*>* out) {
 
 int UnitOwnerTag(const void* unit) { return unit && g_unitOwner ? Rd<int>(unit, g_unitOwner) : 0; }
 uint32_t UnitOwnerOffset() { return g_unitOwner; }
+
+void CountryDivisionOffsets(uint32_t* list, uint32_t* count) {
+    *list = g_countryDivisions;
+    *count = g_countryDivisionCount;
+}
+
+bool UnitInCombat(const void* unit) {
+    if (!unit || !g_unitCombats) return false;
+    PtrList combats = ListAt(unit, g_unitCombats, g_unitCombatCount);
+    for (int c = 0; c < combats.count; ++c)
+        if (combats.data[c]) return true;
+    return false;
+}
+
+bool ProvinceHoldsLandUnit(const void* province, const void* unit) {
+    if (!province || !unit || !g_landUnits) return false;
+    PtrList units = ListAt(province, g_landUnits, g_landUnitCount);
+    for (int u = 0; u < units.count; ++u)
+        if (units.data[u] == unit) return true;
+    return false;
+}
 
 bool ForEachDivision(int tag, void (*fn)(void* division, void* ctx), void* ctx) {
     if (!HaveMilitaryCounts()) return false;

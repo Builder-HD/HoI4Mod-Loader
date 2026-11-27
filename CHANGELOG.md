@@ -18,6 +18,36 @@ A–F; NOTES.md has the findings and test results behind each.
   dismantle entries a mod queues work as before. **Players:** update HoI4Mod Loader: Railway
   Dismantle (it sets the flag); with an older copy of it, Alt+Shift dismantling is off. The test
   mod sets the flag at `on_startup` and has decisions to clear and set it.
+- **New feature `send_home`** (engine tier; guard `hoi4_loader_feature_send_home`; NOTES.md Part V,
+  MODDING.md "Sending divisions home"). Two effects send land divisions home the way the game
+  brings volunteers home: `send_divisions_home = { from = POL }` (country scope: every division of
+  the country standing in territory `from` controls, one travelling group per army, armies come
+  back with their name and general) and `send_home = { }` (division scope: one division, which
+  arrives without an army). Both take `days` (default `VOLUNTEERS_TRANSFER_SPEED`, 14) and an
+  arrival `province` or `state` (default the port the game picks). While travelling the divisions
+  are off the map and out of reach; the game keeps 95% of their equipment. Divisions in battle,
+  at sea, in a border war, volunteers and ones already at home stay. The loader calls the game's
+  own volunteer transfer and only changes its days and arrival province, so nothing of the loader
+  is saved: a save loaded without the loader still brings them home. New code shapes checked
+  offline on 1.20 and 1.19.5 (the same shapes on both); older builds unchecked. Not yet tested in
+  game or in multiplayer.
+- **New feature `division_pathing`** (engine tier; guard `hoi4_loader_feature_division_pathing`;
+  NOTES.md Part W, MODDING.md "Division routes and travel time"). Division-scope triggers on the
+  game's own route search, the one move orders use: `has_path_home = yes/no` (a land route home:
+  `no` = stranded), `has_land_path = <province>`, `needs_naval_transport = home / <province>` and
+  `travel_time` (days, as the unit tooltip's arrival time; `travel_time = { province = <id>
+  naval = no days < 10 }`). "Home" is the country's capital (allies' territory does not count
+  yet). Read only, no cache, nothing hooked. Code shapes checked offline on 1.20 and 1.19.5. Not
+  yet tested in game (cost not measured) or in multiplayer.
+- **`send_home` / `send_divisions_home`: `days` may be a variable** (`days = ROOT.my_days`), read
+  by the game's own variable reader and evaluated in the effect's scope. **`send_home = {
+  travel_time = yes }`** keeps the division away for its travel time home from `division_pathing`
+  (whole days, rounded up; `days` when there is no route). Native script API: Int parameters can
+  be declared `variable` (read with `Args::value`). Not yet tested in game.
+- **`division_pathing`: `in_friendly_territory = yes/no`** (division scope): the division stands in
+  a land province controlled by its country or an ally, by the game's own friendly test (the same
+  faction, or a subject or overlord either way; the one naval control uses). Cheap, no route
+  search. Not yet tested in game.
 
 ## 0.7.1-beta (2026-11-23), script version 3
 

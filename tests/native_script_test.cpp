@@ -189,6 +189,26 @@ int main() {
     CHECK(!register_native_effect(Effect("bad_param", {{"Region", ParamType::Int, true}}), "f"), "invalid parameter name refused");
     CHECK(!register_native_effect(Effect("bad_words", {{"levels", ParamType::Int, false, ScopeDefault::None, "All"}}), "f"),
           "int words must be lower case");
+    {
+        ParamSpec vb{"flag", ParamType::Bool, false};
+        vb.variable = true;
+        CHECK(!register_native_effect(Effect("var_bool", {vb}), "f"), "variable bool parameter refused");
+        ParamSpec vr{"n", ParamType::Int, false};
+        vr.variable = true;
+        vr.repeat = true;
+        CHECK(!register_native_effect(Effect("var_repeat", {vr}), "f"), "repeated variable int refused");
+        ParamSpec vw{"n", ParamType::Int, false, ScopeDefault::None, "all"};
+        vw.variable = true;
+        CHECK(!register_native_effect(Effect("var_words", {vw}), "f"), "variable int with words refused");
+        ArgValue lit;
+        lit.present = true;
+        lit.i = 20;
+        CHECK(Args(&lit, 1).value(0, Scope(nullptr)) == 20, "variable int written as a number reads as the number");
+        ArgValue var;
+        var.present = true;
+        var.value = &var;  // a holder no backend can read
+        CHECK(Args(&var, 1).value(0, Scope(nullptr)) == 0, "unreadable variable reads as 0");
+    }
 
     // 2. Valid registrations, loader-side duplicates.
     CHECK(register_native_effect(Effect("set_thing", kRegionName), "feat_a"), "valid block effect queued");

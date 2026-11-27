@@ -7778,3 +7778,797 @@ both states' resistance inactive (neither is occupied in that save, as expected)
 checked in game: resistance in an occupied state that opens or closes (needs a war; the owner's
 test). Seen on the way: between two impassable states (Libyan Desert and the French side) vanilla
 draws no red line, only the country border, as the type function says.
+
+# Part V: sending divisions home (`send_home`, investigation)
+
+Owner's request (2026-11-21): a "teleport" for land units that works the way the game brings
+volunteers home. The divisions travel for a while, out of reach, and then arrive in their own
+country. The main use is troops left in another country after a peace deal. V1–V4 are the investigation (branch
+`notes/division-teleport`). The owner then chose "both, as proposed", and V5 records what was built.
+
+Addresses are from **1.20 (`v1.20.0.0.8873`, sha256 `1beb2a38…`)** and only for orientation. They
+come from a full Ghidra 12.2 analysis of a copy (`HoI4Mod-Loader-ghidra120/`, `q.ps1` there runs
+the same `Query.java`). Nothing was checked on 1.19.5 yet.
+
+## V1: what vanilla script has
+
+| Need | Vanilla | Notes |
+|---|---|---|
+| Move units at once | `teleport_armies = { to_state / to_state_array / to_province limit = { ... } }` (state scope; `CTeleportArmiesEffect`, execute `0x14032aa50`) | Moves every army in the state whose owner passes `limit`; no target means the owner's capital. **Instant**, no travel. |
+| Bring volunteers home | `recall_volunteers_from = TAG` (country scope) | Only units that are volunteers in TAG; this is the travelling path (V2). |
+| Hand units over | `transfer_units_fraction`, `annex_country = { transfer_troops = yes }` | Changes the owner, not a way home. |
+| A division-scope trigger for "where is it" | none | Division scope has no location or owner-location trigger in the 1.20 documentation. |
+
+**Script alone covers the instant half.** Vanilla already uses it after peace and annexation.
+The LAR Spanish civil war events and the MTG Rhodes on_action run
+`teleport_armies = { limit = { tag = X } to_state_array = owned_controlled_states }` in the state
+the units stand in. So a mod can do this today, without the loader:
+
+```
+# common/on_actions/my_mod.txt
+on_peace = {
+    effect = {
+        # ROOT/FROM per vanilla's on_peace; for each state ROOT's troops may be stranded in:
+        every_state = {
+            limit = { NOT = { is_controlled_by = ROOT } }
+            teleport_armies = { limit = { tag = ROOT } to_state_array = ROOT.owned_controlled_states }
+        }
+    }
+}
+```
+
+What script can't do: **the travel**. That means the divisions being gone for some days (they
+can't be attacked, ordered or seen), arriving at a sensible province, and keeping their army,
+general and name. Only the game's volunteer transfer does that.
+
+**Defines (1.20 `00_defines.lua`):**
+- `NDiplomacy.VOLUNTEERS_TRANSFER_SPEED = 14`: the days every volunteer transfer counts, both
+  ways (V2).
+- `VOLUNTEERS_RETURN_EQUIPMENT = 0.95`: the equipment kept on the way back.
+- `VOLUNTEERS_RECALL_DAYS_PER_UNIT = 2`: only read by a date builder next to the recall UI
+  (`0x141a18750`, units × 2 days), not by the transfer.
+- `NCountry.GIE_ESCAPING_DIVISIONS_TRANSFER_DAYS = 30`: the exile twin (V2.6).
+
+## V2: engine findings (1.20)
+
+### V2.1 The transfer object
+
+`CVolunteerForceTransfer` (RTTI; vtable `0x142a51fc8`, 9 slots, base `CPersistent`, 0xa0 bytes,
+constructor `0x1415becb0`):
+
+| Offset | Save token | Meaning |
+|---|---|---|
+| `+0x08` | `0x2990` | destination country tag (the "receiver") |
+| `+0x0c` | `0x298f` | source country tag (the "sender") |
+| `+0x10` / `+0x1c` | `0x1d7` per division | the travelling divisions (unit handles; count `+0x1c`) |
+| `+0x28` | `0x296d` | **days left** |
+| `+0x2c` | `0x240` | 1 = sending volunteers, 0 = bringing them back |
+| `+0x30` | `0x2d15` | **arrival province id** |
+| `+0x34` | `0x3f` | an army was recorded (then `+0x38` general handle `0x28b7`, `+0x40` a unit handle `0x41bf`, `+0x50` `0x35cf`, `+0x70` army name `0x35d0`) |
+| `+0x90` | `0x19e` | arrive without waiting (V2.4) |
+
+- Slot 2 (`0x1415c22a0`) writes the object. It writes **each travelling division in full, inline**
+  (token `0x1d7`).
+- Slot 4 (`0x1415c0c40`) reads it back: it allocates a new `CArmy` (`0x688`, constructor
+  `0x140ccbf00`), reads the division into it, then takes it off its province again
+  (`0x140ef4470`) and out of its army. A bad one is destroyed ("Bad army").
+- Every transfer lives in the **owner's** country, list `country+0x13b0`, count `+0x13bc`.
+- The save key strings `volunteers_transfer`, `exile_divisions_transfer` and
+  `expeditionary_force_transfer` are registered in the token table (`0x1400e9482`, ...). Which of
+  these the country writer uses was not traced. The local saves are binary, so check in game.
+
+### V2.2 Creating transfers: `0x14072fef0(owner, &from, &to, divisions, sending)`
+
+Callers:
+- `recall_volunteers_from` (`CRecallVolunteersFromEffect` slot 13 `0x140374f00` → recall
+  `0x14071f8d0(owner, &host)`), with `sending = 0`;
+- the automatic recall check `0x14071fb20` (from the country daily `0x1407303a0` and six other
+  places), with `sending = 0`;
+- the send-volunteers action `0x141193930`, with `sending = 1`.
+
+What it does:
+1. Picks the arrival province first: `0x1415bf200(&from, &to)` (V2.5). If there is none, it does
+   nothing and returns 0.
+2. Takes only land units (`unit+8 == 0`) whose `unit+0x1dc < 1` (meaning not identified: a second
+   tag next to the owner `+0x1d8`, which `0x140ccd2c0` prefers when it is set).
+3. **Groups them by their army** (`unit+0xc0`).
+4. For each group:
+   - allocates a transfer and sets `to`, `from` and `sending` (`0x1415b20f0` / `0x1415b20e0` /
+     `0x1415b2100`);
+   - adds the divisions (`0x1415c1460`; with `sending = 1` capped by the volunteer limits, with 0
+     not capped);
+   - appends the transfer to `owner+0x13b0`;
+   - calls **StartTransfer** `0x1415c1820(transfer, province)`.
+   It logs "CreateVolunteersTransfer with %i".
+
+The recall goes through `0x14071f8d0`:
+- it collects the owner's divisions with `unit+0x1e0 == host`, the "fighting for" tag that
+  `0x140c591d0` checks (volunteer = `+0x1d8` differs from `+0x1e0`; `0x140c5c070` sets it on
+  arrival);
+- it cancels sends still under way to that host (`0x1411cd3a0`);
+- it calls `0x140757bf0(host, owner, 0)`;
+- then it calls the function above with `(owner, &host, &owner, list, 0)`.
+
+### V2.3 StartTransfer: how a division disappears (`0x1415c1820`)
+
+1. Stores the province: `transfer+0x30 = province+0xa4` (the province id).
+2. Sets the days: `transfer+0x28 = VOLUNTEERS_TRANSFER_SPEED` (`DAT_1433e6060`), for both
+   directions.
+3. For each division:
+   - `0x140c52c90(unit, 0)` cancels its movement and orders ("Cancel movement %s"). It returns
+     early when the object at `unit+0x2f8` has `+0x24` set (not identified).
+   - Return only: scales the division's equipment (`unit+0x348`) by `VOLUNTEERS_RETURN_EQUIPMENT`
+     (`DAT_1433e5fb8`). The difference goes to the stockpile `0x140ccd2c0` gives (the unit's
+     `+0x1dc` country if set, else the owner).
+   - Send only: puts the unit's handle into the owner's sent list (`country+0x310`,
+     `0x14071afb0`).
+   - Takes it off its province: `0x140ef4470(unit+0x1f0, unit)` removes it from the province's
+     unit lists (`+0xe0` / `+0xec`, and the per-type lists).
+   - Records the army once (`+0x34`): its general's handle, name `+0x160` → `transfer+0x70`, and
+     two more fields.
+   - Takes it out of its army (`0x140f82f20`) or deletes the emptied army (`0x140f82ea0`).
+   - Takes it out of the owner's division list (`0x140759440` → `0x140748a00`).
+   - For a human owner, removes the UI and AI references ("RemoveReferences from StartTransfer",
+     `0x1402c3c20`).
+4. Send only: fires `on_send_volunteers` (ROOT the sender, FROM the receiver).
+
+So while travelling, a division is in **no** province, army or country list. It only exists
+inside the transfer. That is the "out of reach" state: no combat, no orders, no supply, not
+listed.
+
+### V2.4 Daily countdown and arrival (`0x1415bf8b0`)
+
+Called from `0x140761b20`, which walks `country+0x13b0` once a day. Its caller is the country
+daily `0x1407303a0` (← `0x1401eafe0`). It deletes a transfer that is finished (`0x140d0b900`).
+Whether `0x1401eafe0` runs in the serial part of the daily update is to check (Part Q's rule). The
+function asserts game-state access, deletes units and edits lists, so it must be serial.
+
+Each day:
+1. **Count down:** `+0x28 -= 1`, and stop while it is still > 0. The count is skipped when
+   `0x1415c0a90` says "now". For a return that is:
+   - `+0x90` is set; or
+   - the destination country has no `+0x484` (not identified: zero when it is gone); or
+   - `to == from`, or the two tags count as the same in the game's tag-equivalence table
+     (`0x140c0a340`: `gamestate+0x340` maps both to one index); or
+   - a few AI cases (`to+0xf88 → +0x328`).
+2. **Divisions that no longer resolve are dropped.** For a send, also those whose owner changed.
+3. **Arrival province:**
+   - the stored one (`+0x30`, looked up by id) if its controller (`province+0x188`) is `to` or
+     tag-equivalent, and its state is not impassable (`0x140ef3500` = the state flag of Part R,
+     `state+0x30 → +0x15c`);
+   - else a new choice `0x1415bf200(&from, &to)`.
+   - If there is none:
+     - for a return: wait one more day (`+0x28 = 1`) while the destination country still has
+       `+0x484`; otherwise **the divisions are destroyed** (`0x1401edb30`, the engine's destroy
+       unit);
+     - for a send: the sender's own country is tried.
+4. **Placing:** for each division, `0x14071b970(country, unit, 1)` (back into the country),
+   `0x1407592d0(country, unit)` (its typed lists), `vtable+0xe8(unit, province)` (location) and
+   `vtable+0xb0` (refresh).
+   - A send also sets `unit+0x1e0 = to` and calls `0x1402c0320` for a human sender.
+   - Then `0x1415c1230` rebuilds the army: `0x140f73840(theatre, 0, name, +0x50, 0)` makes an
+     army with the recorded name, and `0x140c47380` moves each unit in. The general is put back
+     through `0x1418cf030` / `0x1418de9e0` (a set-leader command built and executed directly),
+     only if he leads nothing and has no other assignment. `+0x40` goes to `0x140c4d350`.
+5. **Message** (`0x140fb79a0`, alerts), only for the players involved:
+   - return: `VOLUNTEER_MESSAGE_RETURNED` / `VOLUNTEERS_RETURNED_TITLE`;
+   - send: `VOLUNTEER_MESSAGE_ARRIVED` or `..._REINFORCEMENTS_ARRIVED`;
+   - keys `SENDER` / `RECEIVER` / `COUNT` / `LOCATION`.
+
+No on_action fires on arrival.
+
+### V2.5 The arrival province: `0x1415bf200(&from, &to)`
+
+1. The receiver's capital state (`0x140735560`) and capital province (`0x1407356a0`). If the
+   capital province is not controlled by `to`, the first province of the capital state that is.
+   No capital state means none (0).
+2. The sender's capital province is the reference point. It falls back to the first province of
+   the sender's capital state, and with no capital state there is none (0). So **`from` must be a
+   country with a capital.**
+3. `0x1415c0660` collects candidate provinces by flood fill over neighbouring states (`state+0x30
+   → +0x110`, count `+0x11c`), starting from the capital state. A state counts only if `to`
+   controls it and it is not impassable (`0x140a27e70`). It takes one province per state
+   (`0x140a25190`; probably the state's naval base province).
+4. Choice, by `0x140ab45b0(map, a, b)` (province distance) to the sender's capital:
+   - first the nearest candidate with `province+0xd0` set (naval base, by its use) that passes
+     `0x140d5b540`;
+   - then the nearest non-impassable province of the receiver's controlled states
+     (`0x140718030`);
+   - then the nearest candidate;
+   - last the receiver's capital (or its first core province `0x140735d40`).
+
+In words: a port of the home country that land connects to the capital, nearest to the country
+they leave; failing that, the nearest home province; failing that, the capital.
+
+### V2.6 The exile twin
+
+`CExileDivisionsTransfer` (vtable `0x142a50ca8`, the same 9-slot layout, created by
+`0x14072f530` "CreateExilesTransfer with %i", StartTransfer `0x1415b21a1` area,
+`GIE_ESCAPING_DIVISIONS_TRANSFER_DAYS`) is the same mechanism for divisions escaping to a
+government in exile's host. Not needed here.
+
+## V3: what is hard-coded and what isn't
+
+- **Hard-coded:** who can travel (volunteers only, by recall or by an automatic recall) and how
+  long (one define for every transfer). There is no "send home" for an ordinary division. That
+  is loader material.
+- **Already data:**
+  - the day count and the arrival province are per transfer (`+0x28`, `+0x30`) and saved;
+  - arrival re-checks the province and falls back to the game's own choice.
+
+  So the loader only has to start the game's own transfer and adjust two saved fields. It needs
+  no state of its own.
+
+## V4: proposal (for the owner's decisions)
+
+```
+# division scope: this division (with its army if the whole army goes, V2.2 groups per army)
+every_country_division = {
+    limit = { ... }
+    send_home = {
+        days = 20          # optional: travel days (default: the game's VOLUNTEERS_TRANSFER_SPEED, 14)
+        province = 6521    # optional: arrival province, or
+        state = 64         #           arrival state (its province nearest to where they leave);
+                           # default: the game's own choice (V2.5)
+    }
+}
+
+# country scope: every land division of this country standing in territory controlled by `from`
+send_divisions_home = {
+    from = POL             # required: a country, or THIS/ROOT/FROM/PREV
+    days = 20              # optional, as above
+    province = 6521        # optional, as above (or state = 64)
+}
+```
+
+**How (engine):**
+- `send_home` calls the game's creator `0x14072fef0(owner, &from, &owner, [division], 0)`
+  (V2.2), exactly as `recall_volunteers_from` does. `from` = the controller of the division's
+  current province.
+- `send_divisions_home` passes all matching divisions at once, so the game makes one transfer
+  per army, as for a recall.
+- Then, only for the transfers it just appended (the `owner+0x13b0` count before and after):
+  - `days` → `+0x28`;
+  - `province` / `state` → `+0x30`, if the owner controls that province. The game still re-checks
+    it on arrival and falls back to its own choice if it was lost (V2.4).
+- Everything else is the game's: hiding, army and general on arrival, the 5% equipment
+  (`VOLUNTEERS_RETURN_EQUIPMENT`), the message.
+
+**Refused, with a log line and a red tooltip line, as for `add_to_army`:**
+
+| Case | Why |
+|---|---|
+| not a land division | the transfer takes only land units |
+| already at home: its province's controller is the owner or tag-equivalent | `0x1415c0a90` would arrive next day with nothing to do |
+| `from` has no capital, or the owner has no destination (V2.5 returns none) | the game would create nothing |
+| `unit+0x1dc > 0` | the game's creator skips these (meaning to identify first) |
+| a volunteer (`0x140c591d0`) | use `recall_volunteers_from`, which also does the volunteer bookkeeping |
+| in battle, or at sea (naval transfer, invasion) | proposed, stricter than the game: what StartTransfer does to a unit in battle is not established (`0x140c52c90` may return early) |
+| its army is in a border war (`army+0x1b0`, Part G) | as `add_to_army` |
+
+**Tooltip:** "Travels home to **Germany** (14 days)", or "...arriving in **Berlin**". Otherwise the
+red line.
+
+**Optional, as engine on_actions (Part Q rules):**
+- `on_divisions_returned_home`: ROOT the owner, FROM the country they left. It fires after
+  `0x1415bf8b0` placed them, for vanilla recalls too.
+- A country trigger `divisions_travelling_home` (a number: the travelling divisions in
+  `+0x13b0` with `sending = 0`).
+
+### V4.1 Multiplayer
+
+- It is an effect, run by every machine in the same order. It calls only game-state code that
+  vanilla's own `recall_volunteers_from` effect already runs in lockstep.
+- No random numbers are used. The destination is deterministic (distances, list order).
+- The two field writes are plain game state.
+- The human/AI branch (`0x140748dc0`) reads the player list, which is the same on every machine.
+- The arrival message is vanilla's own alert.
+- Not testable here (no MP setup). It goes into the G3 plan.
+
+### V4.2 Save and load while travelling
+
+- **Nothing of the loader's is saved.** A travelling group is a vanilla `CVolunteerForceTransfer`
+  in the owner's country, divisions included (V2.1), with the loader's `days` and `province` in
+  its own fields.
+- A save made mid-journey and loaded **without the loader** continues the journey and arrives.
+- To check in game: the countdown and arrival after a reload; the army name and general; a save
+  loaded without the loader.
+
+### V4.3 What can break on a game update
+
+- **New signatures and code shapes** (all to be made unique on 1.20 and checked on 1.19.5):
+  - the creator `0x14072fef0`, found from `recall_volunteers_from`'s execute (RTTI
+    `CRecallVolunteersFromEffect` slot 13 → its only callee → the recall `0x14071f8d0` → the
+    creator, the call with `xor r9d`/`0` flag);
+  - the list `+0x13b0` / `+0x13bc` (cross-checked in the daily walker `0x140761b20` and the
+    creator);
+  - `+0x28` (`mov eax, [define]; mov [rcx+0x28], eax` in StartTransfer, and the decrement in the
+    daily step);
+  - `+0x30` and the province id `+0xa4` (StartTransfer's first instruction pair);
+  - the province controller `+0x188`;
+  - `unit+0x1dc` / `+0x1e0`.
+- **Already resolved by the loader:** the division scope getter, the CArmy vtable, the unit owner
+  `+0x1d8`, the army field `+0xc0` and the border war field (Parts G4, E).
+- **Fail safe:** if any shape or cross-check fails, the feature is off for the session (logged),
+  as every engine feature. The vanilla `teleport_armies` fallback (V1) stays available to mods
+  through their own scripts.
+- **Riskier than `add_to_army`:**
+  - it removes units from the map. A wrong offset here could leave a unit nowhere or double it.
+    So a self-check per game entry: every division of the player's country is in its province's
+    list, and every transfer's divisions resolve and are in no province;
+  - the destroy path (destination country gone, V2.4) is the game's and stays as it is.
+
+### V4.4 Open decisions for the owner
+
+1. **Names:** `send_home` (division scope) and `send_divisions_home` (country scope), or others.
+   Both, or only one.
+2. **Options:** `days` and `province` / `state` as above. Should `days = 0` (arrive the next day)
+   be allowed?
+3. **Equipment:** keep vanilla's 5% loss (simplest), or give it back (the loader adds the
+   difference to the stockpile after StartTransfer).
+4. **Stricter refusals:** battle, at sea, border war, as in the table, or what the game's recall
+   allows.
+5. **The optional on_action and trigger** (V4), now or later.
+6. **Builds:** 1.20 only, or also check 1.19.5 (copy at `HoI4Mod-Loader-ghidra/`).
+
+### V4.5 To check in game before code (1.20, no loader needed)
+
+- `recall_volunteers_from` from the console or a test decision, with volunteers in Spain.
+  Expected: the divisions vanish from the map and the army list for 14 days, reappear at a port
+  near the sender's side, keep their army name and general, and show "volunteers returned".
+- Save while they travel, and reload. They still arrive.
+- What vanilla does with ordinary divisions left in another country after peace. Do they stay
+  (the owner's report) or are they moved?
+
+## V5: implementation (`send_home`, 2026-11-21)
+
+The owner chose **"both, as proposed"** (V4.4). Built on `feature/hoi4-1.20`, because `origin/main`
+does not list 1.20 yet. Files: `src/engine_send_home.cpp` (engine), `src/plugin_send_home.cpp`
+(the two effects), shapes in `src/signatures.h`, offline check `check_send_home` in
+`tools/check_code_shapes.py`, MODDING.md "Sending divisions home".
+
+**Decisions taken from the proposal:**
+1. **Names:** `send_home` (division scope) and `send_divisions_home` (country scope), both built.
+2. **Options:** `days`, `province`, `state`. `days` below 1 counts as 1 (the next day). The V2.4
+   countdown arrives on the next daily step either way. `province` wins over `state`. A `state`
+   gives its owner-controlled province nearest, by map rectangle centres, to where the divisions
+   stand: the division's own province, or for `send_divisions_home` the first selected division's.
+   A place the owner does not control is ignored (logged, and named in the tooltip): the game then
+   picks.
+3. **Equipment:** vanilla's 5% loss is kept. Nothing extra is written.
+4. **Refusals:** the V4 table as proposed: in battle (the unit's combat list), at sea or already
+   travelling (not in its province's land unit list, or a province without controller), at home,
+   volunteer (the game's own test), the transfer's own filter (`unit+8`, `+0x1dc`), and a border
+   war.
+5. **on_action and trigger:** not built. They need a hook in the daily step. Later, if wanted.
+6. **Builds:** the shapes are byte-identical on 1.20 and 1.19.5 (only addresses differ). 1.19.4.2
+   and older were not checked: no copies here. On a build where they don't match, the feature
+   logs why and stays off.
+
+**One change from V4: `send_home` arrives without an army.** V2.2 groups per army *per call*. An
+`every_country_division` calls the effect once per division, so each division would become its
+own transfer. On arrival `0x1415c1230` always makes a **new** army from the recorded one, so N
+divisions of an army would come back as N armies with the same name. There is no point after an
+iterator to batch the calls. A deferred flush (`RunOnMainThread`) is not lockstep-safe: a machine
+catching up may run several ticks in one frame. So `send_home` clears the transfer's "army
+recorded" byte (`+0x34`), and the division arrives unassigned. `send_divisions_home` passes all
+its divisions in one call, so it keeps the game's grouping, army names and generals.
+
+**Resolution (engine_send_home.cpp), each with a cross-check against another feature's value:**
+
+| Piece | Found from | Cross-check |
+|---|---|---|
+| recall `0x14071f8d0` | `CRecallVolunteersFromEffect` slot 13, `kCodeRecallVolunteersExecute` (+0x32) | - |
+| division list `+0x290/+0x29c` | `kCodeRecallVolunteers` | = `army.daily` (Part E) |
+| is-volunteer `0x140c591d0` | the recall (+0x66) | called as the game calls it |
+| create `0x14072fef0` | `kCodeRecallCreateCall` in the recall | `kCodeTransferCreate` at its start |
+| second tag `+0x1dc`, unit army `+0xc0` | `kCodeTransferUnitFilter` | army = add_to_army's move (G4) |
+| transfers `+0x13b0/+0x13bc` | `kCodeTransferAppend` | count = list + 0xc |
+| start `0x1415c1820` | the call after the append | `kCodeTransferStart` at its start |
+| province id `+0xa4`, arrival `+0x30`, days `+0x28`, default days define | `kCodeTransferStart` | id = province data's (M14) |
+| unit province `+0x1f0`, army recorded `+0x34` | `kCodeTransferLeave` in start | army = add_to_army's; the three transfer fields differ and lie in 0xa0 |
+| `CVolunteerForceTransfer` vtable | RTTI | each new list entry is checked against it |
+
+**Call:** `create(owner country, &from, &owner, {data, n, n, null}, false)`. Then the loader writes
+`days`, the arrival province and (for `send_home`) `+0x34 = 0`, but only into the list entries
+appended by that call that carry the transfer vtable. `from` is the controller of the division's
+province (`send_home`) or the `from` parameter.
+
+**Self-check per game entry:** the player country's divisions are found in the land unit list of
+the province `+0x1f0` names. Divisions at sea may not be, so it fails only if none is. Every entry
+of the transfer list carries the transfer vtable and a sane day count. A failure switches the
+feature off for the session.
+
+**Checks done (offline):** build without warnings; `check_signatures.py` and
+`check_code_shapes.py` pass on the 1.20 and 1.19.5 copies (new shapes included; on 1.20 the define
+resolves to `0x1433e6060`, the known `VOLUNTEERS_TRANSFER_SPEED`); smoke test passes.
+
+**Still open, to test in game (1.20):**
+- `send_divisions_home = { from = SPR }` with a few armies in Spain: they vanish, return after
+  14 days at a port with their army names and generals, and the message shows.
+- `send_home` in `every_country_division`: every division leaves, none is skipped or doubled.
+  Whether the iterator copies its list first is not established. The effect re-checks each
+  division (still in its province's list) before acting.
+- `days`, `province`, `state`; a place the owner lost while they travel (the game picks again).
+- Refusals: in battle, at sea, border war, volunteer, at home. Check the tooltip lines.
+- Save while travelling and reload, with and without the loader.
+- `loader.log`: the `send_home:` resolve line and the self-check line.
+- Multiplayer: in the G3 plan.
+
+# Part W: division pathing triggers (`division_pathing`, investigation)
+
+Owner's request (2026-11-21, after `send_home`): division-scope triggers that ask the game's own
+pathfinder three questions, so a mod can tell stranded divisions (send them home) from ones that
+can walk:
+1. Is there **no land path** to territory controlled by the division's country or an ally?
+2. How long would the **travel** take to a province (or to the nearest friendly one)?
+3. Does the route need **naval transport**?
+
+Branch `notes/division-pathing` (worktree `HoI4Mod-Loader-pathing`), on top of
+`notes/division-teleport` (Part V, unit fields reused). Design A built (W7).
+
+Addresses are from **1.20 (`v1.20.0.0.8873`, sha256 `1beb2a38…`)**, the Ghidra 12.2 project in
+`HoI4Mod-Loader-ghidra120/`, and only for orientation. The 64-byte starts of the functions W2 uses
+were compared with the **1.19.5** copy (`HoI4Mod-Loader-ghidra/hoi4_1.19.5.0_copy.exe`): see W2.7.
+
+## W1: what vanilla script has
+
+| Need | Vanilla | Notes |
+|---|---|---|
+| Path exists / travel time / transport | none | Division scope has no location, path or movement trigger (1.20 documentation). |
+| Where the division is | none in division scope | Only state-scope counts (`divisions_in_state`, ...) and the loader's `divisions_count`. |
+
+The game computes all three for the UI. When a move is ordered or hovered it shows:
+- the arrival time: `UNIT_MOVING_DAYS_HOURS` "The Unit will arrive in its destination in $DAYS$
+  day(s) and $HOURS$ hour(s)", `UNIT_VIEW_MOVE_DAYS_HOURS`, `PROVINCE_UNIT_MOVE_DAYS_HOURS`;
+- a failed path: `UNITS_HAS_INVALID_PATH_WARNING` "Unable to find valid path to target",
+  `UNITS_HAS_INVALID_TRANSPORT_WARNING` "Unable to transport to target";
+- transport: `NAVAL_TRANSPORT_MOVE_DESC`, `NAVAL_TRANSPORT_INTERCEPT_WARNING`.
+
+None of it reaches script. **Loader material.**
+
+## W2: engine findings (1.20)
+
+### W2.1 From a move order to the pathfinder
+
+- A move order is a `CQueueUnitActionCommand` carrying a **`CUnitMoveAction`** (RTTI, vtable
+  `0x142a24868`; 0x60 bytes: `+0x10` unit handle, `+0x18`/`+0x24` the target provinces (token
+  `0x2840`), `+0x30`/`+0x3c` a ready-made path (`0x174`), flag bytes `+0x50..+0x5c`).
+  `CUnitNavalMoveAction` (vtable `0x142a24938`) is the naval twin. `CTransportUnitCommand` and
+  `COrderSetPathCommand` (battle plans) exist too.
+- Its execute (slot 9, `0x1412c5f30`): for each target province, `CArmy` vtable `+0x78`
+  (AddMovement) then `0x1412c53d0`, which builds the path with the request builders in W2.3. Its
+  validate (slot 10, `0x1412c6560`) calls `CArmy` vtable `+0x88` (`0x140cd68a0`, can move to).
+- `0x140cd68a0` → **`0x140e68620(&tag, from, to, unit+0x2ae, CMilAccessAreaCostCallback)`**, the
+  order's cheap reachability test:
+  - same land mass (province `+0xd8`) and access (`0x140746540`) → yes;
+  - else a neighbour by strait or adjacency rule;
+  - else, if transport is allowed, an **area-level search** `0x140d58920(from+0xd0, to+0xd0,
+    callback)` over sea areas. It is a Dijkstra with thread-local scratch (`+0x6f0`/`+0x710` of a
+    TLS block) and ties broken by province id.
+- The division's current path: **`unit+0x200` (province ids) / `+0x20c` (count)**. `0x140c54610`
+  returns its last province. `unit+0x2a8` is the path problem the UI shows (`0x140c548a0`):
+  1 invalid move in path, 4 invalid transport, **5 no valid path**, 6 lost its way.
+
+### W2.2 The arrival time the UI shows
+
+`0x141962000` (the unit tooltip, string `UNIT_MOVING_DAYS_HOURS`):
+
+```
+t = 0x140c53fa0(unit, &out, unit+0x1f0 /*here*/, 0x140c54610(unit) /*path end*/,
+                ui->+0x448 /*a UI flag*/, 0x140c50db0(unit) /*the unit's path-time cache*/)
+hours = 0x14049c240(t)   // ceil(t / 100000)
+days = hours / 24, hours % 24
+```
+
+- `0x140c53fa0` gives a fresh path array (allocator `DAT_143103000`) to
+  **`0x140c540c0`**, frees it, and returns the time.
+- Time is **fixed point: 100000 = one hour.**
+- `0x140c50db0` is `unit+0x300`, a per-unit cache of path times, but only outside a parallel
+  section (`DAT_1433e3b38 < 1`). Otherwise it is null. So **the UI tooltip writes into this cache on
+  the local machine only.** A trigger must not use it (W4).
+
+### W2.3 The path and time call: `0x140c540c0`
+
+```
+int64* PathAndTime(CArmy* unit, int64* outTime, CProvince* from, CProvince* to,
+                   CPdxArray<int>* outPath, bool p6, PathCache* cache, bool strategic, bool useCache)
+```
+
+1. `outPath.size = 0`. Strategic mode if `unit+0x2af` (strategic redeployment) or `strategic`.
+2. With `useCache` and a cache: returns a cached time for (from id, to id, strategic, p6).
+3. A **`CPathFind` on the stack** (`0x140e9b4d0` constructor, 0x50 bytes; byte `+0` = 0 turns its
+   edge memo off, W2.5). Then:
+   - strategic: `0x140e9c8e0` (rail), retried with transport allowed;
+   - `p6 = 0` (what the UI passes): **`0x140e9bec0` land only** (request byte `+0x29 = 0`); if the
+     path is empty, again with **`+0x29 = 1` = naval transport allowed**;
+   - `p6 = 1`: `0x140e9c800` (mode 2, then 0), the same retry, then it drops a path that starts at
+     sea unless both ends are coastal.
+4. **Time along the path** `0x140c53cb0(unit, &t, path)`, for each step a → b:
+   - distance: the adjacency's `+0x18` (province `+0xb8` → `+0x70`, 0x30-byte entries, `+0x7c`
+     count), or 100000 without an adjacency, or a define `DAT_1433e7570` for a land unit going from
+     sea to land (landing);
+   - `t += distance * 100000 / speed`, where speed = `CArmy` vtable `+0xd8` (`0x140ce11e0` →
+     `0x140cddba0`: terrain, org, fuel, modifiers, the movement tooltip text);
+   - minus the progress already made if the path starts on the division's current step
+     (`unit+0x200[0]`, progress `unit+0x240`).
+5. With a cache: stores the result. **Null cache = nothing stored.**
+
+Request (0x30 bytes, built by `0x140e9bec0` / `0x140e9c800` / `0x140e9c8e0`):
+
+| Offset | Meaning |
+|---|---|
+| `+0x00` | mode: 0 land, 1 naval, 2 land + port check, 3, 4, 5 (special searches) |
+| `+0x08` | the unit (`CArmy*`) |
+| `+0x10` / `+0x18` | from / to (`CProvince*`) |
+| `+0x20` | a tag pointer (`0x140c08e50(&t, 0)`: none) |
+| `+0x28` | `unit+0x2ae` |
+| `+0x29` | **naval transport allowed** |
+| `+0x2a`..`+0x2f` | other flags (`+0x2c = 1` set by the builders) |
+
+### W2.4 The search: `0x140e9d990(CPathFind*, CPdxArray<int>* out, request*)`
+
+- **Precheck** `0x140e9e7f0`:
+  - no unit, from or to → no path;
+  - the unit can't enter the target (`CArmy` vtable `+0x70`) → no path;
+  - **a land unit with transport not allowed, both ends on land on different continents
+    (province `+0xb8` → `+0xd0`, a short) → no path without searching.** That is the cheap "needs a
+    ship" case.
+- **A\*** over the province graph:
+  - its open list and visited arrays come from a thread-local bump allocator (`0x14256cdc0`),
+    reset on return;
+  - each neighbour is tested by **`0x140e9d520`** (per mode; W2.5);
+  - the path is rebuilt by `0x140e9b530` into `out` (province ids, start excluded);
+  - it reads one double (`0x1425dec8c`, the distance estimate).
+- Called by:
+  - the unit's own movement (`0x1412c53d0`, the move action's execute: runs in lockstep);
+  - about 15 AI functions (`0x1410c6260`, `0x141105540`, `0x14111b4f0`, ...: AI planning,
+    called from parallel AI threads);
+  - supply / UI (`0x140f17d00`, `0x14171cf20`, `0x14156eea0`, ...).
+- It is the same function for every caller. **Vanilla game logic already depends on its result
+  being the same on every machine.**
+
+### W2.5 Purity (what a call writes)
+
+Read through `0x140c540c0` → `0x140e9bec0` → `0x140e9d990` → `0x140e9d520` → `0x140e9ba30`, and
+`0x140c53cb0` → `0x140cddba0`:
+- **Written:** the caller's out path and out time; the stack `CPathFind`; the TLS scratch (reset
+  on return); and debug-only assert flags.
+- **Edge memo:** a hash map inside the `CPathFind` (`+8`), only when its byte `+0` is set and
+  `DAT_14312f740`. The stack object from the constructor has 0, so it is off.
+- **Path-time cache:** only with a non-null cache. The trigger passes null.
+- **Speed:** writes into its tooltip string only when given one (null from `0x140c53cb0`). It has
+  a debug log line (`"Speed mod: %lli"`, level 5).
+- **Not seen:** any write to the unit, a province, a country or the game state.
+- **Not proven:** every callee was not read to the bottom. `0x140e9ba30` →
+  `0x1407463a0(country, province, &a, &b)` (an access lookup, writes its two out bytes) and the
+  `CArmy` vtable `+0x70` (`0x140ce6d00` → `0x140e688b0`, can enter) were read only at the call
+  level. **To check in code review before building.**
+
+### W2.6 Land, sea, ally
+
+- **Sea province:** `province+0xb8 → +0xd2 & 1 == 0` (bit 0 = land; `& 3 == 0` is the "at sea" test
+  in `0x140cd6ca0`, `0x140c540c0`, `0x140c53cb0`).
+- **Needs transport:** the land-only search fails and the transport one succeeds (exactly
+  `0x140c540c0`'s retry), or, the same, the returned path has a sea province.
+- **Controller:** `province+0x188` (Part V). Access and war tests: `0x140749580(country, &tag)`
+  and `0x140746540(country, province, 0)`. Not identified further; `0x140c0a340` is the
+  tag-equivalence test (V2.4).
+- **There is no "nearest friendly province" search in the engine.** The A\* has one goal, and
+  `MOVING_TO_FRIEND_TERRITORY` is only the unit view's label. So question 1 with "or an ally"
+  needs a target (W3).
+
+### W2.7 Builds checked
+
+The 64-byte starts of these functions are **byte-identical and unique in 1.20 and 1.19.5** (1.19.5
+address in brackets):
+- `0x140c540c0` path and time (`0x140c52370`)
+- `0x140c53cb0` time along path (`0x140c51f60`)
+- `0x140e9d990` A\* (`0x140e9a5f0`)
+- `0x140e9bec0` land request (`0x140e98b20`)
+- `0x140e9e7f0` precheck (`0x140e9b450`)
+- `0x14049c240` hours (`0x14049b870`)
+- `0x140c53fa0` UI time, first 32 bytes (`0x140c52250`); then a RIP-relative load differs
+
+The constructor `0x140e9b4d0` differs only in its RIP-relative allocator addresses (to be masked).
+1.19.4.2 and older were not checked: no copies here. Script with the shapes in W4.
+
+## W3: proposal (for the owner's decisions)
+
+All triggers are in **division scope**, guarded like every native trigger (`division_pathing` in
+the feature table).
+
+```
+# 1. no land path home / to a province
+has_path_home = no                         # no land route to friendly territory (W3.1)
+has_land_path = { province = 6521 }        # a land route to that province exists
+
+# 2. travel time (as the game's move order would go: by land, else by sea)
+travel_time = { province = 6521 days < 10 }
+travel_time = { hours > 48 }               # no province: to the nearest friendly territory (W3.1)
+travel_time = { province = 6521 naval = no days < 10 }  # land route only
+
+# 3. naval transport
+needs_naval_transport = { province = 6521 }   # no land route, but one with transport
+needs_naval_transport = yes                    # to the nearest friendly territory
+```
+
+- **Values:** `hours` is what the UI rounds (`ceil(t / 100000)`); `days` = hours / 24, fractional.
+  Compared like the counts in Part E: `<`, `>`, `=` (equal). The right side can be a variable.
+- **No route at all** (not even by sea), an unknown province, or a division at sea or in
+  transport (`unit+0x2f8`): every trigger is **false**, and true under `NOT`, as Part E.
+  `has_path_home = no` is true then, which is what "stranded" means.
+- **Tooltip:** "Travel time of 12. Infanterie-Division to Berlin (6521) below 10 days (currently 7
+  days 5 hours, by sea)".
+
+**How (engine):** one call per trigger, `0x140c540c0(unit, &t, unit+0x1f0, ProvinceById(p), &path,
+false, null, false, false)`, with a path array on the loader's stack (the game's allocator
+`DAT_143103000`, freed with it as `0x140c53fa0` does).
+- `has_land_path` and `naval = no` stop after the land-only half. For that, the loader calls the
+  land request `0x140e9bec0` once itself (+`0x29 = 0`), with a stack `CPathFind`.
+- The time, the transport retry and the sea test are the game's.
+
+### W3.1 "Friendly territory": two designs
+
+**Design A: home = the capital (simple, all game code).** The target is the owner's capital
+province. If the owner doesn't control it, the first province of the capital state it controls
+(as V2.5 step 1, `0x140735560` / `0x1407356a0`). No capital: false.
+- **One A\* per trigger.**
+- **Misses:** allies. Afrika Korps in Italian Libya counts as "no land path home" (it needs a ship to
+  Germany), although it stands next to allied territory.
+
+**Design B: nearest friendly territory (closer to the request).** A breadth-first walk from the
+division's province over the province graph:
+- it uses the **game's own edge test `0x140e9d520`**, with a request built as the land builder
+  builds it, so the rules are the game's (access, war, impassable, straits, adjacency rules);
+- it stops at the first province controlled by the owner, a tag-equivalent country or an ally;
+- "ally" = the loader's existing `allied_with` (faction members, subjects, overlords, as
+  `divisions_count` uses it);
+- that province is the target for `travel_time` / `needs_naval_transport`. It is the nearest
+  **by provinces, not by time.**
+- **Costs more:**
+  - a bounded own loop (a province limit, e.g. 4000, logged when hit; then false);
+  - the edge test's signature and the request layout become shapes;
+  - its result ignores sea (land walk). So "needs transport home" = no land walk reaches friendly
+    land, and the game's transport search to the capital (Design A's target) succeeds.
+
+**Recommended:** both designs share the engine call. Build `has_land_path`, `travel_time` and
+`needs_naval_transport` with an explicit `province` first, plus `has_path_home` as Design A. Add
+Design B's nearest search if the owner wants allies counted.
+
+### W3.2 Cost
+
+- **Not measured** (no game run yet). A\* is goal-directed, and the game runs it for every move
+  order and many times per day in AI planning.
+- Expected:
+  - a few µs when the precheck fails (different continent without transport, or a target the
+    division can't enter);
+  - tens of µs to about a millisecond for a long route across a continent;
+  - twice that when the land half fails and the transport half runs;
+  - a no-path search costs as much as the region the division can reach. A stranded division can
+    reach little (no access), so it is cheap.
+- **Risk:** `every_country_division` with `travel_time` daily, over hundreds of divisions far from
+  the target, could cost milliseconds per day. MODDING.md will say: filter with cheap triggers
+  first, and don't run it every day.
+- **No cache in the first version.** A loader cache needs invalidation on control, access and war
+  changes, and a cache filled by tooltips would differ between machines (W4).
+- Measure with `[diagnostics] trigger_timing = 1` in the test mod (as Part E).
+
+## W4: multiplayer safety
+
+- **Same code as vanilla's lockstep logic:**
+  - the move action's execute builds paths with `0x140e9bec0` / `0x140e9c800` on every machine;
+  - AI planning calls the same A\*;
+  - the inputs are game state only (unit, provinces, controllers, access, wars, speed modifiers,
+    weather);
+  - ties are broken by province id.
+- **Nothing is written** (W2.5): null path-time cache, edge memo off, TLS scratch reset. So a
+  tooltip evaluation on one machine can't change what a later script evaluation sees on another.
+- **Floating point:** one double in the A\* estimate. The movement and AI results already depend on
+  it, so it is as deterministic as they are (MP needs the same build anyway).
+- **Not used:** the UI flag `+0x448` (`0x140c53fa0`'s fifth argument, a local UI setting). The
+  trigger passes `strategic = false`. The unit's own `+0x2af` (in strategic redeployment) still
+  applies, as game state.
+- **Threads:** the A\* is reentrant (TLS scratch) and the game calls it from parallel AI threads.
+  The game's own parallel-section test (`DAT_1433e3b38`) only switches the per-unit cache, which the
+  trigger never uses. So the trigger is safe on whatever thread evaluates triggers (Threading
+  model: trigger reads).
+- Not testable here (no MP setup). It goes into the G3 plan.
+
+## W5: resolution and fail-safe (plan)
+
+| Piece | Found from | Cross-check |
+|---|---|---|
+| UI time `0x140c53fa0`, hours `0x14049c240` | the only reference to `UNIT_MOVING_DAYS_HOURS` (`0x141962000`): `call path-end; mov r8,[r12+0x1f0]; call ui_time; mov rcx,rax; call hours` | `+0x1f0` = send_home's unit province |
+| path end `0x140c54610`, path `+0x200/+0x20c` | the same block | `cmp [rcx+0x20c]` in its shape |
+| path and time `0x140c540c0` | ui_time's call (`+0xa5`) | its shape: `mov [rdi+0xc],0; cmp byte [rcx+0x2af],0` |
+| allocator `DAT_143103000` | ui_time `lea rax,[rip+..]` (+0x5b) | = the one the A\* uses (`0x140e9d990`) |
+| land request `0x140e9bec0`, constructor `0x140e9b4d0` | the first two calls in path-and-time | shapes; request flags +0x28/+0x29 from the call's stack stores |
+| time along path `0x140c53cb0` | the call after the searches | reads `[rcx+0x1f0]` (unit province) |
+| sea bit `+0xb8 → +0xd2` | `0x140c540c0` after the naval search | per game: the sea provinces by this bit = the map's sea provinces (`province_terrain`) |
+| province id `+0xa4` | path-and-time's cache key | = province data's (M14) |
+
+- **Self-check per game entry:**
+  - for a few of the player's divisions with a path (`+0x20c > 0`), a trigger call to the path's
+    end must give a path (not empty) and a time;
+  - the sea-bit check above;
+  - if either fails, the feature is off for the session.
+- **Fail safe:** any shape or cross-check fails → `division_pathing` is off (logged), the guard
+  trigger is false, the triggers are false. Nothing is hooked: the feature only calls game
+  functions, so being off changes nothing in the game.
+
+## W6: decisions for the owner
+
+1. **"Home":** Design A (capital), B (nearest friendly incl. allies), or A first and B later.
+2. **Names:** `has_path_home`, `has_land_path`, `travel_time`, `needs_naval_transport`, or others
+   (e.g. `can_walk_home`, `travel_days`).
+3. **Units:** `days` and `hours` both, or one.
+4. **`naval = no`** option on `travel_time`: wanted?
+5. **Builds:** 1.20 and 1.19.5 (W2.7 shapes match), as `send_home`.
+6. **Feature name:** `division_pathing`, its own guard. Separate from `send_home`, so either works
+   without the other.
+
+**Answered (2026-11-21):** 1. **Design A now, B later** (the owner). The rest I chose, open to change:
+2. `has_path_home`, `has_land_path`, `needs_naval_transport`, `travel_time` (as proposed);
+3. `days` only (`travel_time`'s compare key; hours = days × 24 in script);
+4. `naval = no` kept; 5. both builds; 6. its own feature and guard.
+
+## W7: implementation (Design A)
+
+Files: `src/engine_division_pathing.cpp`, `src/plugin_division_pathing.cpp`, shapes in
+`signatures.h` ("Division pathing"), `tools/check_code_shapes.py` `check_division_pathing`.
+
+**Syntax** (division scope; W3 changed where one name could not take two forms):
+
+| Trigger | Form | True when |
+|---|---|---|
+| `has_path_home = yes/no` | bool | yes: a land route home; no: none (sea only, or no route) |
+| `has_land_path = <province>` | int | a land route to that province |
+| `needs_naval_transport = home / <province>` | int or the word `home` | no land route, but one with transport |
+| `travel_time` (`days`) | numeric, Count | value form `travel_time < 10` = home; block `{ province naval days }` |
+
+`needs_naval_transport = yes` from W3 became `= home`: a trigger has one form, and the province
+form needs the value.
+
+**Resolution** (`ResolveDivisionPathing`, after `ResolveSendHome`):
+1. Anchor `UNIT_MOVING_DAYS_HOURS` (one lea, `0x1419638e7`); `kCodePathUiBlock` in the 0x100 bytes
+   before it (`0x14196383a`, lea − 0xad; the same block appears again after the lea for a second
+   text, so the search must go backwards).
+2. Its hours call → `kCodePathHours` (exact bytes: ceil(t / 100000), so 100000 = one hour).
+3. Its ui_time call → `kCodePathUiTime`: the path array layout (data +0, count +0xc, allocator
+   +0x10, dword +0x18), the allocator (lea at +0x5b → `0x143103000`), and the free
+   (`allocator->vtable[2](allocator, data)`) are all in the exact bytes.
+4. ui_time's call (+0xa5) → `kCodePathTime`; in it `kCodePathSeaTest` (+0xb8 → +0xd2 & 3) and
+   `kCodePathTimeCall` → `kCodePathAlong`.
+5. **Cross-check:** the unit province field from the tooltip block (+0x28) = the one the time along
+   the path reads = send_home's (when resolved): `+0x1f0` on both builds.
+6. Capital: send_home's chain (recall_volunteers_from → recall → create → choose), then
+   `kCodeChooseCapital` at choose's start: capital_state (`0x140735560`) and capital_province
+   (`0x1407356a0`); `kCodeCapitalProvince` must call that same capital_state.
+- The allocator object is constant-initialized: ui_time's thread-safe static guard only registers
+  its atexit destructor, no constructor runs, so it is usable from image load.
+
+**Call:** `path_time(unit, &t, unit province, to, &array, p6 = 0, cache = null, strategic = 0,
+useCache = 0)`; the array starts empty with the game's allocator and is freed as ui_time frees it.
+Route = Land if the path has no sea province, Naval if it has one (the game only searches with
+transport after the land search came back empty), None if empty. A path id the loader can't map,
+or a count outside 1..100000, is Unknown.
+
+**Deviation from the trigger rules (DEVELOPING.md "no allocation"):** the game's search allocates
+its result array with the game's allocator, exactly as the tooltip and the AI threads' searches
+do. The loader itself allocates nothing in evaluate.
+
+**Not used:** `unit+0x2f8` (in transport, W3): a division in transport stands in a sea province, and
+the sea test already makes it Unknown. The path fields `+0x200/+0x20c` are not used either.
+
+**Self-check** (game entry, player country): the sea test over every province splits the map
+(some sea, not all); the home province is land; up to 8 of the player's land divisions are routed
+home: no Unknown, every route ends at the home province with a time in 0..10 years. Fail →
+feature off for the session.
+
+**Checked offline:** `tools/check_code_shapes.py` ok on 1.20 and 1.19.5 (allocator `0x143103000` /
+`0x1430fd000`, capital state `0x140735560` / `0x1407343e0`); `check_signatures.py`: the anchor has
+one lea on both. Build and smoke test pass (signature count 186).
+
+**Not done:** in-game test, cost measurement (`trigger_timing`), multiplayer, Design B. Reading the
+unread callees of W2.5 (access lookup, can enter) to the bottom is still open.

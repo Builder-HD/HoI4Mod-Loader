@@ -23,6 +23,8 @@ const char* ValueText(const void* value) {
 }
 
 using BlockClause_t = void(__fastcall*)(void* self, void* parser, void* mask);
+void* NewValueHolder();  // numeric triggers section below
+using HolderRead_t = void(__fastcall*)(void* holder, void* parser);
 
 void ReadItemFor(ParsedCommand* pc, void* parser, int token, void* mask) {
     int idx = pc ? NativeParamIndex(*pc->cmd, token) : -1;
@@ -51,6 +53,18 @@ void ReadItemFor(ParsedCommand* pc, void* parser, int token, void* mask) {
             Log("Native command '%s': %s", pc->cmd->name.c_str(), error.c_str());
         }
         return;
+    }
+    if (pc->cmd->params[idx].variable) {
+        // Number or variable, read by the game's own CScopedVariable reader (as the numeric
+        // triggers' right side), so a typo in the variable gets the game's own error with file/line.
+        if (void* holder = NewValueHolder()) {
+            ((HolderRead_t)(*(void***)holder)[3])(holder, parser);
+            ArgValue& v = pc->args[idx];
+            v.value = holder;
+            v.i = 0;
+            v.present = true;
+            return;
+        }
     }
     EngineString text{};
     text.cap = 15;
@@ -214,7 +228,6 @@ CompareOp OpOf(int t) {
 
 using Clause_t = void(__fastcall*)(void* self, void* parser, void* ctx);
 using ReadValue_t = bool(__fastcall*)(void* self, void* value);
-using HolderRead_t = void(__fastcall*)(void* holder, void* parser);
 using VarRegister_t = void(__fastcall*)(void* self, int token, const char* desc);
 
 // No C++ objects: SEH around the engine's script value evaluation.
@@ -327,6 +340,20 @@ void* __fastcall NumericEntryCreate(TriggerEntryObj* e) {
     return obj;
 }
 
+// Variable Int parameters (ParamSpec::variable): a CScopedVariable to read `key = value` into. It
+// lives in a numeric Count template object built by its own constructor (the holder the numeric
+// triggers read their right side into, +0x68); the object is a container only, never registered
+// or run. Parse time, kept forever like the parsed command. Null without the numeric functions.
+void* NewValueHolder() {
+    const Engine::NumericTemplate& t = Engine::numericCount;
+    if (!Engine::HaveNumeric() || !t.alloc || !t.ctor || t.size < kCountVar + 8) return nullptr;
+    void* obj = t.alloc(t.size);
+    if (!obj) return nullptr;
+    memset(obj, 0, t.size);
+    t.ctor(obj);
+    return (uint8_t*)obj + kCountVar;
+}
+
 bool SafeRegisterVariable(void* proto, VarRegister_t fn, int token, const char* desc) {
     __try {
         fn(proto, token, desc);
@@ -424,6 +451,9 @@ public:
         std::vector<Engine::LocalizeArg> raw;
         for (const LocArg& a : args) raw.push_back({a.name, a.value.c_str()});
         return Engine::LocalizeWithArgs(key, raw.data(), (int)raw.size(), out);
+    }
+    bool EvalValue(void* holder, const void* engineScope, int64_t* out) override {
+        return holder && engineScope && SafeScriptValue(holder, engineScope, out);
     }
     bool EngineHas(CommandKind kind, int token) override {
         return kind == CommandKind::Effect ? Engine::EffectRegistered(token) : Engine::TriggerRegistered(token);

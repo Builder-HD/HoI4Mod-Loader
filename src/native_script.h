@@ -80,6 +80,10 @@ struct ParamSpec {
     // Block: the keys allowed inside (any types but Block; no scope defaults). Must outlive the
     // registration call (copied then).
     const std::vector<ParamSpec>* block = nullptr;
+    // Int only (not repeated, no words): the value may also be a game variable (`days = my_days`,
+    // `days = ROOT.my_days`), read by the game's own reader and evaluated per use in the scope the
+    // command runs in. Read it with Args::value; Args::i is then 0. A number works as before.
+    bool variable = false;
 };
 
 // Country parameter values below 1 are scope keywords, resolved per evaluation; kCountryAny
@@ -96,7 +100,9 @@ struct ArgValue {
     bool fromScope = false;  // filled in from the scope (ParamSpec::fromScope), not written in script
     const std::vector<int>* ints = nullptr;                // repeat Int: every value written
     const std::vector<ParsedCommand*>* blocks = nullptr;  // Block: every block written
+    void* value = nullptr;  // variable Int read by the engine: its value holder (CScopedVariable)
 };
+class Scope;
 
 // Typed arguments in schema order. Plain reads: safe in trigger evaluate (no allocation).
 class Args {
@@ -108,6 +114,9 @@ public:
     bool b(size_t i) const { return i < n_ && v_[i].b; }
     const char* key(size_t i) const { return i < n_ ? v_[i].s : ""; }
     double num(size_t i) const { return i < n_ ? v_[i].i / 1000.0 : 0.0; }  // Number
+    // Variable Int (ParamSpec::variable): the number, or the variable's value in scope `s`,
+    // truncated to a whole number as vanilla does; 0 if the variable can't be read.
+    int value(size_t i, const Scope& s) const;
     // True when the value came from the scope, e.g. a region inside a strategic region block.
     // Tooltips use it to leave out what the scope's header already names.
     bool fromScope(size_t i) const { return i < n_ && v_[i].fromScope; }
@@ -418,6 +427,11 @@ public:
     // The game's localisation of key with $NAME$ arguments; false if it has no entry.
     virtual bool Localize(const char* key, const std::vector<LocArg>& args, std::string* out) {
         (void)key, (void)args, (void)out;
+        return false;
+    }
+    // A variable Int's value holder evaluated in an engine scope (fixed point, 100000 = 1).
+    virtual bool EvalValue(void* holder, const void* engineScope, int64_t* out) {
+        (void)holder, (void)engineScope, (void)out;
         return false;
     }
 };

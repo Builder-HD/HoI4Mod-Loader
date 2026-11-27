@@ -105,6 +105,8 @@ std::string CheckParams(const std::vector<ParamSpec>& params, bool inBlock = fal
                 if (!((*c >= 'a' && *c <= 'z') || (*c >= '0' && *c <= '9') || *c == '_' || *c == '|'))
                     return std::string("choices of '") + p.name + "' must be a-z 0-9 _ separated by |";
         }
+        if (p.variable && (p.type != ParamType::Int || p.repeat || p.choices))
+            return std::string("only a single int parameter without words can be a variable ('") + p.name + "')";
         if (p.type == ParamType::Country && p.choices && strcmp(p.choices, "any") != 0)
             return std::string("country parameter '") + p.name + "' accepts only \"any\" as extra choice";
         if (p.reserved && (p.required || p.fromScope != ScopeDefault::None))
@@ -664,6 +666,7 @@ static std::string ParamDoc(const ParamSpec& p, const char* indent) {
     std::string s = std::string(indent) + "- `" + p.name + "`: " + TypeName(p.type);
     if (p.type == ParamType::Choice) s += " (" + ParamUsage(p) + ")";
     if (p.type == ParamType::Int && p.choices) s += " (a number or " + ParamUsage(p).substr(6) + ")";
+    if (p.variable) s += " (a number or a variable)";
     if (p.type == ParamType::Country)
         s += p.choices ? " (tag, THIS, ROOT, FROM, PREV or any)" : " (tag, THIS, ROOT, FROM or PREV)";
     if (p.type == ParamType::Number) s += " (a decimal such as 0.5)";
@@ -790,6 +793,14 @@ Args Args::block(size_t i, size_t k) const {
     if (i >= n_ || !v_[i].blocks || k >= v_[i].blocks->size()) return Args(nullptr, 0);
     const ParsedCommand* c = (*v_[i].blocks)[k];
     return Args(c->args.data(), c->args.size());
+}
+
+int Args::value(size_t k, const Scope& s) const {
+    if (k >= n_) return 0;
+    if (!v_[k].value) return v_[k].i;
+    int64_t v = 0;
+    if (!g_backend || !g_backend->EvalValue(v_[k].value, s.raw(), &v)) return 0;
+    return (int)(v / 100000);  // vanilla truncates variables to whole numbers
 }
 
 int native_country(int code, const Scope& s) { return code == kCountryAny ? code : CountryFromKeyword(code, s); }
@@ -1182,6 +1193,10 @@ std::string NativeTooltip(const ParsedCommand* pc, const void* engineScope, bool
         s += std::string(" ") + c.params[i].name + "=";
         switch (c.params[i].type) {
             case ParamType::Int:
+                if (pc->args[i].value) {
+                    s += "<variable>";
+                    break;
+                }
                 if (pc->args[i].ints) {
                     for (size_t k = 0; k < pc->args[i].ints->size(); ++k)
                         s += (k ? "," : "") + std::to_string((*pc->args[i].ints)[k]);

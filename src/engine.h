@@ -193,6 +193,9 @@ struct UnitFilter {
 void* StateById(int id);
 bool IsSameCountry(int a, int b);
 bool HaveAlliance();  // alliedWith is available (IsFriendly resolved)
+// Allied by the IsFriendly test (same faction, or subject/overlord either way); never the same
+// country. False when it can't tell.
+bool IsAllied(int a, int b);
 // Counts in a state / strategic region. False if the area does not exist.
 bool CountDivisions(AreaKind kind, int id, const UnitFilter& f, int64_t* out);
 bool CountShips(AreaKind kind, int id, const UnitFilter& f, int64_t* out);
@@ -603,6 +606,53 @@ bool JoinArmy(void* army, void* division, std::string* oldName, bool* oldDeleted
 // The layout add_to_army relies on: each of the country's divisions that has an army is in that
 // army's member list, and the army carries the division's tag. False and *why on a mismatch.
 bool JoinSelfCheck(int tag, int* armies, const char** why);
+uint32_t DivisionArmyOffset();  // division -> its army (cross-check; 0 if unresolved)
+
+// --- Sending divisions home (send_home; engine_send_home.cpp, NOTES.md Part V) -------------------
+// The game's own return of volunteers (CVolunteerForceTransfer): the divisions leave the map and
+// every list, travel for some days, and arrive in their country. Game state writes: main thread
+// only (effect execution). Reads (the Unit* and province checks) are fine in tooltips too.
+void ResolveSendHome();  // after ResolveArmies, ResolveData and ResolveProvinceData
+bool HaveSendHome();
+int SendHomeDefaultDays();  // the game's VOLUNTEERS_TRANSFER_SPEED now (0 if unreadable)
+void* UnitProvince(const void* unit);  // the CProvince the unit stands in, or null
+// engine_data.cpp: the unit is in the province's land unit list (it stands on the map there).
+bool ProvinceHoldsLandUnit(const void* province, const void* unit);
+bool UnitInCombat(const void* unit);  // engine_data.cpp: the unit takes part in a combat
+void CountryDivisionOffsets(uint32_t* list, uint32_t* count);  // engine_data.cpp (cross-check)
+uint32_t ProvinceIdOffset();  // engine_province_data.cpp (cross-check)
+bool UnitIsVolunteer(const void* unit);  // the game's own test (recall_volunteers_from uses it)
+// The game's transfer takes the unit: a land unit whose second tag is not set (NOTES.md V2.2).
+bool UnitTransferable(const void* unit);
+// Starts the game's return transfer for these divisions of `owner` (all on the map, none a
+// volunteer) leaving territory of `fromTag`, as recall_volunteers_from does: one travelling group
+// per army. Then sets each new group's days (> 0) and arrival province (> 0), and with
+// keepArmy = false clears the army it recorded, so the divisions arrive without an army. Returns
+// the number of groups created: 0 if the game found no arrival province (nothing changed), -1 if
+// the transfer list is unreadable.
+int SendHome(int owner, int fromTag, const std::vector<void*>& divisions, int days, int arrivalProvince, bool keepArmy);
+// The layout send_home relies on, with a country's own data: its divisions stand in the province
+// their province field names, and its travelling groups are the game's transfer objects.
+bool SendHomeSelfCheck(int tag, int* onMap, int* groups, const char** why);
+uint32_t UnitProvinceOffset();  // unit -> its province, as send_home resolved it (0 if not; cross-check)
+
+// --- Division pathing (division_pathing; engine_division_pathing.cpp, NOTES.md Part W) -------------
+// The game's own route search and travel time (what the unit tooltip's arrival time uses), with no
+// cache: nothing is written to game state. Trigger reads, any thread (the game runs the same search
+// from its AI threads).
+void ResolveDivisionPathing();  // after ResolveSendHome, ResolveData and ResolveProvinceData
+bool HaveDivisionPathing();
+void* DivisionProvince(const void* unit);  // the CProvince the unit stands in, or null
+bool ProvinceIsSea(const void* province, bool* sea);  // the game's own "at sea" test; false if unreadable
+// "Home" (Design A): the owner's capital province if the owner controls it, else the first province
+// of its capital state it controls; null without one.
+void* HomeProvince(int owner);
+// How the division's move order would go from where it stands to `to`: the game tries a land route
+// first, then one with naval transport. Unknown: unreadable, or the division is at sea. *time: fixed
+// point hours (100000 = 1 hour), as the tooltip; *steps / *lastId (optional): the path's length and
+// last province id.
+enum class Route { Unknown, None, Land, Naval };
+Route DivisionRoute(void* unit, void* to, int64_t* time, int* steps = nullptr, int* lastId = nullptr);
 
 // --- Air scenarios (air_scenarios; engine_air.cpp, NOTES.md Part L) ------------------------------
 // The 3D air animations on the map. The game builds one template per scenario slot
