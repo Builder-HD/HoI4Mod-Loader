@@ -488,6 +488,35 @@ def write_space_tab(out, game, loc):
     loc.append(' HL_SPACE_TAB:0 "Spaceships\\nAdd a production line for ships built for space."')
 
 
+def write_space_domain(out):
+    """The spaceships' domain (hoi4_loader's ship_domains): the space hulls, their bases on the space
+    continent (the hidden spaceport docks). Built spaceships go only to the docks and space fleets,
+    regular ships never there, and the two never share a task force or fleet."""
+    write_text(os.path.join(out, "common", "hoi4_loader_ship_domains", "hoi4_loader_space_domain.txt"),
+               "# The spaceships' domain (hoi4_loader ship_domains, MODDING.md).\n"
+               "space = {\n\tarchetypes = { space_hull_light space_hull_cruiser space_hull_heavy }\n\tcontinents = { space }\n}\n")
+
+
+def write_space_tests(out, loc):
+    """Test decisions (any country, always): create a spaceship and a regular destroyer, as a dockyard
+    would deliver them (ship_domains puts the spaceship at a spaceport dock, the destroyer at a naval
+    base at sea, even though the docks are the country's best bases)."""
+    write_text(os.path.join(out, "common", "decisions", "categories", "hl_space_test_categories.txt"),
+               "hl_space_tests = {\n\ticon = generic_naval\n\tallowed = { always = yes }\n}\n")
+    tests = (("hl_test_create_spaceship", "create_ship = { type = space_hull_light_1 equipment_variant = \"Orbital Frigate\" creator = ROOT }",
+              "Test: build a spaceship", "Creates an Orbital Frigate as a dockyard would deliver it: at a spaceport dock."),
+             ("hl_test_create_destroyer", "create_ship = { type = ship_hull_light_1 equipment_variant = \"Test Destroyer\" creator = ROOT }",
+              "Test: build a destroyer", "Creates a regular destroyer as a dockyard would deliver it: at a naval base at sea, never at a dock."))
+    body = ["hl_space_tests = {"]
+    for key, effect, name, desc in tests:
+        body += ["\t%s = {" % key, "\t\tcost = 0", "\t\tfire_only_once = no", "\t\tcomplete_effect = {", "\t\t\t" + effect, "\t\t}", "\t}"]
+        loc.append(' %s:0 "%s"' % (key, name))
+        loc.append(' %s_desc:0 "%s"' % (key, desc))
+    body.append("}")
+    write_text(os.path.join(out, "common", "decisions", "hl_space_tests.txt"), "\n".join(body) + "\n")
+    loc.append(' hl_space_tests:0 "Space tests"')
+
+
 def write_space_start(out, sp, tags, capitals, variants):
     """The test scenario's start: each country's capital state has a spaceport, paired with its planet's
     first hidden port, and a small space fleet based there (frigates and a cruiser of the starting
@@ -947,6 +976,10 @@ def main():
                     items = [("name", "=", '"%s"' % label), ("type", "=", hull.replace("ship_hull", "space_hull"))]
                     items += [(k2, o2, v2) for k2, o2, v2 in blk if k2 == "modules"]
                     variants[hull] = items
+            # And a regular design of the same light hull, for the "build a destroyer" test decision.
+            if ty == "ship_hull_light_1" and "test_destroyer" not in variants:
+                variants["test_destroyer"] = ([("name", "=", '"Test Destroyer"'), ("type", "=", "ship_hull_light_1")]
+                                              + [(k2, o2, v2) for k2, o2, v2 in blk if k2 == "modules"])
     palette = [(176, 62, 62), (62, 98, 176), (70, 150, 80), (190, 150, 50), (130, 70, 160), (60, 160, 160)]
     tag_lines = []
     loc = ["l_english:"]
@@ -993,6 +1026,8 @@ def main():
     if space:
         write_space_content(out, game, space, tags, loc)
         write_space_tab(out, game, loc)
+        write_space_domain(out)
+        write_space_tests(out, loc)
         write_space_start(out, space, tags, capitals, variants)
     # Character names (generals, admirals, ministers), the same plain list for every planet.
     males = "Adam Bernard Carl David Emil Felix Georg Henry Isaac Jonas Karl Leon Martin Noah Oscar Paul Robert Simon Thomas Victor"
