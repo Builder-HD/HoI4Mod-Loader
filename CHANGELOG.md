@@ -14,7 +14,12 @@ A–F; NOTES.md has the findings and test results behind each.
   deployment target are refused when they would mix two domains (also the fleet window's
   reorganisation, a new fleet from task forces and ships or in a theater, merging task forces); a
   naval line's "Deploy target" list shows
-  only its domain's fleets and bases, a domain's own bases included. 4 new signatures and 2 code
+  only its domain's fleets and bases, a domain's own bases included. A domain's `terrains` are its
+  waters: the map's tooltips of their sea zones read `KEY_<domain>` for any key the mod defines
+  (space wording instead of the navy's; 1 new anchor and 2 code shapes, checked on 1.20.1, 1.20,
+  1.19.5 and 1.19.4.2).
+- **Engine:** one shared Localize key filter chain (`AddLocalizeKeyFilter`); `railway_queue`'s
+  dismantle tooltip key swap now runs on it. 4 new signatures and 2 code
   shapes, checked on 1.20.1, 1.20, 1.19.5 and 1.19.4.2; tested in game on 1.20.1 (the planets test's
   spaceships).
 - **Game 1.20.1** (`v1.20.1.0.0fd1`, Steam update of 2026-11-26) is listed in `loader_config.ini`.
@@ -52,7 +57,9 @@ A–F; NOTES.md has the findings and test results behind each.
   over space keeps its frame rate. `tools/make_planets_map.py --space-height` builds a space band with space zones,
   hidden spaceport docks per planet, a spaceport building, spaceship hulls and units, a
   spaceships production tab, the spaceships' ship domain and test decisions that build a spaceship
-  and a destroyer; `--planet-sizes` gives each planet its own size in space (its hole's side in
+  and a destroyer, "Deep Space" and "Asteroid Belt" sea terrains (a belt column of zones between
+  each two planets; the space domain's waters, with space wording in its tooltips);
+  `--planet-sizes` gives each planet its own size in space (its hole's side in
   cells, its disc's radius from it), and a run now replaces the generator's earlier output (stale
   dock states from a bigger planet broke the map). Fixed: a space zone's name crossing a planet's
   disc was torn into wedges (its letters over the disc were dropped one vertex at a time); the space

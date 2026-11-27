@@ -2454,6 +2454,7 @@ every other ship and base belongs to no domain (the ordinary navy).
 space = {
     archetypes = { space_hull_light space_hull_cruiser space_hull_heavy }   # ship archetypes
     continents = { space }               # map/continent.txt: the states its naval bases are in
+    terrains = { space_deep space_asteroids }   # its waters: sea provinces of these terrains (optional)
 }
 ```
 
@@ -2478,13 +2479,33 @@ space = {
 - Archetypes are archetypes (`is_archetype = yes`): listing an equipment type takes its archetype
   (logged). An archetype can be in one domain only. At most 15 domains.
 - Same name in several files or mods: the lists add up.
+- **Its waters' text:** the map's tooltips of a sea zone whose provinces have one of the domain's
+  `terrains` (its strategic region's tooltip zoomed in, and the zone's dominance tooltip zoomed out)
+  read every localisation key `K` as `K_<domain>` when the mod defines that key, e.g.
+  `MINIMUM_SEAZONE_DOMINANCE_NEEDED_space`, `NAVAL_DOMINANCE_CONTESTED_space`,
+  `NAVAL_DOMINANCE_CURRENT_VALUE_space`, `NAVAL_DOMINANCE_BASE_space`, `SEAZONE_MINIMUM_DOMINANCE_space`,
+  `CONVOY_DOMINANCE_COST_REDUCTION_EXPLANATION_space` (same `$...$` placeholders as the game's). Keys
+  the mod does not define stay the game's; seas of no domain are untouched. The zone's terrain name
+  (the tooltip's first line) is the terrain's own localisation. A zone counts by its first province,
+  so keep a zone of one terrain kind.
+
+**Space terrains are plain mod data.** A sea terrain is a category in `common/terrain` with
+`naval_terrain = yes` and `is_water = yes`; its effects are per unit type (`space_destroyer = { units
+= { movement = -0.3 } }`, as vanilla's `water_deep_ocean` does for destroyers) and general
+(`navy_visibility`, `positioning`, `minimum_seazone_dominance`); a strategic region picks one with
+`naval_terrain = space_asteroids`, and its provinces' terrain in `map/definition.csv` names the same.
+Its localisation key is its name (`space_asteroids: "Asteroid Belt"`). No loader feature is needed;
+the planets test (`tools/make_planets_map.py`) makes "Deep Space" and an "Asteroid Belt" column
+between each two planets (spaceships 30% slower, -10% attack and defence, harder to see).
 
 **Mod advice:** a country can only use a domain's ships where it has a base of that domain, so make
 building them depend on one (e.g. `is_buildable` / a technology or decision that needs the base).
 Ships of the domain that find no base go into the stockpile.
 
 `loader.log`: `ship_domains: 1 domain(s) from common/hoi4_loader_ship_domains`, per game `space: 3
-archetype(s), 1 continent(s)`, `32 province(s) in states on the domains' continents`; every delivery
+archetype(s), 1 continent(s), 2 terrain(s)`, `1142 province(s) in the domains' waters, 100 zone
+object(s)`, `32 province(s) in states on the domains' continents`; each key first read for a
+domain's waters (`space's waters: NAVAL_DOMINANCE_BASE read as NAVAL_DOMINANCE_BASE_space`); every delivery
 moved elsewhere (`PLA: 1 space ship(s) delivered at province 26872 (a base of their domain) instead of
 9498`) and every refused command (`a naval line's deployment target refused: it would put two ship
 domains together`), at most 40 lines per game. Without definitions nothing is hooked.

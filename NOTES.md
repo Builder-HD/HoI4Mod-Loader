@@ -8916,3 +8916,58 @@ disc away (the ground there is dropped): a letter with one edge inside was stret
 **In game (1.20.1):** over space the zone names stand flat in their grid, "Space Zone 24" reads whole
 along Earth A's top edge, its letters cut where the planet covers them; no dock names over the
 planets; Earth A's globe from 2300 shows no zone names at its pole. Smoke passed.
+
+## U20: space terrains, and the space zones' tooltips in space words (2026-11-27)
+
+Owner: "different types of spaces ... like asteroid belt which gives a penalty for movement" and the
+deep space tooltip saying "Ocean" with the naval lines. Both in one run (owner: "start with 1 and since
+its pretty easy you can also do 2 in the same run").
+
+**1. Terrains: plain data.** Vanilla has sea terrains beside `ocean` (`water_fjords`,
+`water_shallow_sea`, `water_deep_ocean`: `naval_terrain = yes`, per unit type `units = { attack
+movement defence }`, `navy_visibility`, `positioning`, `minimum_seazone_dominance`), picked per
+strategic region (`naval_terrain=water_deep_ocean` in 63 vanilla regions; definition.csv says `ocean`
+for every sea province). The tooltip's first line is the terrain's name key (`water_deep_ocean: "Deep
+Oceans"`). The generator now writes vanilla's terrain file with `space_deep` ("Deep Space", minimum
+250) and `space_asteroids` ("Asteroid Belt": the three space units -30% movement, -10% attack and
+defence; navy visibility -0.3, positioning -0.15, minimum 100) added, a belt column of zones halfway
+between each two neighbouring planets (5 zones, 126 provinces, "Asteroid Belt N"), every other zone
+deep space, the provinces' definition.csv terrain the same as their region's.
+
+**2. The tooltip's words: `ship_domains` waters.** A domain's `terrains` are its waters; their zones'
+tooltips read any key `K` as `K_<domain>` when the mod defines it.
+- **The keys:** `MINIMUM_SEAZONE_DOMINANCE_NEEDED`, `NAVAL_DOMINANCE_CONTESTED`,
+  `NAVAL_DOMINANCE_CURRENT_VALUE`, `NAVAL_DOMINANCE_BASE`, `SEAZONE_MINIMUM_DOMINANCE`,
+  `CONVOY_DOMINANCE_COST_REDUCTION_EXPLANATION`, all localised through `kSigLocalize`
+  (`FUN_1422b2250(out, key, params, count)`, the key a C string).
+- **One Localize hook for all:** `AddLocalizeKeyFilter` (engine.cpp): filters in order, the first
+  replacement wins, none runs while filters (and their own Localize calls) run. `railway_queue`
+  hooked Localize itself before (one MinHook target can't be hooked twice); its swap is a filter now.
+- **The context:** the long tooltip is `FUN_140e7e970(kind, out, CStrategicRegion, flag)` (found by
+  its only reference to the convoy key; its object is a `CStrategicRegion`, not a province: RTTI
+  logged in a debug build after `ProvinceIdOf` read 0 from it). Its +0xe8 is the region's
+  `CNavalRegionDominance`, passed to the dominance text `FUN_14108d910(dominance, out, country)` and
+  the minimum line `FUN_14108e150(dominance, out)`; the short tooltip zoomed out (`FUN_1417d14d0`, a
+  GUI window's virtual, `*(window+0x1d58)+0xe8`) calls the same two. Hooked: the region tooltip and
+  both lines; each sets a thread-local domain from its object while it runs. The objects come from
+  the plugin: after each game entry, per strategic region whose first province is a domain's water,
+  `RegionById(id)` and its dominance (`RegionDominanceObject`, the +0xe8 read from
+  `kCodeTooltipRegionDominance`). Unknown pointers have no domain.
+- **The test mod's words:** "This space zone needs at least N Space Dominance to count as under
+  friendly control", "Contested space", "Current space dominance", "Base value from spaceships on
+  Patrol Missions", "Minimum for space control", "Space Dominance keeps the routes between the
+  worlds open".
+
+**Checks:** 209/209 signatures and anchors, 109/109 code shapes on 1.20.1, 1.20, 1.19.5, 1.19.4.2;
+smoke passed.
+
+**In game (1.20.1, `--planet-sizes 5,3`):** `space: 3 archetype(s), 1 continent(s), 2 terrain(s)`,
+`1142 province(s) in the domains' waters, 100 zone object(s)`. Zoomed out over space: "Current space
+dominance", "Base value from spaceships", "Minimum for space control: 375" (deep space) and 150 in the
+belt. Zoomed in with the space fleet selected: "Deep Space" / "Asteroid Belt" headers and the whole
+text in space words; the zone label "Asteroid Belt 1". Earth A's Norwegian Sea: vanilla's "Ocean" and
+navy text. Not tested: the railway dismantle tooltip on the shared filter (the same check as
+before); movement through the belt (the terrain's own effect).
+
+**Seen on the way (not changed):** on a planet's globe in the naval map mode, the sea names near the
+north pole are drawn torn (their letters stretched round the pole's hole).
